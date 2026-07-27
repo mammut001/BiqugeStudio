@@ -183,15 +183,19 @@ private fun SearchScreen(
     fun refreshLocal() {
         if (isBusy) return
         val term = query.trim().lowercase()
-        val books = LibraryStore.get(context).books().filter { book ->
-            term.isEmpty() ||
-                book.title.lowercase().contains(term) ||
-                book.author.lowercase().contains(term)
-        }
-        listState = if (books.isEmpty()) {
-            SearchListState.Message(emptyLocal)
-        } else {
-            SearchListState.LocalBooks(books)
+        scope.launch {
+            val books = withContext(Dispatchers.IO) {
+                LibraryStore.get(context).books().filter { book ->
+                    term.isEmpty() ||
+                        book.title.lowercase().contains(term) ||
+                        book.author.lowercase().contains(term)
+                }
+            }
+            listState = if (books.isEmpty()) {
+                SearchListState.Message(emptyLocal)
+            } else {
+                SearchListState.LocalBooks(books)
+            }
         }
     }
 
