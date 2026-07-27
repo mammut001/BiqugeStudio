@@ -22,8 +22,7 @@
 | 搜索与导入 | `SearchActivity`（Compose） |
 | 书籍详情 | `BookDetailActivity`（Compose） |
 | HTTPS 直链 / 网页导入 | `RemoteImportActivity` / `WebImportActivity`（Compose） |
-| 主阅读 | `ReaderActivity`（Compose） |
-| TTS / 自动滚动 | `LegacyReaderActivity`（Java，经「经典朗读」） |
+| 主阅读 | `ReaderActivity`（Compose，含沉浸正文、主题、字号、目录、书签、查找、朗读及亮度设置） |
 
 - **主题**：壳跟随 `ReaderPreferences.nightMode`；阅读页有纸张/夜间/护眼。
 - **导入**：本地 **TXT / EPUB**（SAF）；可选 HTTPS 维基 / 直链 / 网页。
@@ -32,32 +31,26 @@
 
 上架步骤见 [`RELEASECHECKLIST.md`](./RELEASECHECKLIST.md)。
 
-## 阅读页：Compose / Legacy 迁移边界（务必遵守）
+## 阅读页：纯 Compose 实现
 
-采用**安全增量迁移**：Compose 为默认阅读体验；原 Java 实现完整保留为高级能力回退，**不删除任何已有功能**。
+阅读功能已全面重构为纯 Compose 架构。
 
 | 组件 | 路径 | 职责 |
 |------|------|------|
-| **Compose 主阅读器** | `ReaderActivity.kt` + `ui/reader/*` | 默认入口。沉浸式正文、纸张/夜间/护眼主题、可选中文本、字号、目录、书签、书内查找（≤50）、进度 0…1000 连续保存 |
-| **Legacy 回退** | `LegacyReaderActivity.java` | 连续 **TTS 朗读**、**语速**、**自动滚动**（尚未迁入 Compose 前的完整实现） |
-| **Intent 契约** | `ReaderActivity.EXTRA_ID` / `LegacyReaderActivity.EXTRA_ID` | 恒为 **`"book_id"`**（历史常量，禁止改成 `bookid` 等，否则断链） |
-| **数据层** | `LibraryStore` / `BookmarkStore` / `ReaderPreferences` / `ReadingHistory` / `ReadingStats` | 两侧共用；进度刻度仍为 **0…1000** |
+| **Compose 阅读器** | `ReaderActivity.kt` + `ui/reader/*` | 唯一阅读入口。沉浸式正文、纸张/夜间/护眼主题、可选中文本、字号、目录、书签、书内查找、进度 0…1000 连续保存 |
+| **Intent 契约** | `ReaderActivity.EXTRA_ID` | 恒为 **`"book_id"`**（历史常量，禁止改成 `bookid` 等，否则断链） |
+| **数据层** | `LibraryStore` / `BookmarkStore` / `ReaderPreferences` / `ReadingHistory` / `ReadingStats` | 共用数据组件；进度刻度仍为 **0…1000** |
 
 ```
 书架 / 详情 / 「继续阅读」
         │  putExtra("book_id", id)
         ▼
-  ReaderActivity（Compose，默认）
-        │  工具栏显式按钮「经典朗读」
-        ▼
-  LegacyReaderActivity（TTS · 语速 · 自动滚动）
+  ReaderActivity（Compose，独立窗口/Activity）
 ```
 
-**Compose 已覆盖**：edge-to-edge 阅读面、轻点显隐顶/底栏、页脚时间+百分比、章节正则（与旧版相同）、目录 sheet、上一章/下一章、书签增删跳、书内查找跳转、外观三主题与字号、阅读亮度窗口属性。
+**Compose 功能全覆盖**：edge-to-edge 阅读面、轻点显隐顶/底栏、页脚时间+百分比、章节正则、目录 sheet、上一章/下一章、书签增删跳、书内查找跳转、外观三主题与字号、阅读亮度窗口属性。
 
-**仍仅在 Legacy**：系统 `TextToSpeech` 连续朗读、长按调语速、自动滚屏。Compose 底部明确提供 **「经典朗读」**（`R.string.reader_legacy_advanced`）打开同一本书的 Legacy，打开前会先写入当前进度。
-
-**不要做的事**：不要删 `LegacyReaderActivity`；不要改 `EXTRA_ID` 字符串；不要把用户书库格式/SharedPreferences key 改掉而不做迁移。
+**不要做的事**：不要改 `EXTRA_ID` 字符串；不要把用户书库格式/SharedPreferences key 改掉而不做迁移。
 
 ## 隐私政策 URL 与 Google Play Data safety
 
@@ -172,10 +165,7 @@ app/src/main/java/app/maoyankanshu/novel/selfuse/
 | 类型 | 组件 |
 |------|------|
 | **Compose** | 主壳四 Tab；`SearchActivity`；`BookDetailActivity`；`RemoteImportActivity`；`WebImportActivity`；`ReaderActivity` |
-| **Java UI（仅 1 个）** | `LegacyReaderActivity`（「经典朗读」入口） |
 | **Java 非 UI** | `LibraryStore`、`Book`、`BookmarkStore`、`EpubReader`、`AppIntents` 等 |
-
-不要再写「BookDetail / Search 仍是 Java」——二者已是 Compose。
 
 ## 已实现
 
@@ -184,7 +174,6 @@ app/src/main/java/app/maoyankanshu/novel/selfuse/
 - **Compose 详情**：继续/开始阅读、编辑元数据、导出 TXT、删除（二次确认）。
 - **Compose 直链 / 网页导入**：仅 HTTPS；User-Agent；LibraryStore 落库。
 - **Compose 阅读页**：0…1000 进度、章节/目录/书签/查找、纸张·夜间·护眼、可选中文本。
-- **Legacy 阅读页**（「经典朗读」）：自动滚动、连续 TTS（长按调语速）——**尚未**迁 Compose，属有意保留。
 - 本地书库 ZIP 备份与恢复；今日阅读时长；最近阅读记录。
 
 ## 迁移参考

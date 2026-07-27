@@ -79,8 +79,7 @@ cd BiqugeStudio
 | 本地 TXT / EPUB | SAF 导入，无需网络 |
 | HTTPS 直链 / 网页 | 仅 `https://`；无明文 HTTP |
 | Compose UI | 主壳四 Tab；`SearchActivity`；`BookDetailActivity`；`RemoteImportActivity`；`WebImportActivity`；`ReaderActivity` |
-| 唯一 Java UI | `LegacyReaderActivity`（「经典朗读」：TTS / 语速 / 自动滚动） |
-| 阅读 | 默认 Compose `ReaderActivity`；高级朗读 → Legacy（Intent `book_id` 不变） |
+| 阅读 | 默认 Compose `ReaderActivity`（Intent `book_id` 不变） |
 | 进度 | 0…1000，`LibraryStore` |
 | 备份 | 本地 ZIP，用户自选路径 |
 | 权限 | 仅 `INTERNET`（可选在线导入） |
