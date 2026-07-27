@@ -45,6 +45,30 @@ object LocalBookImport {
         )
     }
 
+    fun queryDisplayName(context: Context, uri: Uri): String? {
+        if (uri.scheme == "content") {
+            try {
+                context.contentResolver.query(
+                    uri,
+                    arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+                    null,
+                    null,
+                    null,
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val index = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                        if (index >= 0) {
+                            val name = cursor.getString(index)
+                            if (!name.isNullOrEmpty()) return name
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+        return uri.lastPathSegment
+    }
+
     fun fromUri(
         context: Context,
         uri: Uri,
@@ -52,7 +76,7 @@ object LocalBookImport {
         authorEpub: String,
         authorTxt: String,
     ): Imported {
-        val raw = uri.lastPathSegment
+        val raw = queryDisplayName(context, uri)
         val stream = context.contentResolver.openInputStream(uri)
             ?: throw IllegalStateException("null stream")
         return stream.use {
@@ -107,28 +131,24 @@ object LocalBookImport {
         private var totalRead = 0L
 
         override fun read(): Int {
-            if (totalRead >= maxBytes) {
-                return -1
-            }
             val b = delegate.read()
             if (b != -1) {
                 totalRead++
+                if (totalRead > maxBytes) {
+                    throw IllegalArgumentException("file too large, max 32MB")
+                }
             }
             return b
         }
 
         override fun read(b: ByteArray, off: Int, len: Int): Int {
             if (len == 0) return 0
-            if (totalRead >= maxBytes) {
-                return -1
-            }
-            val maxToRead = (maxBytes - totalRead).coerceAtMost(len.toLong()).toInt()
-            if (maxToRead <= 0) {
-                return -1
-            }
-            val n = delegate.read(b, off, maxToRead)
+            val n = delegate.read(b, off, len)
             if (n > 0) {
                 totalRead += n
+                if (totalRead > maxBytes) {
+                    throw IllegalArgumentException("file too large, max 32MB")
+                }
             }
             return n
         }

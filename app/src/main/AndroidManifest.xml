@@ -27,12 +27,20 @@
             android:theme="@style/Theme.BiqugeStudio"
             android:windowSoftInputMode="adjustResize" />
         <activity
-            android:name=".LegacyReaderActivity"
-            android:exported="false"
-            android:theme="@style/Theme.BiqugeStudio" />
-        <activity
             android:name=".SearchActivity"
-            android:exported="false" />
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="application/epub+zip" />
+                <data android:mimeType="application/octet-stream" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+            </intent-filter>
+        </activity>
         <activity
             android:name=".BookDetailActivity"
             android:exported="false" />

@@ -1,5 +1,8 @@
 package app.maoyankanshu.novel.selfuse
 
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
@@ -28,6 +31,7 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -70,10 +74,12 @@ class SearchActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         val openImport = intent.getBooleanExtra(EXTRA_IMPORT, false)
+        val initialUri = extractUriFromIntent(intent)
         setContent {
             BiqugeTheme(darkTheme = ReaderPreferences.get(this).nightMode()) {
                 SearchScreen(
                     openImportOnStart = openImport,
+                    initialUri = initialUri,
                     onClose = { finish() },
                 )
             }
@@ -83,6 +89,23 @@ class SearchActivity : ComponentActivity() {
     companion object {
         /** Historical extra used by [AppIntents.importLocal]. */
         const val EXTRA_IMPORT: String = "open_import"
+
+        fun extractUriFromIntent(intent: Intent?): Uri? {
+            if (intent == null) return null
+            val action = intent.action
+            if (Intent.ACTION_VIEW == action) {
+                return intent.data
+            } else if (Intent.ACTION_SEND == action) {
+                val streamUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri
+                }
+                return streamUri ?: intent.data
+            }
+            return intent.data
+        }
     }
 }
 
@@ -97,6 +120,7 @@ private sealed interface SearchListState {
 @Composable
 private fun SearchScreen(
     openImportOnStart: Boolean,
+    initialUri: Uri?,
     onClose: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -105,9 +129,11 @@ private fun SearchScreen(
     var libraryVersion by remember { mutableIntStateOf(0) }
     var listState by remember { mutableStateOf<SearchListState>(SearchListState.LocalBooks(emptyList())) }
     var pendingPicker by remember { mutableStateOf(openImportOnStart) }
+    var pendingUri by remember { mutableStateOf(initialUri) }
     var localImporting by remember { mutableStateOf(false) }
+    var wikiImportingTitle by remember { mutableStateOf<String?>(null) }
 
-    val isBusy = listState is SearchListState.WikiLoading || localImporting
+    val isBusy = listState is SearchListState.WikiLoading || localImporting || wikiImportingTitle != null
 
     val userAgent = stringResource(R.string.http_user_agent)
     val wikiAuthor = stringResource(R.string.search_wikisource_author)
@@ -141,10 +167,7 @@ private fun SearchScreen(
 
     LaunchedEffect(libraryVersion) { refreshLocal() }
 
-    val openDocument = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument(),
-    ) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
+    fun importUri(uri: Uri) {
         localImporting = true
         scope.launch {
             try {
@@ -167,11 +190,28 @@ private fun SearchScreen(
                 ).show()
             } catch (e: Exception) {
                 Log.e("SearchActivity", "Failed to import local book", e)
-                Toast.makeText(context, context.getString(R.string.search_local_fail), Toast.LENGTH_SHORT).show()
+                val isOversized = e is IllegalArgumentException && (e.message?.contains("too large") == true || e.message?.contains("32MB") == true)
+                val msgRes = if (isOversized) R.string.search_local_file_too_large else R.string.search_local_fail
+                Toast.makeText(context, context.getString(msgRes), Toast.LENGTH_SHORT).show()
             } finally {
                 localImporting = false
             }
         }
+    }
+
+    LaunchedEffect(pendingUri) {
+        val uri = pendingUri
+        if (uri != null) {
+            pendingUri = null
+            importUri(uri)
+        }
+    }
+
+    val openDocument = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        importUri(uri)
     }
 
     fun pickLocalFile() {
@@ -212,6 +252,7 @@ private fun SearchScreen(
 
     fun importWikiPage(pageTitle: String) {
         if (isBusy) return
+        wikiImportingTitle = pageTitle
         Toast.makeText(
             context,
             context.getString(R.string.search_importing_page, pageTitle),
@@ -227,6 +268,8 @@ private fun SearchScreen(
                 Toast.makeText(context, context.getString(R.string.search_import_ok), Toast.LENGTH_SHORT).show()
             } catch (_: Exception) {
                 Toast.makeText(context, context.getString(R.string.search_import_fail), Toast.LENGTH_SHORT).show()
+            } finally {
+                wikiImportingTitle = null
             }
         }
     }
@@ -324,7 +367,20 @@ private fun SearchScreen(
                     .heightIn(min = 48.dp)
                     .semantics { contentDescription = if (localImporting) importingLocalCd else importLocalCd },
             ) {
-                Text(if (localImporting) localImportingLabel else stringResource(R.string.search_import_local))
+                if (localImporting) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        Text(localImportingLabel)
+                    }
+                } else {
+                    Text(stringResource(R.string.search_import_local))
+                }
             }
             Spacer(Modifier.height(8.dp))
             OutlinedButton(
@@ -335,7 +391,20 @@ private fun SearchScreen(
                     .heightIn(min = 48.dp)
                     .semantics { contentDescription = wikiCd },
             ) {
-                Text(stringResource(R.string.search_wikisource))
+                if (listState is SearchListState.WikiLoading) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        Text(stringResource(R.string.search_wikisource))
+                    }
+                } else {
+                    Text(stringResource(R.string.search_wikisource))
+                }
             }
             Spacer(Modifier.height(8.dp))
             OutlinedButton(
@@ -346,7 +415,20 @@ private fun SearchScreen(
                     .heightIn(min = 48.dp)
                     .semantics { contentDescription = featuredCd },
             ) {
-                Text(stringResource(R.string.search_featured))
+                if (wikiImportingTitle == featuredTitle) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        Text(stringResource(R.string.search_featured))
+                    }
+                } else {
+                    Text(stringResource(R.string.search_featured))
+                }
             }
             Spacer(Modifier.height(8.dp))
             OutlinedButton(
@@ -433,6 +515,7 @@ private fun SearchScreen(
                         }
                         items(state.hits, key = { it.title }) { hit ->
                             val cd = stringResource(R.string.search_wiki_result_cd, hit.title)
+                            val isItemImporting = wikiImportingTitle == hit.title
                             Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -445,7 +528,20 @@ private fun SearchScreen(
                                 elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
                             ) {
                                 Column(Modifier.padding(14.dp)) {
-                                    Text(hit.title, style = MaterialTheme.typography.titleMedium)
+                                    if (isItemImporting) {
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(18.dp),
+                                                strokeWidth = 2.dp,
+                                            )
+                                            Text(hit.title, style = MaterialTheme.typography.titleMedium)
+                                        }
+                                    } else {
+                                        Text(hit.title, style = MaterialTheme.typography.titleMedium)
+                                    }
                                     if (hit.summary.isNotEmpty()) {
                                         Text(
                                             hit.summary,
