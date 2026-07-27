@@ -140,6 +140,7 @@ class SearchActivity : ComponentActivity() {
 }
 
 private sealed interface SearchListState {
+    data object LocalLoading : SearchListState
     data class LocalBooks(val books: List<Book>) : SearchListState
     data object WikiLoading : SearchListState
     data class WikiResults(val hits: List<WikisourceClient.Hit>) : SearchListState
@@ -157,13 +158,17 @@ private fun SearchScreen(
     val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf("") }
     var libraryVersion by remember { mutableIntStateOf(0) }
+    var searchToken by remember { mutableIntStateOf(0) }
     var listState by remember { mutableStateOf<SearchListState>(SearchListState.LocalBooks(emptyList())) }
     var pendingPicker by remember { mutableStateOf(openImportOnStart) }
     var pendingUri by remember(initialUri) { mutableStateOf(initialUri) }
     var localImporting by remember { mutableStateOf(false) }
     var wikiImportingTitle by remember { mutableStateOf<String?>(null) }
 
-    val isBusy = listState is SearchListState.WikiLoading || localImporting || wikiImportingTitle != null
+    val isBusy = listState is SearchListState.WikiLoading ||
+        listState is SearchListState.LocalLoading ||
+        localImporting ||
+        wikiImportingTitle != null
 
     val userAgent = stringResource(R.string.http_user_agent)
     val wikiAuthor = stringResource(R.string.search_wikisource_author)
@@ -181,8 +186,10 @@ private fun SearchScreen(
     val searchClearCd = stringResource(R.string.search_clear_cd)
 
     fun refreshLocal() {
-        if (isBusy) return
+        if (localImporting || wikiImportingTitle != null || listState is SearchListState.WikiLoading) return
+        val currentToken = ++searchToken
         val term = query.trim().lowercase()
+        listState = SearchListState.LocalLoading
         scope.launch {
             val books = withContext(Dispatchers.IO) {
                 LibraryStore.get(context).books().filter { book ->
@@ -191,10 +198,12 @@ private fun SearchScreen(
                         book.author.lowercase().contains(term)
                 }
             }
-            listState = if (books.isEmpty()) {
-                SearchListState.Message(emptyLocal)
-            } else {
-                SearchListState.LocalBooks(books)
+            if (currentToken == searchToken) {
+                listState = if (books.isEmpty()) {
+                    SearchListState.Message(emptyLocal)
+                } else {
+                    SearchListState.LocalBooks(books)
+                }
             }
         }
     }
@@ -486,6 +495,23 @@ private fun SearchScreen(
             Spacer(Modifier.height(12.dp))
 
             when (val state = listState) {
+                is SearchListState.LocalLoading -> {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(top = 12.dp),
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        Text(
+                            text = stringResource(R.string.search_local_loading),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 is SearchListState.WikiLoading -> {
                     Text(
                         text = wikiLoading,

@@ -15,7 +15,7 @@
     <string name="welcome_book_title">使用说明</string>
     <string name="welcome_book_body">欢迎使用新的本地阅读器。\n\n这里可以导入你拥有的 TXT / EPUB 文本，并在设备上保存阅读进度。\n\n原版的在线书城、账户、广告和支付依赖已经失效，不会作为%1$s的功能基础。\n\n下一步会继续迁移阅读设置、目录、书架管理和离线下载。</string>
     <string name="profile_no_account_note">账户、支付、广告和远端推送不会迁入%1$s。</string>
-    <string name="about_body">这是一个独立维护的本地阅读器。\n\n书籍、进度、书签、历史和备份默认只保存在你的设备中，不会上传到%1$s运营方服务器。\n\n本地可导入 TXT / EPUB；可选在线能力：中文维基文库公版文本、你提供的直链或授权网页。详情见仓库 PRIVACY.md。\n\n连续朗读与自动滚动请在阅读页使用「经典朗读」（Legacy 阅读器）。</string>
+    <string name="about_body">这是一个独立维护的本地阅读器。\n\n书籍、进度、书签、历史和备份默认只保存在你的设备中，不会上传到%1$s运营方服务器。\n\n本地可导入 TXT / EPUB；可选在线能力：中文维基文库公版文本、你提供的直链或授权网页。详情见仓库 PRIVACY.md。</string>
     <string name="about_ok">知道了</string>
     <string name="privacy_summary_cd">隐私摘要：数据默认仅保存在本机</string>
 
@@ -116,9 +116,11 @@
     <string name="search_import_fail">导入失败，请稍后重试</string>
     <string name="search_local_ok">已导入《%1$s》</string>
     <string name="search_local_fail">无法读取该文本文件</string>
+    <string name="search_local_file_too_large">文件超过 32MB 限制</string>
     <string name="search_local_default_name">本地导入</string>
     <string name="search_local_author_epub">本地 EPUB</string>
     <string name="search_local_author_txt">本地 TXT</string>
+    <string name="search_local_loading">正在检索本地书库…</string>
     <string name="search_wikisource_author">中文维基文库</string>
     <string name="search_back_cd">返回</string>
     <string name="search_result_cd">打开书籍 %1$s</string>
@@ -136,6 +138,8 @@
     <string name="shelf_screen_cd">书架列表</string>
     <string name="shelf_filter_all">全部</string>
     <string name="shelf_filter_progress">在读</string>
+    <string name="shelf_loading">正在加载书库...</string>
+    <string name="shelf_loading_cd">正在加载本地书库，请稍候</string>
     <string name="shelf_filter_not_started">未读</string>
     <string name="shelf_filter_finished">已读完</string>
     <string name="shelf_filter_all_cd">筛选：显示全部书籍</string>
@@ -183,8 +187,15 @@
     <string name="reader_font_larger">A+</string>
     <string name="reader_font_smaller_cd">减小字号</string>
     <string name="reader_font_larger_cd">增大字号</string>
-    <string name="reader_legacy_advanced">经典朗读</string>
-    <string name="reader_legacy_advanced_cd">打开经典版：连续朗读、语速与自动滚动</string>
+    <string name="reader_line_height">行高</string>
+    <string name="reader_line_height_smaller">H-</string>
+    <string name="reader_line_height_larger">H+</string>
+    <string name="reader_line_height_smaller_cd">减小行高</string>
+    <string name="reader_line_height_larger_cd">增大行高</string>
+    <string name="reader_line_height_label">行高：%1$.2f</string>
+    <string name="reader_line_height_compact">紧凑</string>
+    <string name="reader_line_height_standard">标准</string>
+    <string name="reader_line_height_relaxed">宽松</string>
     <string name="reader_add_bookmark">＋ 添加当前位置书签</string>
     <string name="reader_manage_bookmarks">管理书签</string>
     <string name="reader_delete_bookmark_title">删除书签？</string>
@@ -231,7 +242,22 @@
     <string name="reader_page_title_cd">当前页面：%1$s</string>
 
     <!-- Profile -->
-    <string name="profile_settings_heading">阅读设置</string>
+    <string name="profile_settings_heading">设置与偏好</string>
+    <string name="profile_section_reading">阅读外观与偏好</string>
+    <string name="profile_section_data">数据备份与恢复</string>
+    <string name="profile_section_system">系统与关于</string>
+    <string name="profile_font_size_title">默认字号</string>
+    <string name="profile_font_size_subtitle">当前默认字号：%1$d sp</string>
+    <string name="profile_night_title">夜间模式</string>
+    <string name="profile_night_subtitle">降低护眼亮度与深色配色</string>
+    <string name="profile_backup_title">备份本地书库</string>
+    <string name="profile_backup_subtitle">导出全量书籍文本与阅读进度 Zip 包</string>
+    <string name="profile_restore_title">从备份恢复书库</string>
+    <string name="profile_restore_subtitle">导入并恢复由本应用导出的备份包</string>
+    <string name="profile_display_title">系统显示设置</string>
+    <string name="profile_display_subtitle">前往系统调整屏幕超时与显示字号</string>
+    <string name="profile_about_title">关于 %1$s</string>
+    <string name="profile_about_subtitle">版本 v%1$s · 本地离线说明与隐私</string>
     <string name="profile_font_size">默认字号：%1$dsp</string>
     <string name="profile_font_size_cd">默认字号 %1$d sp</string>
     <string name="profile_font_smaller">减小默认字号</string>
@@ -241,14 +267,28 @@
     <string name="profile_backup">备份本地书库</string>
     <string name="profile_restore">从备份恢复书库</string>
     <string name="profile_display_settings">系统显示设置</string>
-    <string name="profile_backup_ok">书库备份已保存</string>
-    <string name="profile_backup_fail">备份文件无法使用</string>
-    <string name="profile_restore_ok">已恢复 %1$d 本书</string>
+    <string name="profile_backup_ok">书库备份已导出</string>
+    <string name="profile_backup_fail">导出失败：无法写入备份文件</string>
+    <string name="profile_restore_ok">已成功恢复 %1$d 本书</string>
+    <string name="profile_backup_in_progress">正在导出书库备份...</string>
+    <string name="profile_restore_in_progress">正在还原书库...</string>
+    <string name="profile_backup_in_progress_cd">正在生成备份 Zip 文件，请稍候</string>
+    <string name="profile_restore_in_progress_cd">正在解压并恢复书库，请稍候</string>
+    <string name="profile_restore_empty_fail">恢复失败：备份文件不包含有效书籍</string>
+    <string name="profile_restore_invalid_format">恢复失败：请选择由本应用导出的 .zip 备份包</string>
+    <string name="profile_error_dialog_title">操作提示</string>
+    <string name="profile_error_dialog_confirm">确定</string>
 
     <!-- Discover -->
     <string name="discover_overview_heading">阅读概览</string>
     <string name="discover_overview_body">今日阅读：%1$s\n书籍：%2$d 本\n已开始：%3$d 本\n本地文本：%4$d 字</string>
     <string name="discover_overview_cd">今日阅读 %1$s，共 %2$d 本书，已开始 %3$d 本，本地文本 %4$d 字</string>
+    <string name="discover_stat_today">今日阅读</string>
+    <string name="discover_stat_books">书籍</string>
+    <string name="discover_stat_started">已开始</string>
+    <string name="discover_stat_characters">本地文本</string>
+    <string name="discover_stat_count">%1$d 本</string>
+    <string name="discover_stat_chars">%1$d 字</string>
     <string name="discover_continue_heading">继续阅读</string>
     <string name="discover_history_heading">最近阅读</string>
     <string name="discover_clear_history">清除阅读历史</string>
