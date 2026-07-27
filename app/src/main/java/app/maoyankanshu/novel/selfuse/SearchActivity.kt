@@ -1,5 +1,6 @@
 package app.maoyankanshu.novel.selfuse
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -70,25 +71,54 @@ import kotlinx.coroutines.withContext
  */
 class SearchActivity : ComponentActivity() {
 
+    private var intentUriState = mutableStateOf<Uri?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        val openImport = intent.getBooleanExtra(EXTRA_IMPORT, false)
-        val initialUri = extractUriFromIntent(intent)
+        val openImport = intent?.getBooleanExtra(EXTRA_IMPORT, false) ?: false
+        val uri = extractUriFromIntent(intent)
+        takePersistablePermissionIfGranted(this, intent, uri)
+        intentUriState.value = uri
+
         setContent {
             BiqugeTheme(darkTheme = ReaderPreferences.get(this).nightMode()) {
                 SearchScreen(
                     openImportOnStart = openImport,
-                    initialUri = initialUri,
+                    initialUri = intentUriState.value,
                     onClose = { finish() },
                 )
             }
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val uri = extractUriFromIntent(intent)
+        takePersistablePermissionIfGranted(this, intent, uri)
+        intentUriState.value = uri
+    }
+
     companion object {
         /** Historical extra used by [AppIntents.importLocal]. */
         const val EXTRA_IMPORT: String = "open_import"
+
+        fun takePersistablePermissionIfGranted(context: Context, intent: Intent?, uri: Uri?) {
+            if (uri != null && uri.scheme == "content" && intent != null) {
+                try {
+                    val flags = intent.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    if (flags != 0) {
+                        context.contentResolver.takePersistableUriPermission(
+                            uri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                        )
+                    }
+                } catch (_: Exception) {
+                    // Ignored if provider does not grant persistable permissions
+                }
+            }
+        }
 
         fun extractUriFromIntent(intent: Intent?): Uri? {
             if (intent == null) return null
@@ -129,7 +159,7 @@ private fun SearchScreen(
     var libraryVersion by remember { mutableIntStateOf(0) }
     var listState by remember { mutableStateOf<SearchListState>(SearchListState.LocalBooks(emptyList())) }
     var pendingPicker by remember { mutableStateOf(openImportOnStart) }
-    var pendingUri by remember { mutableStateOf(initialUri) }
+    var pendingUri by remember(initialUri) { mutableStateOf(initialUri) }
     var localImporting by remember { mutableStateOf(false) }
     var wikiImportingTitle by remember { mutableStateOf<String?>(null) }
 
