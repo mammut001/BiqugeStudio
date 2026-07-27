@@ -23,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.Lifecycle
@@ -34,6 +35,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import app.maoyankanshu.novel.selfuse.LibraryStore
+import app.maoyankanshu.novel.selfuse.R
 import app.maoyankanshu.novel.selfuse.SearchActivity
 import app.maoyankanshu.novel.selfuse.ui.navigation.MainTab
 import app.maoyankanshu.novel.selfuse.ui.screens.DiscoverScreen
@@ -43,7 +45,9 @@ import app.maoyankanshu.novel.selfuse.ui.screens.StoreScreen
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BiqugeApp() {
+fun BiqugeApp(
+    onPreferencesChanged: () -> Unit = {},
+) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val navController = rememberNavController()
@@ -66,6 +70,16 @@ fun BiqugeApp() {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    fun navigateTo(tab: MainTab) {
+        navController.navigate(tab.route) {
+            popUpTo(navController.graph.findStartDestination().id) {
+                saveState = true
+            }
+            launchSingleTop = true
+            restoreState = true
+        }
+    }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
@@ -80,11 +94,13 @@ fun BiqugeApp() {
                 },
                 actions = {
                     if (currentTab == MainTab.Shelf) {
+                        val searchCd = stringResource(R.string.search_shelf_cd)
+                        val importCd = stringResource(R.string.toolbar_import_cd)
                         IconButton(
                             onClick = {
                                 context.startActivity(Intent(context, SearchActivity::class.java))
                             },
-                            modifier = Modifier.semantics { contentDescription = "搜索本地书架" },
+                            modifier = Modifier.semantics { contentDescription = searchCd },
                         ) {
                             Icon(Icons.Filled.Search, contentDescription = null)
                         }
@@ -95,7 +111,7 @@ fun BiqugeApp() {
                                         .putExtra(SearchActivity.EXTRA_IMPORT, true),
                                 )
                             },
-                            modifier = Modifier.semantics { contentDescription = "导入 TXT 或 EPUB 文件" },
+                            modifier = Modifier.semantics { contentDescription = importCd },
                         ) {
                             Icon(Icons.Filled.Add, contentDescription = null)
                         }
@@ -116,15 +132,7 @@ fun BiqugeApp() {
                     val selected = currentTab == tab
                     NavigationBarItem(
                         selected = selected,
-                        onClick = {
-                            navController.navigate(tab.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
-                                }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        },
+                        onClick = { navigateTo(tab) },
                         icon = {
                             Icon(
                                 imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
@@ -163,6 +171,7 @@ fun BiqugeApp() {
                     books = books,
                     historyVersion = historyVersion,
                     onHistoryCleared = { historyVersion++ },
+                    onOpenShelf = { navigateTo(MainTab.Shelf) },
                     contentPadding = innerPadding,
                 )
             }
@@ -170,6 +179,7 @@ fun BiqugeApp() {
                 ProfileScreen(
                     contentPadding = innerPadding,
                     onLibraryRestored = { libraryVersion++ },
+                    onPreferencesChanged = onPreferencesChanged,
                 )
             }
         }

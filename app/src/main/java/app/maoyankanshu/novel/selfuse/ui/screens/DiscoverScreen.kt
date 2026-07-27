@@ -18,6 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -25,9 +26,11 @@ import androidx.compose.ui.unit.dp
 import app.maoyankanshu.novel.selfuse.Book
 import app.maoyankanshu.novel.selfuse.BookDetailActivity
 import app.maoyankanshu.novel.selfuse.LibraryStore
+import app.maoyankanshu.novel.selfuse.R
 import app.maoyankanshu.novel.selfuse.ReadingHistory
 import app.maoyankanshu.novel.selfuse.ReadingStats
 import app.maoyankanshu.novel.selfuse.ui.components.BookCard
+import app.maoyankanshu.novel.selfuse.ui.components.EmptyState
 import java.text.DateFormat
 import java.util.Date
 
@@ -36,6 +39,7 @@ fun DiscoverScreen(
     books: List<Book>,
     historyVersion: Int,
     onHistoryCleared: () -> Unit,
+    onOpenShelf: () -> Unit,
     contentPadding: PaddingValues,
 ) {
     val context = LocalContext.current
@@ -91,10 +95,13 @@ fun DiscoverScreen(
 
         if (inProgress.isEmpty()) {
             item {
-                Text(
-                    text = "尚没有进行中的阅读。打开书架中的书即可开始记录进度。",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                EmptyState(
+                    title = stringResource(R.string.discover_empty_progress_cd),
+                    body = stringResource(R.string.discover_empty_progress),
+                    contentDescription = stringResource(R.string.discover_empty_progress_cd),
+                    primaryLabel = stringResource(R.string.cta_open_shelf),
+                    primaryDescription = stringResource(R.string.cta_open_shelf),
+                    onPrimary = onOpenShelf,
                 )
             }
         } else {

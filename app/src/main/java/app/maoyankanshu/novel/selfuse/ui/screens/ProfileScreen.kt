@@ -42,6 +42,7 @@ import app.maoyankanshu.novel.selfuse.ReaderPreferences
 fun ProfileScreen(
     contentPadding: PaddingValues,
     onLibraryRestored: () -> Unit,
+    onPreferencesChanged: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val appName = stringResource(R.string.app_name)
@@ -126,6 +127,8 @@ fun ProfileScreen(
             onClick = {
                 preferences.setNightMode(!nightMode)
                 nightMode = preferences.nightMode()
+                // Refresh Compose shell MaterialTheme (ReaderActivity keeps its own themes).
+                onPreferencesChanged()
             },
             modifier = Modifier
                 .fillMaxWidth()

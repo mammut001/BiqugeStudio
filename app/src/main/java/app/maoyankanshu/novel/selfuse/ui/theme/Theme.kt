@@ -1,7 +1,6 @@
 package app.maoyankanshu.novel.selfuse.ui.theme
 
 import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -42,14 +41,14 @@ private val DarkColors = darkColorScheme(
 )
 
 /**
- * Material 3 theme for the shell UI.
+ * Material 3 theme for the Compose shell.
  *
- * Prefer system light/dark. On Android 12+ you may opt into dynamic color,
- * but brand orange remains the default so the app stays recognizable.
+ * [darkTheme] is driven by [app.maoyankanshu.novel.selfuse.ReaderPreferences.nightMode]
+ * from MainActivity so “夜间阅读” updates the shell immediately. ReaderActivity is separate.
  */
 @Composable
 fun BiqugeTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    darkTheme: Boolean,
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
