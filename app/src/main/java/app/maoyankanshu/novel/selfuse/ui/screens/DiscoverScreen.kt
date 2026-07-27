@@ -3,13 +3,17 @@ package app.maoyankanshu.novel.selfuse.ui.screens
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -47,19 +51,13 @@ fun DiscoverScreen(
     val inProgress = remember(books) {
         books.filter { it.position > 0 && it.position < 1000 }
     }
+    val booksById = remember(books) { books.associateBy { it.id } }
     val history = remember(historyVersion) { ReadingHistory.get(context).list() }
     val timeFormat = remember {
         DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
     }
     val todayLabel = remember(historyVersion) { ReadingStats.todayLabel(context) }
 
-    val overviewBody = stringResource(
-        R.string.discover_overview_body,
-        todayLabel,
-        books.size,
-        started,
-        characters,
-    )
     val overviewCd = stringResource(
         R.string.discover_overview_cd,
         todayLabel,
@@ -77,20 +75,56 @@ fun DiscoverScreen(
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
-            Column {
-                Text(
-                    text = stringResource(R.string.discover_overview_heading),
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.semantics { heading() },
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = overviewBody,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.semantics { contentDescription = overviewCd },
-                )
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics { contentDescription = overviewCd },
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                ),
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.discover_overview_heading),
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.semantics { heading() },
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        OverviewStatTile(
+                            label = stringResource(R.string.discover_stat_today),
+                            value = todayLabel,
+                            modifier = Modifier.weight(1f),
+                        )
+                        OverviewStatTile(
+                            label = stringResource(R.string.discover_stat_books),
+                            value = stringResource(R.string.discover_stat_count, books.size),
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        OverviewStatTile(
+                            label = stringResource(R.string.discover_stat_started),
+                            value = stringResource(R.string.discover_stat_count, started),
+                            modifier = Modifier.weight(1f),
+                        )
+                        OverviewStatTile(
+                            label = stringResource(R.string.discover_stat_characters),
+                            value = stringResource(R.string.discover_stat_chars, characters),
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
             }
         }
 
@@ -143,7 +177,7 @@ fun DiscoverScreen(
             }
 
             items(history, key = { "history-${it.bookId}-${it.at}" }) { entry ->
-                val book = LibraryStore.get(context).byId(entry.bookId) ?: return@items
+                val book = booksById[entry.bookId] ?: return@items
                 BookCard(
                     book = book,
                     subtitle = timeFormat.format(Date(entry.at)),
@@ -164,11 +198,33 @@ fun DiscoverScreen(
                     },
                     modifier = Modifier
                         .fillMaxWidth()
+                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                         .semantics { contentDescription = clearHistory },
                 ) {
                     Text(clearHistory)
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun OverviewStatTile(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
