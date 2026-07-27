@@ -2,6 +2,8 @@
 
 这是一个可由 Android Studio 直接打开、独立维护的本地阅读器工程。反编译产物只作为功能迁移参考，不会被直接当作可维护源码使用。
 
+**显示名称**统一为「笔趣阁（自用）」，来源是 `app/src/main/res/values/strings.xml` 的 `app_name`：AndroidManifest 启动器标签、关于页 / TalkBack、`LibraryStore` 默认说明书作者、备份文件名默认值都引用它。改名时只改这一处即可。
+
 主界面（书架 / 书城 / 发现 / 我的）已迁移为 **Jetpack Compose + Material 3**；阅读页、搜索导入、书籍详情等仍为 Java Activity，通过 Intent 衔接。
 
 ## 打开与构建

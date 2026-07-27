@@ -32,7 +32,12 @@ public final class LibraryStore {
         this.context = context.getApplicationContext();
         prefs = this.context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         if (!prefs.contains(KEY)) {
-            add("使用说明", "笔趣阁（自用）", "欢迎使用新的本地阅读器。\n\n这里可以导入你拥有的 TXT 文本，并在设备上保存阅读进度。\n\n原版的在线书城、账户、广告和支付依赖已经失效，不会作为自用版的功能基础。\n\n下一步会继续迁移阅读设置、目录、书架管理和离线下载。");
+            String appName = this.context.getString(R.string.app_name);
+            add(
+                    this.context.getString(R.string.welcome_book_title),
+                    appName,
+                    this.context.getString(R.string.welcome_book_body, appName)
+            );
         }
     }
 

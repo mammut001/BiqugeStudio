@@ -28,12 +28,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import app.maoyankanshu.novel.selfuse.BuildConfig
 import app.maoyankanshu.novel.selfuse.LibraryStore
+import app.maoyankanshu.novel.selfuse.R
 import app.maoyankanshu.novel.selfuse.ReaderPreferences
 
 @Composable
@@ -42,6 +44,7 @@ fun ProfileScreen(
     onLibraryRestored: () -> Unit,
 ) {
     val context = LocalContext.current
+    val appName = stringResource(R.string.app_name)
     val preferences = remember { ReaderPreferences.get(context) }
     var fontSize by remember { mutableIntStateOf(preferences.fontSize()) }
     var nightMode by remember { mutableStateOf(preferences.nightMode()) }
@@ -136,7 +139,7 @@ fun ProfileScreen(
         Spacer(Modifier.height(8.dp))
 
         OutlinedButton(
-            onClick = { createBackup.launch("笔趣阁自用版书库备份.zip") },
+            onClick = { createBackup.launch(context.getString(R.string.backup_file_name, appName)) },
             modifier = Modifier
                 .fillMaxWidth()
                 .semantics { contentDescription = "备份本地书库" },
@@ -161,18 +164,19 @@ fun ProfileScreen(
         ) {
             Text("系统显示设置")
         }
+        val aboutLabel = stringResource(R.string.about_app, appName)
         OutlinedButton(
             onClick = { showAbout = true },
             modifier = Modifier
                 .fillMaxWidth()
-                .semantics { contentDescription = "关于笔趣阁自用版" },
+                .semantics { contentDescription = aboutLabel },
         ) {
-            Text("关于笔趣阁（自用）")
+            Text(aboutLabel)
         }
 
         Spacer(Modifier.height(8.dp))
         Text(
-            text = "账户、支付、广告和远端推送不会迁入自用版。",
+            text = stringResource(R.string.profile_no_account_note, appName),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -181,7 +185,7 @@ fun ProfileScreen(
     if (showAbout) {
         AlertDialog(
             onDismissRequest = { showAbout = false },
-            title = { Text("笔趣阁（自用） ${BuildConfig.VERSION_NAME}") },
+            title = { Text("$appName ${BuildConfig.VERSION_NAME}") },
             text = {
                 Text(
                     "这是一个独立维护的本地阅读器。\n\n" +

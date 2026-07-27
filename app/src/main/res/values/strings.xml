@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Canonical display name: launcher, about, TalkBack, LibraryStore, backups. -->
+    <string name="app_name">笔趣阁（自用）</string>
+    <string name="about_app">关于%1$s</string>
+    <string name="about_app_talkback">关于%1$s</string>
+    <string name="backup_file_name">%1$s书库备份.zip</string>
+    <string name="welcome_book_title">使用说明</string>
+    <string name="welcome_book_body">欢迎使用新的本地阅读器。\n\n这里可以导入你拥有的 TXT 文本，并在设备上保存阅读进度。\n\n原版的在线书城、账户、广告和支付依赖已经失效，不会作为%1$s的功能基础。\n\n下一步会继续迁移阅读设置、目录、书架管理和离线下载。</string>
+    <string name="profile_no_account_note">账户、支付、广告和远端推送不会迁入%1$s。</string>
+</resources>
