@@ -226,6 +226,7 @@ private fun SearchScreen(
     val queryCd = stringResource(R.string.search_query_cd)
     val searchCd = stringResource(R.string.search_action_cd)
     val importLocalCd = stringResource(R.string.search_import_local_cd)
+    val importingLocalCd = stringResource(R.string.search_importing_local_cd)
     val wikiCd = stringResource(R.string.search_wikisource_cd)
     val featuredCd = stringResource(R.string.search_featured_cd)
     val epubCd = stringResource(R.string.search_featured_epub_cd)
@@ -296,7 +297,7 @@ private fun SearchScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 48.dp)
-                    .semantics { contentDescription = importLocalCd },
+                    .semantics { contentDescription = if (localImporting) importingLocalCd else importLocalCd },
             ) {
                 Text(if (localImporting) localImportingLabel else stringResource(R.string.search_import_local))
             }
