@@ -35,7 +35,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
 import app.maoyankanshu.novel.selfuse.Book
+import app.maoyankanshu.novel.selfuse.R
 import kotlin.math.abs
 
 /** Fixed offline cover tile (no network images). */
@@ -55,6 +57,11 @@ fun BookCard(
 ) {
     val progressFraction = (book.position.coerceIn(0, 1000) / 1000f)
     val progressLabel = book.progressLabel()
+    val actionLabel = if (book.position <= 0) {
+        stringResource(R.string.detail_start_reading)
+    } else {
+        stringResource(R.string.detail_continue_reading)
+    }
     val description = buildString {
         append(book.title)
         append("，作者 ")
@@ -62,7 +69,10 @@ fun BookCard(
         append("，")
         append(subtitle ?: progressLabel)
         if (onLongClick != null) append("。长按打开更多操作")
-        if (showContinueReading && onContinueReading != null) append("。可继续阅读")
+        if (showContinueReading && onContinueReading != null) {
+            append("。可")
+            append(actionLabel)
+        }
     }
     val coverBrush = remember(book.id, book.title) {
         coverGradient(book.id + book.title)
@@ -163,10 +173,10 @@ fun BookCard(
                     modifier = Modifier
                         .align(Alignment.End)
                         .heightIn(min = 48.dp)
-                        .semantics { contentDescription = "继续阅读 ${book.title}" },
+                        .semantics { contentDescription = "$actionLabel ${book.title}" },
                 ) {
                     Text(
-                        text = "继续阅读",
+                        text = actionLabel,
                         color = MaterialTheme.colorScheme.primary,
                         style = MaterialTheme.typography.labelLarge,
                     )
