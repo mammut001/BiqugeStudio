@@ -226,6 +226,8 @@
     <string name="reader_font_size_label">字号：%1$d sp</string>
     <string name="reader_day">日间</string>
     <string name="reader_night_toggle">夜间</string>
+    <string name="reader_legacy_advanced">经典朗读</string>
+    <string name="reader_legacy_cd">打开经典朗读界面，使用连续朗读与自动滚动</string>
     <string name="reader_tts">朗读</string>
     <string name="reader_tts_stop">停止</string>
     <string name="reader_auto">自动</string>

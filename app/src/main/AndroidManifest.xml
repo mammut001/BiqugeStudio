@@ -27,6 +27,9 @@
             android:theme="@style/Theme.BiqugeStudio"
             android:windowSoftInputMode="adjustResize" />
         <activity
+            android:name=".LegacyReaderActivity"
+            android:exported="false" />
+        <activity
             android:name=".SearchActivity"
             android:exported="true">
             <!-- 1. ACTION_VIEW for content:// URIs -->

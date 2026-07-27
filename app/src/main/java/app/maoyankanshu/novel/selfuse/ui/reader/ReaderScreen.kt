@@ -35,6 +35,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.FormatSize
 import androidx.compose.material.icons.filled.Search
@@ -78,6 +79,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.maoyankanshu.novel.selfuse.AppIntents
 import app.maoyankanshu.novel.selfuse.Book
 import app.maoyankanshu.novel.selfuse.BookmarkStore
 import app.maoyankanshu.novel.selfuse.LibraryStore
@@ -114,6 +116,7 @@ fun ReaderScreen(
     val findCd = stringResource(R.string.reader_find_cd)
     val bookmarksCd = stringResource(R.string.reader_bookmarks_cd)
     val tocCd = stringResource(R.string.reader_toc_cd)
+    val legacyCd = stringResource(R.string.reader_legacy_cd)
     val fontSmallerCd = stringResource(R.string.reader_font_smaller_cd)
     val fontLargerCd = stringResource(R.string.reader_font_larger_cd)
     val lineHeightSmallerCd = stringResource(R.string.reader_line_height_smaller_cd)
@@ -349,6 +352,17 @@ fun ReaderScreen(
                             .semantics { contentDescription = tocCd },
                     ) {
                         Icon(Icons.AutoMirrored.Filled.List, contentDescription = null)
+                    }
+                    IconButton(
+                        onClick = {
+                            LibraryStore.get(context).savePosition(book.id, progress)
+                            context.startActivity(AppIntents.legacyReader(context, book.id))
+                        },
+                        modifier = Modifier
+                            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                            .semantics { contentDescription = legacyCd },
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
