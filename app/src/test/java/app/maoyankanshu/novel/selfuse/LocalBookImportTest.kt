@@ -169,7 +169,7 @@ class LocalBookImportTest {
     }
 
     @Test
-    fun testTooLargeFileRejected() {
+    fun testOversizedTxtFileCappedAt32Mb() {
         val totalSize = (32 * 1024 * 1024) + 1024
         val oversizedStream = object : java.io.InputStream() {
             private var bytesRead = 0
@@ -188,15 +188,61 @@ class LocalBookImportTest {
             }
         }
 
-        assertThrows(IllegalArgumentException::class.java) {
-            LocalBookImport.fromStream(
-                stream = oversizedStream,
-                rawName = "oversized_book.txt",
-                defaultName = "默认书名",
-                authorEpub = "EPUB作者",
-                authorTxt = "TXT作者",
-            )
+        val imported = LocalBookImport.fromStream(
+            stream = oversizedStream,
+            rawName = "oversized_book.txt",
+            defaultName = "默认书名",
+            authorEpub = "EPUB作者",
+            authorTxt = "TXT作者",
+        )
+        assertEquals("oversized_book", imported.title)
+        assertEquals(32 * 1024 * 1024, imported.text.length)
+    }
+
+    @Test
+    fun testOversizedEpubImport() {
+        val epubBytes = createMinimalEpubZip("第一章 概述\n欢迎阅读 EPUB 电子书。")
+        val targetSize = (32 * 1024 * 1024) + 1024
+        val oversizedEpubStream = object : java.io.InputStream() {
+            private var bytesRead = 0
+            override fun read(): Int {
+                if (bytesRead >= targetSize) return -1
+                val b = if (bytesRead < epubBytes.size) epubBytes[bytesRead].toInt() and 0xFF else 'x'.code
+                bytesRead++
+                return b
+            }
+
+            override fun read(b: ByteArray, off: Int, len: Int): Int {
+                if (bytesRead >= targetSize) return -1
+                val toRead = Math.min(len, targetSize - bytesRead)
+                var written = 0
+                while (written < toRead) {
+                    val currPos = bytesRead + written
+                    if (currPos < epubBytes.size) {
+                        val chunk = Math.min(toRead - written, epubBytes.size - currPos)
+                        System.arraycopy(epubBytes, currPos, b, off + written, chunk)
+                        written += chunk
+                    } else {
+                        val chunk = toRead - written
+                        java.util.Arrays.fill(b, off + written, off + written + chunk, 'x'.code.toByte())
+                        written += chunk
+                    }
+                }
+                bytesRead += written
+                return written
+            }
         }
+
+        val imported = LocalBookImport.fromStream(
+            stream = oversizedEpubStream,
+            rawName = "sample_large.epub",
+            defaultName = "默认书名",
+            authorEpub = "EPUB作者",
+            authorTxt = "TXT作者",
+        )
+        assertEquals("sample_large", imported.title)
+        assertEquals("EPUB作者", imported.author)
+        assertTrue(imported.text.contains("第一章 概述"))
     }
 
     private fun createMinimalEpubZip(chapterHtmlContent: String): ByteArray {

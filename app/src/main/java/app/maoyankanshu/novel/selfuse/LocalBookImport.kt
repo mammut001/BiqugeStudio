@@ -71,9 +71,6 @@ object LocalBookImport {
         val buffer = ByteArray(16384)
         var count: Int
         while (stream.read(buffer).also { count = it } != -1) {
-            if (output.size() + count > MAX_IMPORT_BYTES) {
-                throw IllegalArgumentException("file too large, max 32MB")
-            }
             output.write(buffer, 0, count)
         }
         val data = output.toByteArray()
@@ -111,28 +108,27 @@ object LocalBookImport {
 
         override fun read(): Int {
             if (totalRead >= maxBytes) {
-                throw IllegalArgumentException("file too large, max 32MB")
+                return -1
             }
             val b = delegate.read()
             if (b != -1) {
                 totalRead++
-                if (totalRead > maxBytes) {
-                    throw IllegalArgumentException("file too large, max 32MB")
-                }
             }
             return b
         }
 
         override fun read(b: ByteArray, off: Int, len: Int): Int {
+            if (len == 0) return 0
             if (totalRead >= maxBytes) {
-                throw IllegalArgumentException("file too large, max 32MB")
+                return -1
             }
-            val n = delegate.read(b, off, len)
-            if (n != -1) {
+            val maxToRead = (maxBytes - totalRead).coerceAtMost(len.toLong()).toInt()
+            if (maxToRead <= 0) {
+                return -1
+            }
+            val n = delegate.read(b, off, maxToRead)
+            if (n > 0) {
                 totalRead += n
-                if (totalRead > maxBytes) {
-                    throw IllegalArgumentException("file too large, max 32MB")
-                }
             }
             return n
         }
