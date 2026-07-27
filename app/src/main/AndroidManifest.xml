@@ -29,16 +29,35 @@
         <activity
             android:name=".SearchActivity"
             android:exported="true">
+            <!-- 1. ACTION_VIEW for content:// URIs -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
-                <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
                 <data android:mimeType="text/plain" />
                 <data android:mimeType="application/epub+zip" />
                 <data android:mimeType="application/octet-stream" />
-                <data android:scheme="content" />
+            </intent-filter>
+            <!-- 2. ACTION_VIEW for file:// URIs -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="file" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="application/epub+zip" />
+                <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="*/*" android:host="*" android:pathPattern=".*\\.txt" />
+                <data android:mimeType="*/*" android:host="*" android:pathPattern=".*\\.epub" />
+            </intent-filter>
+            <!-- 3. ACTION_SEND for system share -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="application/epub+zip" />
+                <data android:mimeType="application/octet-stream" />
             </intent-filter>
         </activity>
         <activity
