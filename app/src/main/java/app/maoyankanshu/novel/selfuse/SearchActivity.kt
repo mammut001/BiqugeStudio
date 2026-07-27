@@ -19,10 +19,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -105,6 +107,8 @@ private fun SearchScreen(
     var pendingPicker by remember { mutableStateOf(openImportOnStart) }
     var localImporting by remember { mutableStateOf(false) }
 
+    val isBusy = listState is SearchListState.WikiLoading || localImporting
+
     val userAgent = stringResource(R.string.http_user_agent)
     val wikiAuthor = stringResource(R.string.search_wikisource_author)
     val localDefault = stringResource(R.string.search_local_default_name)
@@ -118,8 +122,10 @@ private fun SearchScreen(
     val wikiFail = stringResource(R.string.search_wikisource_fail)
     val wikiLoading = stringResource(R.string.search_wikisource_loading)
     val localImportingLabel = stringResource(R.string.search_importing_local)
+    val searchClearCd = stringResource(R.string.search_clear_cd)
 
     fun refreshLocal() {
+        if (isBusy) return
         val term = query.trim().lowercase()
         val books = LibraryStore.get(context).books().filter { book ->
             term.isEmpty() ||
@@ -169,6 +175,7 @@ private fun SearchScreen(
     }
 
     fun pickLocalFile() {
+        if (isBusy) return
         openDocument.launch(arrayOf("text/plain", "application/epub+zip"))
     }
 
@@ -180,6 +187,7 @@ private fun SearchScreen(
     }
 
     fun searchWiki() {
+        if (isBusy) return
         val term = query.trim()
         if (term.isEmpty()) {
             Toast.makeText(context, context.getString(R.string.search_query_required), Toast.LENGTH_SHORT).show()
@@ -203,6 +211,7 @@ private fun SearchScreen(
     }
 
     fun importWikiPage(pageTitle: String) {
+        if (isBusy) return
         Toast.makeText(
             context,
             context.getString(R.string.search_importing_page, pageTitle),
@@ -243,6 +252,7 @@ private fun SearchScreen(
                 navigationIcon = {
                     IconButton(
                         onClick = onClose,
+                        enabled = !isBusy,
                         modifier = Modifier
                             .heightIn(min = 48.dp)
                             .semantics { contentDescription = backCd },
@@ -272,17 +282,32 @@ private fun SearchScreen(
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
+                    enabled = !isBusy,
                     singleLine = true,
                     label = { Text(stringResource(R.string.search_shelf)) },
+                    trailingIcon = if (query.isNotEmpty()) {
+                        {
+                            IconButton(
+                                onClick = {
+                                    query = ""
+                                    refreshLocal()
+                                },
+                                enabled = !isBusy,
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .semantics { contentDescription = searchClearCd },
+                            ) {
+                                Icon(Icons.Default.Clear, contentDescription = null)
+                            }
+                        }
+                    } else null,
                     modifier = Modifier
                         .weight(1f)
                         .semantics { contentDescription = queryCd },
                 )
                 Button(
-                    onClick = {
-                        // Local shelf filter; if last mode was wiki, still re-filter local.
-                        refreshLocal()
-                    },
+                    onClick = { refreshLocal() },
+                    enabled = !isBusy,
                     modifier = Modifier
                         .heightIn(min = 48.dp)
                         .semantics { contentDescription = searchCd },
@@ -293,7 +318,7 @@ private fun SearchScreen(
             Spacer(Modifier.height(10.dp))
             OutlinedButton(
                 onClick = { pickLocalFile() },
-                enabled = !localImporting,
+                enabled = !isBusy,
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 48.dp)
@@ -304,6 +329,7 @@ private fun SearchScreen(
             Spacer(Modifier.height(8.dp))
             OutlinedButton(
                 onClick = { searchWiki() },
+                enabled = !isBusy,
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 48.dp)
@@ -314,6 +340,7 @@ private fun SearchScreen(
             Spacer(Modifier.height(8.dp))
             OutlinedButton(
                 onClick = { importWikiPage(featuredTitle) },
+                enabled = !isBusy,
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 48.dp)
@@ -324,12 +351,15 @@ private fun SearchScreen(
             Spacer(Modifier.height(8.dp))
             OutlinedButton(
                 onClick = {
-                    context.startActivity(
-                        AppIntents.remoteImport(context)
-                            .putExtra(RemoteImportActivity.EXTRA_TITLE, featuredTitle)
-                            .putExtra(RemoteImportActivity.EXTRA_URL, featuredEpubUrl),
-                    )
+                    if (!isBusy) {
+                        context.startActivity(
+                            AppIntents.remoteImport(context)
+                                .putExtra(RemoteImportActivity.EXTRA_TITLE, featuredTitle)
+                                .putExtra(RemoteImportActivity.EXTRA_URL, featuredEpubUrl),
+                        )
+                    }
                 },
+                enabled = !isBusy,
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 48.dp)
@@ -366,7 +396,7 @@ private fun SearchScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .heightIn(min = 48.dp)
-                                    .clickable {
+                                    .clickable(enabled = !isBusy) {
                                         context.startActivity(AppIntents.bookDetail(context, book.id))
                                     }
                                     .semantics { contentDescription = cd },
@@ -407,7 +437,7 @@ private fun SearchScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .heightIn(min = 48.dp)
-                                    .clickable { importWikiPage(hit.title) }
+                                    .clickable(enabled = !isBusy) { importWikiPage(hit.title) }
                                     .semantics { contentDescription = cd },
                                 colors = CardDefaults.cardColors(
                                     containerColor = MaterialTheme.colorScheme.surface,

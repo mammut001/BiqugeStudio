@@ -94,6 +94,7 @@
     <string name="search_action">搜索</string>
     <string name="search_action_cd">搜索本地书架</string>
     <string name="search_query_cd">搜索关键词</string>
+    <string name="search_clear_cd">清除搜索内容</string>
     <string name="search_import_local">导入本地 TXT / EPUB 文件</string>
     <string name="search_import_local_cd">通过系统选择器导入本地 TXT 或 EPUB</string>
     <string name="search_importing_local">正在读取文件…</string>
