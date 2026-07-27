@@ -85,6 +85,7 @@ import app.maoyankanshu.novel.selfuse.R
 import app.maoyankanshu.novel.selfuse.ReaderPreferences
 import app.maoyankanshu.novel.selfuse.ReadingHistory
 import app.maoyankanshu.novel.selfuse.ReadingStats
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
@@ -146,11 +147,17 @@ fun ReaderScreen(
     }
 
     DisposableEffect(book.id) {
-        ReadingHistory.get(context).record(book.id)
+        val appContext = context.applicationContext
+        val bookId = book.id
+        ReadingHistory.get(appContext).record(bookId)
         val started = android.os.SystemClock.elapsedRealtime()
         onDispose {
-            ReadingStats.add(context, android.os.SystemClock.elapsedRealtime() - started)
-            LibraryStore.get(context).savePosition(book.id, progress)
+            val duration = android.os.SystemClock.elapsedRealtime() - started
+            val finalProgress = progress
+            CoroutineScope(Dispatchers.IO).launch {
+                ReadingStats.add(appContext, duration)
+                LibraryStore.get(appContext).savePosition(bookId, finalProgress)
+            }
         }
     }
 
