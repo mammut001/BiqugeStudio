@@ -23,8 +23,18 @@ enum class ShelfSortOrder {
  * Position is 0..1000 (LibraryStore scale).
  */
 object ShelfFilters {
-    fun continueReading(books: List<Book>): List<Book> =
-        books.filter { it.position > 0 && it.position < 1000 }
+    /**
+     * In-progress books (position in (0, 1000)), sorted with [order].
+     * DEFAULT keeps LibraryStore order among matches.
+     */
+    fun continueReading(
+        books: List<Book>,
+        order: ShelfSortOrder = ShelfSortOrder.DEFAULT,
+    ): List<Book> =
+        sorted(
+            books.filter { it.position > 0 && it.position < 1000 },
+            order,
+        )
 
     fun matchesFilter(book: Book, filter: ShelfProgressFilter): Boolean = when (filter) {
         ShelfProgressFilter.ALL -> true

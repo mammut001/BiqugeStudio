@@ -9,11 +9,34 @@ import java.nio.charset.StandardCharsets
 
 /** SAF local TXT / EPUB import helpers (call off the main thread for large files if needed). */
 object LocalBookImport {
+    private const val MAX_BYTES = 32 * 1024 * 1024
+
     data class Imported(
         val title: String,
         val author: String,
         val text: String,
     )
+
+    fun fromStream(
+        stream: InputStream,
+        rawName: String?,
+        defaultName: String,
+        authorEpub: String,
+        authorTxt: String,
+    ): Imported {
+        var name = defaultName
+        if (!rawName.isNullOrEmpty()) {
+            name = rawName.replaceFirst(Regex("\\.[^.]+$"), "")
+        }
+        val epub = rawName != null && rawName.lowercase().endsWith(".epub")
+        val content = if (epub) EpubReader.read(stream) else readText(stream)
+        if (content.trim().isEmpty()) throw IllegalArgumentException("empty")
+        return Imported(
+            title = name,
+            author = if (epub) authorEpub else authorTxt,
+            text = content,
+        )
+    }
 
     fun fromUri(
         context: Context,
@@ -23,31 +46,30 @@ object LocalBookImport {
         authorTxt: String,
     ): Imported {
         val raw = uri.lastPathSegment
-        var name = defaultName
-        if (!raw.isNullOrEmpty()) {
-            name = raw.replaceFirst(Regex("\\.[^.]+$"), "")
-        }
-        val epub = raw != null && raw.lowercase().endsWith(".epub")
-        context.contentResolver.openInputStream(uri).use { stream ->
-            if (stream == null) throw IllegalStateException("null stream")
-            val content = if (epub) EpubReader.read(stream) else readText(stream)
-            if (content.trim().isEmpty()) throw IllegalArgumentException("empty")
-            return Imported(
-                title = name,
-                author = if (epub) authorEpub else authorTxt,
-                text = content,
-            )
+        val stream = context.contentResolver.openInputStream(uri)
+            ?: throw IllegalStateException("null stream")
+        return stream.use {
+            fromStream(it, raw, defaultName, authorEpub, authorTxt)
         }
     }
 
     fun readText(stream: InputStream): String {
-        val output = ByteArrayOutputStream()
-        val buffer = ByteArray(8192)
+        val capacity = try {
+            val avail = stream.available()
+            if (avail > 0) avail else 16384
+        } catch (_: Exception) {
+            16384
+        }
+        val output = ByteArrayOutputStream(capacity)
+        val buffer = ByteArray(16384)
         var count: Int
         while (stream.read(buffer).also { count = it } != -1) {
+            if (output.size() + count > MAX_BYTES) throw IllegalStateException("too large")
             output.write(buffer, 0, count)
         }
         val data = output.toByteArray()
+        if (data.isEmpty()) return ""
+
         if (data.size >= 2 && (data[0].toInt() and 0xff) == 0xff && (data[1].toInt() and 0xff) == 0xfe) {
             return String(data, 2, data.size - 2, Charset.forName("UTF-16LE"))
         }

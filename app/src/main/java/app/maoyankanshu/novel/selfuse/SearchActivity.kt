@@ -1,6 +1,7 @@
 package app.maoyankanshu.novel.selfuse
 
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -102,6 +103,7 @@ private fun SearchScreen(
     var libraryVersion by remember { mutableIntStateOf(0) }
     var listState by remember { mutableStateOf<SearchListState>(SearchListState.LocalBooks(emptyList())) }
     var pendingPicker by remember { mutableStateOf(openImportOnStart) }
+    var localImporting by remember { mutableStateOf(false) }
 
     val userAgent = stringResource(R.string.http_user_agent)
     val wikiAuthor = stringResource(R.string.search_wikisource_author)
@@ -115,6 +117,7 @@ private fun SearchScreen(
     val wikiNone = stringResource(R.string.search_wikisource_none)
     val wikiFail = stringResource(R.string.search_wikisource_fail)
     val wikiLoading = stringResource(R.string.search_wikisource_loading)
+    val localImportingLabel = stringResource(R.string.search_importing_local)
 
     fun refreshLocal() {
         val term = query.trim().lowercase()
@@ -136,23 +139,32 @@ private fun SearchScreen(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        try {
-            val imported = LocalBookImport.fromUri(
-                context = context,
-                uri = uri,
-                defaultName = localDefault,
-                authorEpub = authorEpub,
-                authorTxt = authorTxt,
-            )
-            LibraryStore.get(context).add(imported.title, imported.author, imported.text)
-            libraryVersion++
-            Toast.makeText(
-                context,
-                context.getString(R.string.search_local_ok, imported.title),
-                Toast.LENGTH_SHORT,
-            ).show()
-        } catch (_: Exception) {
-            Toast.makeText(context, context.getString(R.string.search_local_fail), Toast.LENGTH_SHORT).show()
+        localImporting = true
+        scope.launch {
+            try {
+                val imported = withContext(Dispatchers.IO) {
+                    val res = LocalBookImport.fromUri(
+                        context = context,
+                        uri = uri,
+                        defaultName = localDefault,
+                        authorEpub = authorEpub,
+                        authorTxt = authorTxt,
+                    )
+                    LibraryStore.get(context).add(res.title, res.author, res.text)
+                    res
+                }
+                libraryVersion++
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.search_local_ok, imported.title),
+                    Toast.LENGTH_SHORT,
+                ).show()
+            } catch (e: Exception) {
+                Log.e("SearchActivity", "Failed to import local book", e)
+                Toast.makeText(context, context.getString(R.string.search_local_fail), Toast.LENGTH_SHORT).show()
+            } finally {
+                localImporting = false
+            }
         }
     }
 
@@ -198,10 +210,10 @@ private fun SearchScreen(
         ).show()
         scope.launch {
             try {
-                val page = withContext(Dispatchers.IO) {
-                    WikisourceClient.importPage(pageTitle, userAgent, wikiAuthor)
+                withContext(Dispatchers.IO) {
+                    val page = WikisourceClient.importPage(pageTitle, userAgent, wikiAuthor)
+                    LibraryStore.get(context).add(page.title, page.author, page.text)
                 }
-                LibraryStore.get(context).add(page.title, page.author, page.text)
                 libraryVersion++
                 Toast.makeText(context, context.getString(R.string.search_import_ok), Toast.LENGTH_SHORT).show()
             } catch (_: Exception) {
@@ -280,12 +292,13 @@ private fun SearchScreen(
             Spacer(Modifier.height(10.dp))
             OutlinedButton(
                 onClick = { pickLocalFile() },
+                enabled = !localImporting,
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 48.dp)
                     .semantics { contentDescription = importLocalCd },
             ) {
-                Text(stringResource(R.string.search_import_local))
+                Text(if (localImporting) localImportingLabel else stringResource(R.string.search_import_local))
             }
             Spacer(Modifier.height(8.dp))
             OutlinedButton(

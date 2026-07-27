@@ -26,6 +26,7 @@ import app.maoyankanshu.novel.selfuse.AppIntents
 import app.maoyankanshu.novel.selfuse.Book
 import app.maoyankanshu.novel.selfuse.R
 import app.maoyankanshu.novel.selfuse.ui.components.BookCard
+import app.maoyankanshu.novel.selfuse.ui.components.EmptyState
 
 @Composable
 fun StoreScreen(
@@ -97,6 +98,33 @@ fun StoreScreen(
                 ) {
                     Text(importWeb)
                 }
+            }
+        }
+
+        if (books.isEmpty()) {
+            item {
+                EmptyState(
+                    title = stringResource(R.string.store_empty_title),
+                    body = stringResource(R.string.store_empty_body),
+                    contentDescription = stringResource(R.string.store_empty_cd),
+                    primaryLabel = stringResource(R.string.cta_search),
+                    primaryDescription = stringResource(R.string.search_shelf_cd),
+                    onPrimary = { context.startActivity(AppIntents.search(context)) },
+                    secondaryLabel = stringResource(R.string.cta_import),
+                    secondaryDescription = stringResource(R.string.import_local_txt_epub_cd),
+                    onSecondary = { context.startActivity(AppIntents.importLocal(context)) },
+                )
+            }
+        } else {
+            item {
+                Text(
+                    text = stringResource(R.string.store_my_books_heading),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier
+                        .padding(top = 6.dp)
+                        .semantics { heading() },
+                )
             }
         }
 

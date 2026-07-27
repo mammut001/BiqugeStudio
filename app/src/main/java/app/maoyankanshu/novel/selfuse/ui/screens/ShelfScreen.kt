@@ -52,7 +52,10 @@ fun ShelfScreen(
     var sortOrder by remember { mutableStateOf(ShelfSortOrder.DEFAULT) }
     var sortMenuExpanded by remember { mutableStateOf(false) }
 
-    val continueReading = remember(books) { ShelfFilters.continueReading(books) }
+    // 继续阅读 shares sortOrder with 全部书籍; progressFilter applies only to sectionAll.
+    val continueReading = remember(books, sortOrder) {
+        ShelfFilters.continueReading(books, sortOrder)
+    }
     val allBooks = remember(books, progressFilter, sortOrder) {
         ShelfFilters.sectionAll(books, progressFilter, sortOrder)
     }

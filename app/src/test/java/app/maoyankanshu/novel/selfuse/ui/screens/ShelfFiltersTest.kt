@@ -23,6 +23,34 @@ class ShelfFiltersTest {
     }
 
     @Test
+    fun continueReading_respects_sort_order() {
+        val books = listOf(
+            book("a", "Zebra", 0),
+            book("b", "Mango", 100),
+            book("c", "Apple", 900),
+            book("d", "Done", 1000),
+            book("e", "Berry", 200),
+        )
+        // DEFAULT: LibraryStore order among in-progress only
+        assertEquals(
+            listOf("b", "c", "e"),
+            ShelfFilters.continueReading(books, ShelfSortOrder.DEFAULT).map { it.id },
+        )
+        assertEquals(
+            listOf("Apple", "Berry", "Mango"),
+            ShelfFilters.continueReading(books, ShelfSortOrder.TITLE).map { it.title },
+        )
+        assertEquals(
+            listOf(900, 200, 100),
+            ShelfFilters.continueReading(books, ShelfSortOrder.PROGRESS_DESC).map { it.position },
+        )
+        assertEquals(
+            listOf(100, 200, 900),
+            ShelfFilters.continueReading(books, ShelfSortOrder.PROGRESS_ASC).map { it.position },
+        )
+    }
+
+    @Test
     fun filter_progress_buckets() {
         val books = listOf(
             book("a", "A", 0),
