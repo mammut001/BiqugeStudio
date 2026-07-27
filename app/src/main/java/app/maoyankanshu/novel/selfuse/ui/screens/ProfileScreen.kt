@@ -42,7 +42,7 @@ import app.maoyankanshu.novel.selfuse.ReaderPreferences
 fun ProfileScreen(
     contentPadding: PaddingValues,
     onLibraryRestored: () -> Unit,
-    onPreferencesChanged: () -> Unit = {},
+    onDarkThemeChanged: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
     val appName = stringResource(R.string.app_name)
@@ -50,6 +50,9 @@ fun ProfileScreen(
     var fontSize by remember { mutableIntStateOf(preferences.fontSize()) }
     var nightMode by remember { mutableStateOf(preferences.nightMode()) }
     var showAbout by remember { mutableStateOf(false) }
+
+    val backupOk = stringResource(R.string.profile_backup_ok)
+    val backupFail = stringResource(R.string.profile_backup_fail)
 
     val createBackup = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/zip"),
@@ -59,9 +62,9 @@ fun ProfileScreen(
             context.contentResolver.openOutputStream(uri)?.use { stream ->
                 LibraryStore.get(context).exportTo(stream)
             }
-            Toast.makeText(context, "书库备份已保存", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, backupOk, Toast.LENGTH_SHORT).show()
         } catch (_: Exception) {
-            Toast.makeText(context, "备份文件无法使用", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, backupFail, Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -73,12 +76,28 @@ fun ProfileScreen(
             val count = context.contentResolver.openInputStream(uri)?.use { stream ->
                 LibraryStore.get(context).importFrom(stream)
             } ?: 0
-            Toast.makeText(context, "已恢复 $count 本书", Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                context,
+                context.getString(R.string.profile_restore_ok, count),
+                Toast.LENGTH_SHORT,
+            ).show()
             onLibraryRestored()
         } catch (_: Exception) {
-            Toast.makeText(context, "备份文件无法使用", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, backupFail, Toast.LENGTH_SHORT).show()
         }
     }
+
+    val fontSizeLabel = stringResource(R.string.profile_font_size, fontSize)
+    val fontSizeCd = stringResource(R.string.profile_font_size_cd, fontSize)
+    val smaller = stringResource(R.string.profile_font_smaller)
+    val larger = stringResource(R.string.profile_font_larger)
+    val nightLabel = stringResource(
+        if (nightMode) R.string.profile_night_off else R.string.profile_night_on,
+    )
+    val backup = stringResource(R.string.profile_backup)
+    val restore = stringResource(R.string.profile_restore)
+    val display = stringResource(R.string.profile_display_settings)
+    val aboutLabel = stringResource(R.string.about_app, appName)
 
     Column(
         modifier = Modifier
@@ -89,16 +108,16 @@ fun ProfileScreen(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
-            text = "阅读设置",
+            text = stringResource(R.string.profile_settings_heading),
             style = MaterialTheme.typography.titleLarge,
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.semantics { heading() },
         )
         Text(
-            text = "默认字号：${fontSize}sp",
+            text = fontSizeLabel,
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.semantics { contentDescription = "默认字号 $fontSize sp" },
+            modifier = Modifier.semantics { contentDescription = fontSizeCd },
         )
 
         OutlinedButton(
@@ -108,9 +127,9 @@ fun ProfileScreen(
             },
             modifier = Modifier
                 .fillMaxWidth()
-                .semantics { contentDescription = "减小默认字号" },
+                .semantics { contentDescription = smaller },
         ) {
-            Text("减小默认字号")
+            Text(smaller)
         }
         OutlinedButton(
             onClick = {
@@ -119,24 +138,22 @@ fun ProfileScreen(
             },
             modifier = Modifier
                 .fillMaxWidth()
-                .semantics { contentDescription = "增大默认字号" },
+                .semantics { contentDescription = larger },
         ) {
-            Text("增大默认字号")
+            Text(larger)
         }
         OutlinedButton(
             onClick = {
-                preferences.setNightMode(!nightMode)
+                val enabled = !nightMode
+                preferences.setNightMode(enabled)
                 nightMode = preferences.nightMode()
-                // Refresh Compose shell MaterialTheme (ReaderActivity keeps its own themes).
-                onPreferencesChanged()
+                onDarkThemeChanged(nightMode)
             },
             modifier = Modifier
                 .fillMaxWidth()
-                .semantics {
-                    contentDescription = if (nightMode) "关闭夜间阅读" else "开启夜间阅读"
-                },
+                .semantics { contentDescription = nightLabel },
         ) {
-            Text(if (nightMode) "关闭夜间阅读" else "开启夜间阅读")
+            Text(nightLabel)
         }
 
         Spacer(Modifier.height(8.dp))
@@ -145,17 +162,17 @@ fun ProfileScreen(
             onClick = { createBackup.launch(context.getString(R.string.backup_file_name, appName)) },
             modifier = Modifier
                 .fillMaxWidth()
-                .semantics { contentDescription = "备份本地书库" },
+                .semantics { contentDescription = backup },
         ) {
-            Text("备份本地书库")
+            Text(backup)
         }
         OutlinedButton(
             onClick = { restoreBackup.launch(arrayOf("application/zip", "*/*")) },
             modifier = Modifier
                 .fillMaxWidth()
-                .semantics { contentDescription = "从备份恢复书库" },
+                .semantics { contentDescription = restore },
         ) {
-            Text("从备份恢复书库")
+            Text(restore)
         }
         OutlinedButton(
             onClick = {
@@ -163,11 +180,10 @@ fun ProfileScreen(
             },
             modifier = Modifier
                 .fillMaxWidth()
-                .semantics { contentDescription = "打开系统显示设置" },
+                .semantics { contentDescription = display },
         ) {
-            Text("系统显示设置")
+            Text(display)
         }
-        val aboutLabel = stringResource(R.string.about_app, appName)
         OutlinedButton(
             onClick = { showAbout = true },
             modifier = Modifier
@@ -191,15 +207,16 @@ fun ProfileScreen(
             title = { Text("$appName ${BuildConfig.VERSION_NAME}") },
             text = {
                 Text(
-                    "这是一个独立维护的本地阅读器。\n\n" +
-                        "书籍、进度、书签、历史和备份默认只保存在你的设备中。\n\n" +
-                        "在线导入只接入中文维基文库的公共领域或自由许可文本；" +
-                        "其他网络文件仅在你主动提供直链时下载。",
+                    text = stringResource(R.string.about_body, appName),
+                    modifier = Modifier.semantics {
+                        contentDescription =
+                            context.getString(R.string.privacy_summary_cd)
+                    },
                 )
             },
             confirmButton = {
                 TextButton(onClick = { showAbout = false }) {
-                    Text("知道了")
+                    Text(stringResource(R.string.about_ok))
                 }
             },
         )

@@ -1,12 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Host theme for Compose shell + remaining Java Activities. -->
+    <!-- Host theme for Compose shell + Java Activities (post-splash). -->
     <style name="Theme.BiqugeStudio" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:colorAccent">#FFA414</item>
+        <item name="android:colorAccent">@color/brand_orange</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+    </style>
+
+    <!--
+      Android 12+ system splash + AndroidX back-port for API 23–30.
+      Used only on MainActivity; postSplashScreenTheme switches to Theme.BiqugeStudio
+      so Compose shell, ReaderActivity, and LegacyReaderActivity keep the app theme.
+    -->
+    <style name="Theme.BiqugeStudio.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <!-- Prefer adaptive foreground so Android 12+ splash matches the launcher icon. -->
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher_foreground</item>
+        <item name="windowSplashScreenAnimationDuration">300</item>
+        <item name="postSplashScreenTheme">@style/Theme.BiqugeStudio</item>
     </style>
 </resources>

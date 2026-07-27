@@ -25,8 +25,8 @@ import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** Local TXT reader with chapter navigation and retained scroll progress. */
-public final class ReaderActivity extends Activity {
+/** Legacy Java reader: continuous TTS, TTS rate, and auto-scroll. Primary UI is Compose ReaderActivity. */
+public final class LegacyReaderActivity extends Activity {
     public static final String EXTRA_ID = "book_id";
     private final List<Chapter> chapters = new ArrayList<>();
     private Book book;
@@ -82,12 +82,12 @@ public final class ReaderActivity extends Activity {
         toolbar = new LinearLayout(this);
         toolbar.setGravity(Gravity.CENTER_VERTICAL); toolbar.setPadding(pad, 0, pad, 0);
         toolbar.setBackgroundColor(Color.rgb(38, 38, 38));
-        Button back = button("返回"); back.setOnClickListener(v -> finish());
+        Button back = button(getString(R.string.reader_back)); back.setOnClickListener(v -> finish());
         TextView title = new TextView(this); title.setText(book.title); title.setTextSize(18); title.setTextColor(Color.LTGRAY); title.setGravity(Gravity.CENTER);
-        Button toc = button("目录"); toc.setOnClickListener(v -> showContents());
-        Button bookmarks = button("书签"); bookmarks.setOnClickListener(v -> showBookmarks());
-        Button appearance = button("外观"); appearance.setOnClickListener(v -> showAppearance());
-        Button find = button("查找"); find.setOnClickListener(v -> showFind());
+        Button toc = button(getString(R.string.reader_toc)); toc.setOnClickListener(v -> showContents());
+        Button bookmarks = button(getString(R.string.reader_bookmarks)); bookmarks.setOnClickListener(v -> showBookmarks());
+        Button appearance = button(getString(R.string.reader_appearance)); appearance.setOnClickListener(v -> showAppearance());
+        Button find = button(getString(R.string.reader_find)); find.setOnClickListener(v -> showFind());
         toolbar.addView(back, new LinearLayout.LayoutParams(dp(70), dp(52)));
         toolbar.addView(title, new LinearLayout.LayoutParams(0, dp(52), 1));
         toolbar.addView(appearance, new LinearLayout.LayoutParams(dp(70), dp(52)));
@@ -113,14 +113,14 @@ public final class ReaderActivity extends Activity {
 
         controls = new LinearLayout(this); controls.setPadding(pad, 0, pad, 0);
         controls.setBackgroundColor(Color.rgb(38, 38, 38));
-        addControl(controls, "上一章", v -> goChapter(currentChapter - 1));
-        addControl(controls, "A-", v -> changeTextSize(-2));
-        addControl(controls, "A+", v -> changeTextSize(2));
-        addControl(controls, night ? "日间" : "夜间", v -> { preferences.setNightMode(!preferences.nightMode()); recreate(); });
-        speakButton = button("朗读"); speakButton.setTextSize(13); speakButton.setOnClickListener(v -> toggleSpeech());
+        addControl(controls, getString(R.string.reader_prev_chapter), v -> goChapter(currentChapter - 1));
+        addControl(controls, getString(R.string.reader_font_smaller), v -> changeTextSize(-2));
+        addControl(controls, getString(R.string.reader_font_larger), v -> changeTextSize(2));
+        addControl(controls, night ? getString(R.string.reader_day) : getString(R.string.reader_night_toggle), v -> { preferences.setNightMode(!preferences.nightMode()); recreate(); });
+        speakButton = button(getString(R.string.reader_tts)); speakButton.setTextSize(13); speakButton.setOnClickListener(v -> toggleSpeech());
         speakButton.setOnLongClickListener(v -> { showTtsSettings(); return true; }); controls.addView(speakButton, new LinearLayout.LayoutParams(0, -1, 1));
-        autoButton = button("自动"); autoButton.setTextSize(13); autoButton.setOnClickListener(v -> toggleAutoScroll()); controls.addView(autoButton, new LinearLayout.LayoutParams(0, -1, 1));
-        addControl(controls, "下一章", v -> goChapter(currentChapter + 1));
+        autoButton = button(getString(R.string.reader_auto)); autoButton.setTextSize(13); autoButton.setOnClickListener(v -> toggleAutoScroll()); controls.addView(autoButton, new LinearLayout.LayoutParams(0, -1, 1));
+        addControl(controls, getString(R.string.reader_next_chapter), v -> goChapter(currentChapter + 1));
         root.addView(controls, new LinearLayout.LayoutParams(-1, dp(56)));
         setContentView(root);
         restoreProgress();
@@ -135,64 +135,80 @@ public final class ReaderActivity extends Activity {
     private void findChapters() {
         Matcher matcher = Pattern.compile("(?m)^\\s*第.{1,18}[章节回].*$", Pattern.UNICODE_CASE).matcher(book.text);
         while (matcher.find()) chapters.add(new Chapter(matcher.group().trim(), matcher.start()));
-        if (chapters.isEmpty()) chapters.add(new Chapter("全文", 0));
+        if (chapters.isEmpty()) chapters.add(new Chapter(getString(R.string.reader_chapter_full), 0));
     }
     private void showContents() {
         String[] names = new String[chapters.size()]; for (int i = 0; i < chapters.size(); i++) names[i] = chapters.get(i).title;
-        new AlertDialog.Builder(this).setTitle("目录").setItems(names, (dialog, index) -> goChapter(index)).show();
+        new AlertDialog.Builder(this).setTitle(R.string.reader_toc).setItems(names, (dialog, index) -> goChapter(index)).show();
     }
     private void showFind() {
-        EditText query = new EditText(this); query.setHint("输入正文关键词"); query.setSingleLine(true); query.setSelectAllOnFocus(false);
+        EditText query = new EditText(this); query.setHint(R.string.reader_find_hint); query.setSingleLine(true); query.setSelectAllOnFocus(false);
         int pad = dp(20); LinearLayout box = new LinearLayout(this); box.setPadding(pad, 0, pad, 0); box.addView(query, new LinearLayout.LayoutParams(-1, -2));
-        new AlertDialog.Builder(this).setTitle("书内查找").setView(box).setNegativeButton("取消", null).setPositiveButton("查找", (dialog, which) -> showFindResults(query.getText().toString())).show();
+        new AlertDialog.Builder(this).setTitle(R.string.reader_find_title).setView(box)
+                .setNegativeButton(R.string.reader_cancel, null)
+                .setPositiveButton(R.string.reader_search, (dialog, which) -> showFindResults(query.getText().toString())).show();
     }
     private void showFindResults(String raw) {
         String keyword = raw == null ? "" : raw.trim();
-        if (keyword.isEmpty()) { android.widget.Toast.makeText(this, "请输入关键词", android.widget.Toast.LENGTH_SHORT).show(); return; }
+        if (keyword.isEmpty()) { android.widget.Toast.makeText(this, R.string.reader_find_empty, android.widget.Toast.LENGTH_SHORT).show(); return; }
         String content = book.text.toLowerCase(java.util.Locale.ROOT), needle = keyword.toLowerCase(java.util.Locale.ROOT);
         java.util.ArrayList<Integer> positions = new java.util.ArrayList<>(); int from = 0;
         while (positions.size() < 50) { int at = content.indexOf(needle, from); if (at < 0) break; positions.add(at); from = at + Math.max(1, needle.length()); }
-        if (positions.isEmpty()) { android.widget.Toast.makeText(this, "未找到“" + keyword + "”", android.widget.Toast.LENGTH_SHORT).show(); return; }
+        if (positions.isEmpty()) { android.widget.Toast.makeText(this, getString(R.string.reader_find_none, keyword), android.widget.Toast.LENGTH_SHORT).show(); return; }
         String[] labels = new String[positions.size()];
         for (int i = 0; i < positions.size(); i++) {
             int at = positions.get(i), start = Math.max(0, at - 20), end = Math.min(book.text.length(), at + keyword.length() + 36);
             labels[i] = book.text.substring(start, at) + "【" + book.text.substring(at, at + keyword.length()) + "】" + book.text.substring(at + keyword.length(), end).replace('\n', ' ');
         }
-        new AlertDialog.Builder(this).setTitle("“" + keyword + "” · " + positions.size() + (positions.size() == 50 ? "+" : "") + " 处")
+        String title = positions.size() == 50
+                ? getString(R.string.reader_find_results_capped, keyword, 50)
+                : getString(R.string.reader_find_results, keyword, positions.size());
+        new AlertDialog.Builder(this).setTitle(title)
                 .setItems(labels, (dialog, index) -> { scrollToOffset(positions.get(index)); updateCurrentChapter(); }).show();
     }
     private void showBookmarks() {
         java.util.List<BookmarkStore.Bookmark> items = BookmarkStore.get(this).list(book.id);
         String[] labels = new String[items.size() + 1];
-        labels[0] = "＋ 添加当前位置书签";
-        for (int i = 0; i < items.size(); i++) labels[i + 1] = items.get(i).label + " · " + Math.round(items.get(i).progress / 10f) + "%";
-        new AlertDialog.Builder(this).setTitle("书签").setItems(labels, (dialog, index) -> {
+        labels[0] = getString(R.string.reader_add_bookmark);
+        for (int i = 0; i < items.size(); i++) {
+            labels[i + 1] = getString(R.string.reader_bookmark_list_item, items.get(i).label, Math.round(items.get(i).progress / 10f));
+        }
+        new AlertDialog.Builder(this).setTitle(R.string.reader_bookmarks).setItems(labels, (dialog, index) -> {
             if (index == 0) {
                 int progress = currentProgress();
-                String chapter = chapters.isEmpty() ? "当前位置" : chapters.get(currentChapter).title;
+                String chapter = chapters.isEmpty() ? getString(R.string.reader_current_position) : chapters.get(currentChapter).title;
                 BookmarkStore.get(this).add(book.id, progress, chapter);
             } else scrollToProgress(items.get(index - 1).progress);
-        }).setNegativeButton(items.isEmpty() ? "关闭" : "管理", (dialog, which) -> { if (!items.isEmpty()) manageBookmarks(items); }).show();
+        }).setNegativeButton(items.isEmpty() ? getString(R.string.reader_close) : getString(R.string.reader_manage), (dialog, which) -> {
+            if (!items.isEmpty()) manageBookmarks(items);
+        }).show();
     }
     private void manageBookmarks(java.util.List<BookmarkStore.Bookmark> items) {
         String[] labels = new String[items.size()];
-        for (int i = 0; i < items.size(); i++) labels[i] = "删除 · " + items.get(i).label + " · " + Math.round(items.get(i).progress / 10f) + "%";
-        new AlertDialog.Builder(this).setTitle("管理书签").setItems(labels, (dialog, index) ->
-                new AlertDialog.Builder(this).setTitle("删除书签？").setMessage(items.get(index).label)
-                        .setNegativeButton("取消", null).setPositiveButton("删除", (d, w) -> BookmarkStore.get(this).remove(book.id, index)).show()).show();
+        for (int i = 0; i < items.size(); i++) {
+            labels[i] = getString(R.string.reader_bookmark_manage_item, items.get(i).label, Math.round(items.get(i).progress / 10f));
+        }
+        new AlertDialog.Builder(this).setTitle(R.string.reader_manage_bookmarks).setItems(labels, (dialog, index) ->
+                new AlertDialog.Builder(this).setTitle(R.string.reader_delete_bookmark_title).setMessage(items.get(index).label)
+                        .setNegativeButton(R.string.reader_cancel, null)
+                        .setPositiveButton(R.string.reader_delete, (d, w) -> BookmarkStore.get(this).remove(book.id, index)).show()).show();
     }
     private void showAppearance() {
-        String[] themes = {"浅色纸张", "夜间", "护眼暖色"};
-        new AlertDialog.Builder(this).setTitle("阅读外观")
+        String[] themes = {
+                getString(R.string.reader_theme_paper),
+                getString(R.string.reader_theme_night),
+                getString(R.string.reader_theme_eye)
+        };
+        new AlertDialog.Builder(this).setTitle(R.string.reader_appearance_title)
                 .setSingleChoiceItems(themes, preferences.theme(), (dialog, index) -> {
                     preferences.setTheme(index); dialog.dismiss(); recreate();
                 })
-                .setNeutralButton("屏幕亮度", (dialog, which) -> showBrightness())
-                .setNegativeButton("取消", null).show();
+                .setNeutralButton(R.string.reader_brightness_title, (dialog, which) -> showBrightness())
+                .setNegativeButton(R.string.reader_cancel, null).show();
     }
     private void showBrightness() {
         LinearLayout body = new LinearLayout(this); body.setOrientation(LinearLayout.VERTICAL); body.setPadding(dp(24), 0, dp(24), 0);
-        TextView note = new TextView(this); note.setText("只影响本阅读页，不修改系统亮度"); note.setTextColor(Color.GRAY); note.setTextSize(14);
+        TextView note = new TextView(this); note.setText(R.string.reader_brightness_note); note.setTextColor(Color.GRAY); note.setTextSize(14);
         SeekBar slider = new SeekBar(this); slider.setMax(92);
         float previous = preferences.brightness(); int initial = previous < 0 ? 42 : Math.round((previous - .08f) * 100f);
         slider.setProgress(Math.max(0, Math.min(92, initial))); body.addView(note); body.addView(slider);
@@ -201,9 +217,10 @@ public final class ReaderActivity extends Activity {
             @Override public void onStartTrackingTouch(SeekBar seekBar) { }
             @Override public void onStopTrackingTouch(SeekBar seekBar) { }
         });
-        new AlertDialog.Builder(this).setTitle("屏幕亮度").setView(body).setNegativeButton("跟随系统", (d, w) -> { preferences.setBrightness(-1); applyBrightness(-1); })
-                .setNeutralButton("取消", (d, w) -> applyBrightness(previous))
-                .setPositiveButton("保存", (d, w) -> preferences.setBrightness(.08f + slider.getProgress() / 100f)).show();
+        new AlertDialog.Builder(this).setTitle(R.string.reader_brightness_title).setView(body)
+                .setNegativeButton(R.string.reader_brightness_system, (d, w) -> { preferences.setBrightness(-1); applyBrightness(-1); })
+                .setNeutralButton(R.string.reader_cancel, (d, w) -> applyBrightness(previous))
+                .setPositiveButton(R.string.reader_brightness_save, (d, w) -> preferences.setBrightness(.08f + slider.getProgress() / 100f)).show();
     }
     private void goChapter(int index) {
         if (index < 0 || index >= chapters.size() || text.getLayout() == null) return;
@@ -242,9 +259,9 @@ public final class ReaderActivity extends Activity {
     }
     private int currentProgress() { int maximum = Math.max(1, text.getHeight() - scroll.getHeight()); return Math.round(Math.min(1f, scroll.getScrollY() / (float) maximum) * 1000); }
     private void toggleSpeech() {
-        if (!speechReady) { android.widget.Toast.makeText(this, "系统朗读服务暂不可用", android.widget.Toast.LENGTH_SHORT).show(); return; }
+        if (!speechReady) { android.widget.Toast.makeText(this, R.string.reader_tts_unavailable, android.widget.Toast.LENGTH_SHORT).show(); return; }
         if (readingAloud) { stopSpeech(); return; }
-        speechOffset = currentTextOffset(); readingAloud = true; speakButton.setText("停止"); speakNextChunk();
+        speechOffset = currentTextOffset(); readingAloud = true; speakButton.setText(R.string.reader_tts_stop); speakNextChunk();
     }
     private void speakNextChunk() {
         if (!readingAloud || speechOffset >= book.text.length()) { stopSpeech(); return; }
@@ -258,7 +275,7 @@ public final class ReaderActivity extends Activity {
         if (!readingAloud) return;
         scrollToOffset(speechOffset); speakNextChunk();
     }
-    private void stopSpeech() { readingAloud = false; if (speaker != null) speaker.stop(); if (speakButton != null) speakButton.setText("朗读"); }
+    private void stopSpeech() { readingAloud = false; if (speaker != null) speaker.stop(); if (speakButton != null) speakButton.setText(R.string.reader_tts); }
     private int currentTextOffset() {
         if (text.getLayout() == null) return chapterStart();
         return text.getLayout().getOffsetForHorizontal(text.getLayout().getLineForVertical(Math.max(0, scroll.getScrollY())), 0);
@@ -267,13 +284,13 @@ public final class ReaderActivity extends Activity {
     private void showTtsSettings() {
         String[] labels = {"0.75×", "1.0×", "1.25×", "1.5×"}; float[] rates = {.75f, 1f, 1.25f, 1.5f};
         int selected = 1; float current = preferences.ttsRate(); for (int i = 0; i < rates.length; i++) if (Math.abs(rates[i] - current) < .05f) selected = i;
-        new AlertDialog.Builder(this).setTitle("朗读语速").setSingleChoiceItems(labels, selected, (dialog, index) -> {
+        new AlertDialog.Builder(this).setTitle(R.string.reader_tts_rate_title).setSingleChoiceItems(labels, selected, (dialog, index) -> {
             preferences.setTtsRate(rates[index]); if (speaker != null) speaker.setSpeechRate(rates[index]); dialog.dismiss();
-        }).setNegativeButton("取消", null).show();
+        }).setNegativeButton(R.string.reader_cancel, null).show();
     }
     private void toggleAutoScroll() { if (autoScrolling) stopAutoScroll(); else startAutoScroll(); }
     private void startAutoScroll() {
-        autoScrolling = true; autoButton.setText("停止");
+        autoScrolling = true; autoButton.setText(R.string.reader_auto_stop);
         handler.post(new Runnable() { @Override public void run() {
             if (!autoScrolling) return;
             int maximum = Math.max(0, text.getHeight() - scroll.getHeight());
@@ -282,7 +299,7 @@ public final class ReaderActivity extends Activity {
             handler.postDelayed(this, 30);
         }});
     }
-    private void stopAutoScroll() { autoScrolling = false; handler.removeCallbacksAndMessages(null); if (autoButton != null) autoButton.setText("自动"); }
+    private void stopAutoScroll() { autoScrolling = false; handler.removeCallbacksAndMessages(null); if (autoButton != null) autoButton.setText(R.string.reader_auto); }
     private int chapterStart() { return chapters.isEmpty() ? 0 : chapters.get(currentChapter).start; }
     private void addControl(LinearLayout row, String label, android.view.View.OnClickListener listener) { Button b = button(label); b.setTextSize(13); b.setOnClickListener(listener); row.addView(b, new LinearLayout.LayoutParams(0, -1, 1)); }
     private Button button(String label) { Button b = new Button(this); b.setText(label); b.setAllCaps(false); return b; }

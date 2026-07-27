@@ -28,6 +28,9 @@ public final class LibraryStore {
     private final Context context;
     private final SharedPreferences prefs;
 
+    /** Pre-rename product author on the built-in seed book only. */
+    private static final String LEGACY_SEED_AUTHOR = "笔趣阁（自用）";
+
     private LibraryStore(Context context) {
         this.context = context.getApplicationContext();
         prefs = this.context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
@@ -38,7 +41,29 @@ public final class LibraryStore {
                     appName,
                     this.context.getString(R.string.welcome_book_body, appName)
             );
+        } else {
+            migrateLegacySeedAuthor();
         }
+    }
+
+    /**
+     * If the built-in seed book still uses the old product name as author, update only that
+     * author field to {@link R.string#app_name}. Never changes titles or user-imported books.
+     */
+    private void migrateLegacySeedAuthor() {
+        String appName = context.getString(R.string.app_name);
+        String seedTitle = context.getString(R.string.welcome_book_title);
+        if (LEGACY_SEED_AUTHOR.equals(appName)) return;
+        List<Book> all = books();
+        boolean changed = false;
+        for (int i = 0; i < all.size(); i++) {
+            Book book = all.get(i);
+            if (seedTitle.equals(book.title) && LEGACY_SEED_AUTHOR.equals(book.author)) {
+                all.set(i, new Book(book.id, book.title, appName, book.text, book.position));
+                changed = true;
+            }
+        }
+        if (changed) save(all);
     }
 
     public static LibraryStore get(Context context) { return new LibraryStore(context); }

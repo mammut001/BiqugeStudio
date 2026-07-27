@@ -1,6 +1,5 @@
 package app.maoyankanshu.novel.selfuse.ui.screens
 
-import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -23,12 +22,9 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import app.maoyankanshu.novel.selfuse.AppIntents
 import app.maoyankanshu.novel.selfuse.Book
-import app.maoyankanshu.novel.selfuse.BookDetailActivity
 import app.maoyankanshu.novel.selfuse.R
-import app.maoyankanshu.novel.selfuse.RemoteImportActivity
-import app.maoyankanshu.novel.selfuse.SearchActivity
-import app.maoyankanshu.novel.selfuse.WebImportActivity
 import app.maoyankanshu.novel.selfuse.ui.components.BookCard
 
 @Composable
@@ -71,10 +67,7 @@ fun StoreScreen(
                 Spacer(Modifier.height(12.dp))
                 Button(
                     onClick = {
-                        context.startActivity(
-                            Intent(context, SearchActivity::class.java)
-                                .putExtra(SearchActivity.EXTRA_IMPORT, true),
-                        )
+                        context.startActivity(AppIntents.importLocal(context))
                     },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -85,7 +78,7 @@ fun StoreScreen(
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(
                     onClick = {
-                        context.startActivity(Intent(context, RemoteImportActivity::class.java))
+                        context.startActivity(AppIntents.remoteImport(context))
                     },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -96,7 +89,7 @@ fun StoreScreen(
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(
                     onClick = {
-                        context.startActivity(Intent(context, WebImportActivity::class.java))
+                        context.startActivity(AppIntents.webImport(context))
                     },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -111,10 +104,10 @@ fun StoreScreen(
             BookCard(
                 book = book,
                 onClick = {
-                    context.startActivity(
-                        Intent(context, BookDetailActivity::class.java)
-                            .putExtra(BookDetailActivity.EXTRA_ID, book.id),
-                    )
+                    context.startActivity(AppIntents.bookDetail(context, book.id))
+                },
+                onContinueReading = {
+                    context.startActivity(AppIntents.reader(context, book.id))
                 },
             )
         }

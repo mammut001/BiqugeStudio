@@ -1,6 +1,5 @@
 package app.maoyankanshu.novel.selfuse.ui.screens
 
-import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -23,8 +22,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import app.maoyankanshu.novel.selfuse.AppIntents
 import app.maoyankanshu.novel.selfuse.Book
-import app.maoyankanshu.novel.selfuse.BookDetailActivity
 import app.maoyankanshu.novel.selfuse.LibraryStore
 import app.maoyankanshu.novel.selfuse.R
 import app.maoyankanshu.novel.selfuse.ReadingHistory
@@ -54,6 +53,22 @@ fun DiscoverScreen(
     }
     val todayLabel = remember(historyVersion) { ReadingStats.todayLabel(context) }
 
+    val overviewBody = stringResource(
+        R.string.discover_overview_body,
+        todayLabel,
+        books.size,
+        started,
+        characters,
+    )
+    val overviewCd = stringResource(
+        R.string.discover_overview_cd,
+        todayLabel,
+        books.size,
+        started,
+        characters,
+    )
+    val clearHistory = stringResource(R.string.discover_clear_history)
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -64,27 +79,24 @@ fun DiscoverScreen(
         item {
             Column {
                 Text(
-                    text = "阅读概览",
+                    text = stringResource(R.string.discover_overview_heading),
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.semantics { heading() },
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "今日阅读：$todayLabel\n书籍：${books.size} 本\n已开始：$started 本\n本地文本：$characters 字",
+                    text = overviewBody,
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.semantics {
-                        contentDescription =
-                            "今日阅读 $todayLabel，共 ${books.size} 本书，已开始 $started 本，本地文本 $characters 字"
-                    },
+                    modifier = Modifier.semantics { contentDescription = overviewCd },
                 )
             }
         }
 
         item {
             Text(
-                text = "继续阅读",
+                text = stringResource(R.string.discover_continue_heading),
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier
@@ -108,12 +120,11 @@ fun DiscoverScreen(
             items(inProgress, key = { "progress-${it.id}" }) { book ->
                 BookCard(
                     book = book,
-                    subtitle = "${book.title} · ${book.progressLabel()}",
                     onClick = {
-                        context.startActivity(
-                            Intent(context, BookDetailActivity::class.java)
-                                .putExtra(BookDetailActivity.EXTRA_ID, book.id),
-                        )
+                        context.startActivity(AppIntents.bookDetail(context, book.id))
+                    },
+                    onContinueReading = {
+                        context.startActivity(AppIntents.reader(context, book.id))
                     },
                 )
             }
@@ -122,7 +133,7 @@ fun DiscoverScreen(
         if (history.isNotEmpty()) {
             item {
                 Text(
-                    text = "最近阅读",
+                    text = stringResource(R.string.discover_history_heading),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier
@@ -135,12 +146,12 @@ fun DiscoverScreen(
                 val book = LibraryStore.get(context).byId(entry.bookId) ?: return@items
                 BookCard(
                     book = book,
-                    subtitle = "${book.title} · ${timeFormat.format(Date(entry.at))}",
+                    subtitle = timeFormat.format(Date(entry.at)),
                     onClick = {
-                        context.startActivity(
-                            Intent(context, BookDetailActivity::class.java)
-                                .putExtra(BookDetailActivity.EXTRA_ID, book.id),
-                        )
+                        context.startActivity(AppIntents.bookDetail(context, book.id))
+                    },
+                    onContinueReading = {
+                        context.startActivity(AppIntents.reader(context, book.id))
                     },
                 )
             }
@@ -153,9 +164,9 @@ fun DiscoverScreen(
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .semantics { contentDescription = "清除阅读历史" },
+                        .semantics { contentDescription = clearHistory },
                 ) {
-                    Text("清除阅读历史")
+                    Text(clearHistory)
                 }
             }
         }

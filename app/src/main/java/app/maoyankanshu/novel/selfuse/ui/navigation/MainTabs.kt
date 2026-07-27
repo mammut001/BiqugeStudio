@@ -16,35 +16,30 @@ enum class MainTab(
     val label: String,
     val selectedIcon: ImageVector,
     val unselectedIcon: ImageVector,
-    val contentDescription: String,
 ) {
     Shelf(
         route = "shelf",
         label = "书架",
         selectedIcon = Icons.Filled.Home,
         unselectedIcon = Icons.Outlined.Home,
-        contentDescription = "书架，查看本地书籍",
     ),
     Store(
         route = "store",
         label = "书城",
         selectedIcon = Icons.Filled.Store,
         unselectedIcon = Icons.Outlined.Store,
-        contentDescription = "书城，导入与本地书库",
     ),
     Discover(
         route = "discover",
         label = "发现",
         selectedIcon = Icons.Filled.Explore,
         unselectedIcon = Icons.Outlined.Explore,
-        contentDescription = "发现，阅读概览与历史",
     ),
     Profile(
         route = "profile",
         label = "我的",
         selectedIcon = Icons.Filled.Person,
         unselectedIcon = Icons.Outlined.Person,
-        contentDescription = "我的，阅读设置与备份",
     );
 
     companion object {
