@@ -169,7 +169,7 @@ class LocalBookImportTest {
     }
 
     @Test
-    fun testExceeding32MbFileStreamThrowsException() {
+    fun testTooLargeFileRejected() {
         val totalSize = (32 * 1024 * 1024) + 1024
         val oversizedStream = object : java.io.InputStream() {
             private var bytesRead = 0
@@ -188,7 +188,7 @@ class LocalBookImportTest {
             }
         }
 
-        assertThrows(IllegalStateException::class.java) {
+        assertThrows(IllegalArgumentException::class.java) {
             LocalBookImport.fromStream(
                 stream = oversizedStream,
                 rawName = "oversized_book.txt",

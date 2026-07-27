@@ -9,7 +9,7 @@ import java.nio.charset.StandardCharsets
 
 /** SAF local TXT / EPUB import helpers (call off the main thread for large files if needed). */
 object LocalBookImport {
-    private const val MAX_BYTES = 32 * 1024 * 1024
+    private const val MAX_IMPORT_BYTES = 32 * 1024 * 1024
 
     data class Imported(
         val title: String,
@@ -29,7 +29,14 @@ object LocalBookImport {
             name = rawName.replaceFirst(Regex("\\.[^.]+$"), "")
         }
         val epub = rawName != null && rawName.lowercase().endsWith(".epub")
-        val content = if (epub) EpubReader.read(stream) else readText(stream)
+        val boundedStream = BoundedInputStream(stream, MAX_IMPORT_BYTES.toLong())
+        val content = try {
+            if (epub) EpubReader.read(boundedStream) else readText(boundedStream)
+        } catch (e: IllegalArgumentException) {
+            throw e
+        } catch (e: Exception) {
+            throw IllegalArgumentException(e.message ?: "failed to read book", e)
+        }
         if (content.trim().isEmpty()) throw IllegalArgumentException("empty")
         return Imported(
             title = name,
@@ -64,7 +71,9 @@ object LocalBookImport {
         val buffer = ByteArray(16384)
         var count: Int
         while (stream.read(buffer).also { count = it } != -1) {
-            if (output.size() + count > MAX_BYTES) throw IllegalStateException("too large")
+            if (output.size() + count > MAX_IMPORT_BYTES) {
+                throw IllegalArgumentException("file too large, max 32MB")
+            }
             output.write(buffer, 0, count)
         }
         val data = output.toByteArray()
@@ -91,6 +100,45 @@ object LocalBookImport {
             String(data, offset, data.size - offset, Charset.forName("GB18030"))
         } else {
             utf8
+        }
+    }
+
+    private class BoundedInputStream(
+        private val delegate: InputStream,
+        private val maxBytes: Long,
+    ) : InputStream() {
+        private var totalRead = 0L
+
+        override fun read(): Int {
+            if (totalRead >= maxBytes) {
+                throw IllegalArgumentException("file too large, max 32MB")
+            }
+            val b = delegate.read()
+            if (b != -1) {
+                totalRead++
+                if (totalRead > maxBytes) {
+                    throw IllegalArgumentException("file too large, max 32MB")
+                }
+            }
+            return b
+        }
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int {
+            if (totalRead >= maxBytes) {
+                throw IllegalArgumentException("file too large, max 32MB")
+            }
+            val n = delegate.read(b, off, len)
+            if (n != -1) {
+                totalRead += n
+                if (totalRead > maxBytes) {
+                    throw IllegalArgumentException("file too large, max 32MB")
+                }
+            }
+            return n
+        }
+
+        override fun close() {
+            delegate.close()
         }
     }
 }
