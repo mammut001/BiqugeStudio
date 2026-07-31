@@ -25,7 +25,8 @@
 | 主阅读 | `ReaderActivity`（Compose，含沉浸正文、主题、字号、目录、书签、查找、朗读及亮度设置） |
 
 - **主题**：壳跟随 `ReaderPreferences.nightMode`；阅读页有纸张/夜间/护眼。
-- **导入**：本地 **TXT / EPUB**（SAF）；可选 HTTPS 维基 / 直链 / 网页。
+- **导入**：本地 **TXT / EPUB**（SAF；扩展名或 `application/epub+zip` MIME）；可选 HTTPS 维基 / 直链 / 网页。EPUB 优先 OPF `dc:title` / `dc:creator`，可选封面落盘。
+- **书架**：继续阅读区 + 进度筛选 / 排序；可选按作者分组（默认扁平，不落库）。
 - **无障碍**：关键控件 `contentDescription` / `heading`，触控目标 ≥ 48dp。
 - **启动**：Android 12+ SplashScreen；自适应图标 `@mipmap/ic_launcher`（API 23+ 有 mipmap 回退）。
 
@@ -175,9 +176,13 @@ app/src/main/java/app/maoyankanshu/novel/selfuse/
 ## 已实现
 
 - **Compose 主壳**：Material 3 Scaffold、顶部栏、四 Tab、edge-to-edge、品牌橙 `#FFA414`、自适应图标 + Splash。
+- **Compose 书架**：继续阅读区；进度筛选与排序；可选 **按作者分组**（`ShelfGroupMode.NONE` 默认扁平 / `BY_AUTHOR`；首见作者序、组内相对序；空白作者 → 本地化「未知作者」；**不**持久化分组偏好）。
 - **Compose 搜索与导入**：本地书架过滤；SAF 导入 TXT / EPUB；HTTPS 维基搜索与导入；推荐公版与完整 EPUB 直链。
+- **本地 EPUB 识别**：文件名 `.epub` **或** ContentResolver MIME `application/epub+zip`（可带参数）均可识别，避免无扩展名被当成 TXT。
+- **EPUB 元数据（OPF）**：本地导入读取前缀容忍的 `dc:title` / `dc:creator`（含 HTML 实体解码）；非空优先，否则回退文件名 / 默认名与 `authorEpub`。`EpubReader.read` 仍为仅正文 API（源兼容）。
+- **EPUB 封面**：从 OPF 解析 cover-image（EPUB2 meta / EPUB3 `properties`），**2 MiB** 上限 + 图像魔数校验；可选存于 `covers/{id}.cover`（书库 4 字段行不变）；删除书籍时清理；**备份 ZIP 含封面**；`BookCard` 显示本地位图，缺省渐变占位。
 - **Compose 详情**：继续/开始阅读、编辑元数据、导出 TXT、删除（二次确认）。
-- **Compose 直链 / 网页导入**：仅 HTTPS；User-Agent；LibraryStore 落库。
+- **Compose 直链 / 网页导入**：仅 HTTPS；User-Agent；LibraryStore 落库；远程 EPUB 同样可带封面字节。
 - **Compose 阅读页**：0…1000 进度、章节/目录/书签/查找、纸张·夜间·护眼、可选中文本、经典朗读入口。
 - **经典朗读回退**：`ReaderScreen` 顶栏提供入口启动 `LegacyReaderActivity`，支持连续 TTS 朗读与自动滚动。
 - 本地书库 ZIP 备份与恢复；今日阅读时长；最近阅读记录。
@@ -194,6 +199,8 @@ app/src/main/java/app/maoyankanshu/novel/selfuse/
 ## 待继续迁移
 
 1. 将 **TTS / 语速 / 自动滚动** 安全迁入 Compose 后，再评估是否弱化（非删除）`LegacyReaderActivity`。（`BookDetail` / `Search` / `RemoteImport` / `WebImport` **已完成** Compose，无需再列。）
-2. 更多文本编码、EPUB 封面与书籍分组；翻页动画。
-3. 下载队列与仅接入你有权使用的内容服务。
+2. 更多文本编码检测；翻页动画。
+3. **下载队列**与仅接入你有权使用的内容服务。
 4. 若要恢复评论、书单、登录等功能，需要独立的新服务端。
+
+（已落地、勿再列入待办：EPUB OPF 书名/作者、封面抽取与备份、MIME-only EPUB 识别、书架可选作者分组。）

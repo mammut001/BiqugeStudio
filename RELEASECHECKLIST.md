@@ -61,10 +61,10 @@ cd BiqugeStudio
 |------|------|
 | 应用名称 | 阅笺 |
 | 简短说明 | 本地 TXT/EPUB 阅读；进度、书签、离线优先 |
-| 完整说明 | 强调自有文件导入、可选维基公版、无账号/无广告；注明「经典朗读」含系统 TTS |
+| 完整说明 | 强调自有文件导入（EPUB 可读 OPF 书名/作者与可选封面）、可选维基公版、无账号/无广告；书架可筛选/排序/按作者分组；注明「经典朗读」含系统 TTS |
 | 图标 | 512×512（可由 logo 导出） |
 | 功能图形 | 按需 |
-| 手机截图 | 至少 2 张：书架、Compose 阅读页；建议再加搜索/导入、详情 |
+| 手机截图 | 至少 2 张：书架（可含作者分组）、Compose 阅读页；建议再加搜索/导入、详情（封面卡片） |
 | 分类 | 图书与工具类中择一 |
 | 内容分级 | 按实际填写 |
 | 目标受众 | 一般；无儿童定向收集 |
@@ -76,14 +76,17 @@ cd BiqugeStudio
 
 | 项 | 期望 |
 |----|------|
-| 本地 TXT / EPUB | SAF 导入，无需网络 |
+| 本地 TXT / EPUB | SAF 导入，无需网络；EPUB 支持扩展名 **或** MIME `application/epub+zip` |
+| EPUB 元数据 / 封面 | OPF `dc:title`/`dc:creator` 优先；封面 ≤ 2 MiB 落盘 + BookCard 位图/渐变回退；备份 ZIP 含封面 |
+| 书架分组 | 可选按作者分组（默认扁平、不持久化）；继续阅读区 / 进度筛选 / 排序不变 |
 | HTTPS 直链 / 网页 | 仅 `https://`；无明文 HTTP |
 | Compose UI | 主壳四 Tab；`SearchActivity`；`BookDetailActivity`；`RemoteImportActivity`；`WebImportActivity`；`ReaderActivity`（含 `ReaderScreen`） |
 | 阅读与朗读 | 默认 Compose `ReaderActivity`（Intent `book_id` 不变）；`ReaderScreen` 顶栏提供 `LegacyReaderActivity` 入口用于连续 TTS 与自动滚动 |
 | 进度 | 0…1000，`LibraryStore` |
-| 备份 | 本地 ZIP，用户自选路径 |
+| 备份 | 本地 ZIP（含可选封面文件），用户自选路径 |
 | 权限 | 仅 `INTERNET`（可选在线导入） |
 | 测试 | `./gradlew :app:testDebugUnitTest` 通过；有设备时 `connectedDebugAndroidTest` |
+| 上架前已知缺口 | TTS 仍经 `LegacyReaderActivity`；**无**下载队列（见 README「待继续迁移」） |
 
 ---
 
