@@ -19,6 +19,21 @@ enum class ShelfSortOrder {
 }
 
 /**
+ * Optional grouping for the "全部书籍" section only.
+ * Default [NONE] keeps a flat list (source-compatible behavior).
+ */
+enum class ShelfGroupMode {
+    NONE,
+    BY_AUTHOR,
+}
+
+/** One author heading + books beneath it (order of books preserved from input). */
+data class ShelfAuthorGroup(
+    val authorLabel: String,
+    val books: List<Book>,
+)
+
+/**
  * Pure shelf list helpers — unit-tested without Compose.
  * Position is 0..1000 (LibraryStore scale).
  */
@@ -55,4 +70,24 @@ object ShelfFilters {
 
     fun sectionAll(books: List<Book>, filter: ShelfProgressFilter, order: ShelfSortOrder): List<Book> =
         sorted(filtered(books, filter), order)
+
+    /**
+     * Group an already-filtered/sorted list by author for display.
+     * - Preserves relative book order within each group and first-seen author order.
+     * - Blank/whitespace authors use [unknownAuthorLabel] (localized by UI).
+     * Does not re-sort or re-filter; call after [sectionAll].
+     */
+    fun groupByAuthor(
+        books: List<Book>,
+        unknownAuthorLabel: String,
+    ): List<ShelfAuthorGroup> {
+        if (books.isEmpty()) return emptyList()
+        val fallback = unknownAuthorLabel.ifBlank { "—" }
+        val groups = LinkedHashMap<String, MutableList<Book>>()
+        for (book in books) {
+            val label = book.author.trim().ifEmpty { fallback }
+            groups.getOrPut(label) { ArrayList() }.add(book)
+        }
+        return groups.map { (label, list) -> ShelfAuthorGroup(label, list) }
+    }
 }

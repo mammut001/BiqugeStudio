@@ -7,8 +7,12 @@ import org.junit.Test
 
 class ShelfFiltersTest {
 
-    private fun book(id: String, title: String, position: Int): Book =
-        Book(id, title, "author", "text", position)
+    private fun book(
+        id: String,
+        title: String,
+        position: Int,
+        author: String = "author",
+    ): Book = Book(id, title, author, "text", position)
 
     @Test
     fun continueReading_only_in_progress() {
@@ -100,5 +104,59 @@ class ShelfFiltersTest {
             ShelfSortOrder.TITLE,
         )
         assertEquals(listOf("Apple", "Berry"), result.map { it.title })
+    }
+
+    @Test
+    fun groupByAuthor_preservesOrderAndFirstSeenAuthors() {
+        val books = listOf(
+            book("1", "A1", 0, author = "Bob"),
+            book("2", "A2", 0, author = "Alice"),
+            book("3", "A3", 0, author = "Bob"),
+            book("4", "A4", 0, author = "Alice"),
+        )
+        val groups = ShelfFilters.groupByAuthor(books, unknownAuthorLabel = "未知作者")
+        assertEquals(listOf("Bob", "Alice"), groups.map { it.authorLabel })
+        assertEquals(listOf("A1", "A3"), groups[0].books.map { it.title })
+        assertEquals(listOf("A2", "A4"), groups[1].books.map { it.title })
+    }
+
+    @Test
+    fun groupByAuthor_blankAuthor_usesFallback() {
+        val books = listOf(
+            book("1", "T1", 0, author = "  "),
+            book("2", "T2", 0, author = ""),
+            book("3", "T3", 0, author = "Named"),
+        )
+        val groups = ShelfFilters.groupByAuthor(books, unknownAuthorLabel = "未知作者")
+        assertEquals(2, groups.size)
+        assertEquals("未知作者", groups[0].authorLabel)
+        assertEquals(listOf("T1", "T2"), groups[0].books.map { it.title })
+        assertEquals("Named", groups[1].authorLabel)
+        assertEquals(listOf("T3"), groups[1].books.map { it.title })
+    }
+
+    @Test
+    fun groupByAuthor_emptyList() {
+        assertTrue(ShelfFilters.groupByAuthor(emptyList(), "未知作者").isEmpty())
+    }
+
+    @Test
+    fun groupByAuthor_afterSectionAll_keepsSortWithinAuthor() {
+        val books = listOf(
+            book("1", "Zebra", 100, author = "A"),
+            book("2", "Apple", 900, author = "B"),
+            book("3", "Mango", 50, author = "A"),
+            book("4", "Berry", 200, author = "B"),
+        )
+        val flat = ShelfFilters.sectionAll(
+            books,
+            ShelfProgressFilter.ALL,
+            ShelfSortOrder.TITLE,
+        )
+        // Title order: Apple, Berry, Mango, Zebra — first-seen authors: B then A
+        val groups = ShelfFilters.groupByAuthor(flat, "未知作者")
+        assertEquals(listOf("B", "A"), groups.map { it.authorLabel })
+        assertEquals(listOf("Apple", "Berry"), groups[0].books.map { it.title })
+        assertEquals(listOf("Mango", "Zebra"), groups[1].books.map { it.title })
     }
 }

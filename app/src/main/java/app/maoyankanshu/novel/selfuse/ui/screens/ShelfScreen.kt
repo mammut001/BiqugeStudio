@@ -55,14 +55,25 @@ fun ShelfScreen(
     var pendingDelete by remember { mutableStateOf<Book?>(null) }
     var progressFilter by remember { mutableStateOf(ShelfProgressFilter.ALL) }
     var sortOrder by remember { mutableStateOf(ShelfSortOrder.DEFAULT) }
+    var groupMode by remember { mutableStateOf(ShelfGroupMode.NONE) }
     var sortMenuExpanded by remember { mutableStateOf(false) }
+    var groupMenuExpanded by remember { mutableStateOf(false) }
+    val unknownAuthorLabel = stringResource(R.string.shelf_author_unknown)
 
     // 继续阅读 shares sortOrder with 全部书籍; progressFilter applies only to sectionAll.
+    // groupMode only affects rendering of the all-books section (not continue-reading).
     val continueReading = remember(books, sortOrder) {
         ShelfFilters.continueReading(books, sortOrder)
     }
     val allBooks = remember(books, progressFilter, sortOrder) {
         ShelfFilters.sectionAll(books, progressFilter, sortOrder)
+    }
+    val authorGroups = remember(allBooks, groupMode, unknownAuthorLabel) {
+        if (groupMode == ShelfGroupMode.BY_AUTHOR) {
+            ShelfFilters.groupByAuthor(allBooks, unknownAuthorLabel)
+        } else {
+            emptyList()
+        }
     }
 
     fun openDetail(book: Book) {
@@ -153,6 +164,13 @@ fun ShelfScreen(
                             sortOrder = it
                             sortMenuExpanded = false
                         },
+                        groupMode = groupMode,
+                        groupMenuExpanded = groupMenuExpanded,
+                        onGroupMenuExpandedChange = { groupMenuExpanded = it },
+                        onGroupModeChange = {
+                            groupMode = it
+                            groupMenuExpanded = false
+                        },
                     )
                 }
 
@@ -169,6 +187,20 @@ fun ShelfScreen(
                                     contentDescription = context.getString(R.string.shelf_filter_empty)
                                 },
                         )
+                    }
+                } else if (groupMode == ShelfGroupMode.BY_AUTHOR) {
+                    authorGroups.forEach { group ->
+                        item(key = "author-h-${group.authorLabel}") {
+                            AuthorSectionHeading(group.authorLabel)
+                        }
+                        items(group.books, key = { "all-${it.id}" }) { book ->
+                            BookCard(
+                                book = book,
+                                onClick = { openDetail(book) },
+                                onLongClick = { menuBook = book },
+                                onContinueReading = { openReader(book) },
+                            )
+                        }
                     }
                 } else {
                     items(allBooks, key = { "all-${it.id}" }) { book ->
@@ -257,12 +289,17 @@ private fun ShelfToolbar(
     sortMenuExpanded: Boolean,
     onSortMenuExpandedChange: (Boolean) -> Unit,
     onSortOrderChange: (ShelfSortOrder) -> Unit,
+    groupMode: ShelfGroupMode,
+    groupMenuExpanded: Boolean,
+    onGroupMenuExpandedChange: (Boolean) -> Unit,
+    onGroupModeChange: (ShelfGroupMode) -> Unit,
 ) {
     val filterAllCd = stringResource(R.string.shelf_filter_all_cd)
     val filterProgressCd = stringResource(R.string.shelf_filter_progress_cd)
     val filterNotStartedCd = stringResource(R.string.shelf_filter_not_started_cd)
     val filterFinishedCd = stringResource(R.string.shelf_filter_finished_cd)
     val sortCd = stringResource(R.string.shelf_sort_cd)
+    val groupCd = stringResource(R.string.shelf_group_cd)
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -311,25 +348,53 @@ private fun ShelfToolbar(
             )
         }
 
-        Box {
-            TextButton(
-                onClick = { onSortMenuExpandedChange(true) },
-                modifier = Modifier
-                    .heightIn(min = 48.dp)
-                    .semantics { contentDescription = sortCd },
-            ) {
-                Text(stringResource(sortLabelRes(sortOrder)))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Box {
+                TextButton(
+                    onClick = { onSortMenuExpandedChange(true) },
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .semantics { contentDescription = sortCd },
+                ) {
+                    Text(stringResource(sortLabelRes(sortOrder)))
+                }
+                DropdownMenu(
+                    expanded = sortMenuExpanded,
+                    onDismissRequest = { onSortMenuExpandedChange(false) },
+                ) {
+                    ShelfSortOrder.entries.forEach { order ->
+                        DropdownMenuItem(
+                            text = { Text(stringResource(sortLabelRes(order))) },
+                            onClick = { onSortOrderChange(order) },
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        )
+                    }
+                }
             }
-            DropdownMenu(
-                expanded = sortMenuExpanded,
-                onDismissRequest = { onSortMenuExpandedChange(false) },
-            ) {
-                ShelfSortOrder.entries.forEach { order ->
-                    DropdownMenuItem(
-                        text = { Text(stringResource(sortLabelRes(order))) },
-                        onClick = { onSortOrderChange(order) },
-                        modifier = Modifier.heightIn(min = 48.dp),
-                    )
+            Box {
+                TextButton(
+                    onClick = { onGroupMenuExpandedChange(true) },
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .semantics { contentDescription = groupCd },
+                ) {
+                    Text(stringResource(groupLabelRes(groupMode)))
+                }
+                DropdownMenu(
+                    expanded = groupMenuExpanded,
+                    onDismissRequest = { onGroupMenuExpandedChange(false) },
+                ) {
+                    ShelfGroupMode.entries.forEach { mode ->
+                        DropdownMenuItem(
+                            text = { Text(stringResource(groupLabelRes(mode))) },
+                            onClick = { onGroupModeChange(mode) },
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        )
+                    }
                 }
             }
         }
@@ -343,6 +408,11 @@ private fun sortLabelRes(order: ShelfSortOrder): Int = when (order) {
     ShelfSortOrder.PROGRESS_ASC -> R.string.shelf_sort_progress_asc
 }
 
+private fun groupLabelRes(mode: ShelfGroupMode): Int = when (mode) {
+    ShelfGroupMode.NONE -> R.string.shelf_group_none
+    ShelfGroupMode.BY_AUTHOR -> R.string.shelf_group_by_author
+}
+
 @Composable
 private fun SectionLabel(text: String) {
     Text(
@@ -353,6 +423,23 @@ private fun SectionLabel(text: String) {
             .fillMaxWidth()
             .padding(top = 4.dp, bottom = 2.dp)
             .semantics { heading() },
+    )
+}
+
+@Composable
+private fun AuthorSectionHeading(authorLabel: String) {
+    val cd = stringResource(R.string.shelf_author_heading_cd, authorLabel)
+    Text(
+        text = authorLabel,
+        style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp, bottom = 2.dp)
+            .semantics {
+                heading()
+                contentDescription = cd
+            },
     )
 }
 

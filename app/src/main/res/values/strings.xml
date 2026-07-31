@@ -160,6 +160,12 @@
     <string name="shelf_sort_title">排序：书名</string>
     <string name="shelf_sort_progress_desc">排序：进度从高到低</string>
     <string name="shelf_sort_progress_asc">排序：进度从低到高</string>
+    <string name="shelf_group_cd">书籍分组方式</string>
+    <string name="shelf_group_none">分组：无</string>
+    <string name="shelf_group_by_author">分组：按作者</string>
+    <string name="shelf_group_by_author_cd">按作者分组全部书籍</string>
+    <string name="shelf_author_unknown">未知作者</string>
+    <string name="shelf_author_heading_cd">作者 %1$s</string>
     <string name="shelf_action_pin">置顶到书架首位</string>
     <string name="shelf_action_edit">编辑书名和作者</string>
     <string name="shelf_action_delete">从书架删除</string>
