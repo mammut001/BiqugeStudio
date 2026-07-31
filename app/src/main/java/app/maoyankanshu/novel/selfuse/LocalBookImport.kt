@@ -11,11 +11,27 @@ import java.nio.charset.StandardCharsets
 object LocalBookImport {
     private const val MAX_IMPORT_BYTES = 32 * 1024 * 1024
 
+    /** Standard EPUB MIME from SAF / DocumentsUI (optional parameters allowed). */
+    const val MIME_EPUB: String = "application/epub+zip"
+
     data class Imported(
         val title: String,
         val author: String,
         val text: String,
     )
+
+    /**
+     * True when the display name ends with `.epub` (any case) or [mimeType] is
+     * [MIME_EPUB] (with optional `;…` parameters). Extension and MIME are OR'd so
+     * providers that omit the filename extension still import as EPUB.
+     */
+    fun isEpub(rawName: String?, mimeType: String? = null): Boolean {
+        if (rawName != null && rawName.lowercase().endsWith(".epub")) return true
+        val mime = mimeType?.trim()?.lowercase() ?: return false
+        if (mime == MIME_EPUB) return true
+        // e.g. application/epub+zip; charset=binary
+        return mime.startsWith("$MIME_EPUB;")
+    }
 
     fun fromStream(
         stream: InputStream,
@@ -23,12 +39,13 @@ object LocalBookImport {
         defaultName: String,
         authorEpub: String,
         authorTxt: String,
+        mimeType: String? = null,
     ): Imported {
         var name = defaultName
         if (!rawName.isNullOrEmpty()) {
             name = rawName.replaceFirst(Regex("\\.[^.]+$"), "")
         }
-        val epub = rawName != null && rawName.lowercase().endsWith(".epub")
+        val epub = isEpub(rawName, mimeType)
         val boundedStream = BoundedInputStream(stream, MAX_IMPORT_BYTES.toLong())
         val content = try {
             if (epub) EpubReader.read(boundedStream) else readText(boundedStream)
@@ -69,6 +86,15 @@ object LocalBookImport {
         return uri.lastPathSegment
     }
 
+    /** ContentResolver MIME, or null if unknown / unavailable. */
+    fun queryMimeType(context: Context, uri: Uri): String? {
+        return try {
+            context.contentResolver.getType(uri)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     fun fromUri(
         context: Context,
         uri: Uri,
@@ -77,10 +103,11 @@ object LocalBookImport {
         authorTxt: String,
     ): Imported {
         val raw = queryDisplayName(context, uri)
+        val mime = queryMimeType(context, uri)
         val stream = context.contentResolver.openInputStream(uri)
             ?: throw IllegalStateException("null stream")
         return stream.use {
-            fromStream(it, raw, defaultName, authorEpub, authorTxt)
+            fromStream(it, raw, defaultName, authorEpub, authorTxt, mimeType = mime)
         }
     }
 

@@ -1,6 +1,7 @@
 package app.maoyankanshu.novel.selfuse
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -108,6 +109,77 @@ class LocalBookImportTest {
         assertEquals("sample", imported.title)
         assertEquals("EPUB作者", imported.author)
         assertTrue(imported.text.contains("第一章 概述"))
+    }
+
+    @Test
+    fun isEpub_extensionAndMime() {
+        assertTrue(LocalBookImport.isEpub("book.epub", null))
+        assertTrue(LocalBookImport.isEpub("Book.EPUB", null))
+        assertTrue(LocalBookImport.isEpub(null, "application/epub+zip"))
+        assertTrue(LocalBookImport.isEpub("doc", "application/epub+zip"))
+        assertTrue(LocalBookImport.isEpub("doc", "application/epub+zip; charset=binary"))
+        assertTrue(LocalBookImport.isEpub("x.epub", "text/plain")) // extension wins
+        assertFalse(LocalBookImport.isEpub("doc", null))
+        assertFalse(LocalBookImport.isEpub("story.txt", "text/plain"))
+        assertFalse(LocalBookImport.isEpub("story.txt", "application/octet-stream"))
+        assertFalse(LocalBookImport.isEpub(null, null))
+        assertFalse(LocalBookImport.isEpub(null, "application/zip"))
+    }
+
+    /**
+     * Regression: some SAF providers report MIME application/epub+zip but a display
+     * name without ".epub". Without MIME-aware detection this was misread as TXT.
+     */
+    @Test
+    fun testEpubImport_mimeOnlyWithoutEpubExtension_regression() {
+        val chapter = "MIME-only EPUB body that must not be decoded as plain text ZIP bytes"
+        val epubBytes = createMinimalEpubZip(chapter)
+        val imported = LocalBookImport.fromStream(
+            stream = ByteArrayInputStream(epubBytes),
+            rawName = "document", // no .epub suffix (DocumentsUI-style)
+            defaultName = "默认书名",
+            authorEpub = "EPUB作者",
+            authorTxt = "TXT作者",
+            mimeType = LocalBookImport.MIME_EPUB,
+        )
+        assertEquals("document", imported.title)
+        assertEquals("EPUB作者", imported.author)
+        assertTrue(
+            "expected EPUB chapter text, got: ${imported.text.take(80)}",
+            imported.text.contains(chapter),
+        )
+        // Plain-text path would embed PK zip headers or fail — ensure we got real text.
+        assertFalse(imported.text.startsWith("PK"))
+    }
+
+    @Test
+    fun testEpubImport_mimeWithParameters_noExtension() {
+        val epubBytes = createMinimalEpubZip("参数 MIME 章节")
+        val imported = LocalBookImport.fromStream(
+            stream = ByteArrayInputStream(epubBytes),
+            rawName = "untitled",
+            defaultName = "默认书名",
+            authorEpub = "EPUB作者",
+            authorTxt = "TXT作者",
+            mimeType = "application/epub+zip; charset=binary",
+        )
+        assertEquals("EPUB作者", imported.author)
+        assertTrue(imported.text.contains("参数 MIME 章节"))
+    }
+
+    @Test
+    fun testTxtImport_notEpubWhenMimeIsOctetStream() {
+        val text = "plain novel line"
+        val imported = LocalBookImport.fromStream(
+            stream = ByteArrayInputStream(text.toByteArray(StandardCharsets.UTF_8)),
+            rawName = "mystery",
+            defaultName = "默认书名",
+            authorEpub = "EPUB作者",
+            authorTxt = "TXT作者",
+            mimeType = "application/octet-stream",
+        )
+        assertEquals("TXT作者", imported.author)
+        assertEquals(text, imported.text)
     }
 
     @Test
