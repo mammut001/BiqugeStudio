@@ -1,6 +1,6 @@
 package app.maoyankanshu.novel.selfuse.ui.components
 
-import android.graphics.BitmapFactory
+import android.graphics.Bitmap
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -28,7 +28,11 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,6 +40,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -48,6 +53,8 @@ import androidx.compose.ui.unit.sp
 import app.maoyankanshu.novel.selfuse.Book
 import app.maoyankanshu.novel.selfuse.R
 import kotlin.math.abs
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** Fixed offline cover tile (no network images). */
 private val CoverWidth = 56.dp
@@ -89,16 +96,28 @@ fun BookCard(
     val initial = remember(book.title) {
         book.title.trim().firstOrNull()?.toString() ?: "书"
     }
-    // Offline file only — no network images. Malformed/missing path → gradient fallback.
-    val coverBitmap = remember(book.coverPath) {
-        book.coverPath?.let { path ->
-            try {
-                BitmapFactory.decodeFile(path)
-            } catch (_: Exception) {
-                null
-            }
+    // Offline file only — decode on IO with inSampleSize for the 56×74dp tile.
+    // Loading / missing / malformed → null → deterministic gradient + initial letter.
+    val density = LocalDensity.current
+    val reqWidthPx = with(density) { CoverWidth.roundToPx() }
+    val reqHeightPx = with(density) { CoverHeight.roundToPx() }
+    var decodedCover by remember(book.coverPath, reqWidthPx, reqHeightPx) {
+        mutableStateOf<Bitmap?>(null)
+    }
+    LaunchedEffect(book.coverPath, reqWidthPx, reqHeightPx) {
+        val path = book.coverPath
+        if (path == null) {
+            decodedCover = null
+            return@LaunchedEffect
+        }
+        // Reset immediately so path changes do not briefly show a stale bitmap.
+        decodedCover = null
+        decodedCover = withContext(Dispatchers.IO) {
+            CoverBitmap.decodeFile(path, reqWidthPx, reqHeightPx)
         }
     }
+    // Local snapshot for smart-cast (delegated mutableState is not smart-castable).
+    val coverBitmap = decodedCover
 
     Card(
         modifier = modifier
