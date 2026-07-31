@@ -44,8 +44,8 @@ Issue 模板：Bug / Feature（`.github/ISSUE_TEMPLATE/`）。PR 模板：`.gith
 - **主题**：壳跟随 `ReaderPreferences.nightMode`；阅读页有纸张/夜间/护眼。
 - **导入**：本地 **TXT / EPUB**（SAF；扩展名或 `application/epub+zip` MIME）；可选 HTTPS 维基 / 直链 / 网页。EPUB 优先 OPF `dc:title` / `dc:creator`，可选封面落盘。
 - **书架**：继续阅读区 + 进度筛选 / 排序；可选按作者分组（默认扁平，不落库）。
-- **无障碍**：关键控件 `contentDescription` / `heading`，触控目标 ≥ 48dp；`RemoteImport` / `WebImport` / `Search` / `Profile` 校验、加载中文案与失败提示对 TalkBack 使用 polite `liveRegion`。
-- **HTTPS / 搜索 / 备份协程**：`RemoteImportActivity` / `WebImportActivity` / `SearchActivity` / `ProfileScreen` 用 `rememberCoroutineScope` 跟踪 `Job` 跑 IO；加载中可 **取消**（`Job.cancel`），**不**把 `CancellationException` 当成失败（无失败 Toast / 失败 liveRegion / 错误对话框）；Activity 已 `finishing`/`destroyed` 时不再 Toast / 写状态（`ImportUiGate.canAcceptUi`，minSdk 23 可用 `isDestroyed`）。搜索页：本地 `content://`·`file://` 导入与 HTTPS 维基搜索/导入共用该约定；批次 Toast 由 `SearchWorkOutcomes` 纯函数判定（JVM 可测）。个人页：CreateDocument 备份 / OpenDocument 恢复共用该约定；结果 Toast 与失败对话框由 `ProfileBackupOutcomes` 纯函数判定（JVM 可测）。
+- **无障碍**：关键控件 `contentDescription` / `heading`，触控目标 ≥ 48dp；`RemoteImport` / `WebImport` / `Search` / `Profile` / `BookDetail` 校验、加载中文案与失败提示对 TalkBack 使用 polite `liveRegion`。
+- **HTTPS / 搜索 / 备份 / 详情导出协程**：`RemoteImportActivity` / `WebImportActivity` / `SearchActivity` / `ProfileScreen` / `BookDetailActivity` 用 `rememberCoroutineScope` 跟踪 `Job` 跑 IO；加载中可 **取消**（`Job.cancel`），**不**把 `CancellationException` 当成失败（无失败 Toast / 失败 liveRegion / 错误对话框）；Activity 已 `finishing`/`destroyed` 时不再 Toast / 写状态（`ImportUiGate.canAcceptUi`，minSdk 23 可用 `isDestroyed`）。搜索页：本地 `content://`·`file://` 导入与 HTTPS 维基搜索/导入共用该约定；批次 Toast 由 `SearchWorkOutcomes` 纯函数判定（JVM 可测）。个人页：CreateDocument 备份 / OpenDocument 恢复共用该约定；结果 Toast 与失败对话框由 `ProfileBackupOutcomes` 纯函数判定（JVM 可测）。书籍详情：CreateDocument 单书 TXT 导出（`LibraryStore.exportBook` + SAF）共用该约定；结果 Toast 由 `BookDetailExportOutcomes` 纯函数判定（JVM 可测）。`EXTRA_ID` 仍为 `"book_id"`。
 - **启动**：Android 12+ SplashScreen；自适应图标 `@mipmap/ic_launcher`（API 23+ 有 mipmap 回退）。
 
 上架步骤见 [`RELEASECHECKLIST.md`](./RELEASECHECKLIST.md)。

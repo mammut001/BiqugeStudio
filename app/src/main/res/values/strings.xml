@@ -96,6 +96,10 @@
     <string name="detail_delete_body">将删除本设备中保存的《%1$s》文本和阅读进度。</string>
     <string name="detail_export_ok">TXT 文件已导出</string>
     <string name="detail_export_fail">导出失败</string>
+    <string name="detail_export_in_progress">正在导出 TXT…</string>
+    <string name="detail_export_in_progress_cd">正在导出本书为本地 TXT 文件，请稍候</string>
+    <string name="detail_cancel_export">取消导出</string>
+    <string name="detail_cancel_export_cd">取消正在进行的 TXT 导出</string>
     <string name="detail_preview_cd">正文预览</string>
     <string name="search_shelf">搜索本地书架</string>
     <string name="search_shelf_cd">搜索本地书架</string>

@@ -22,6 +22,8 @@ They do **not** assert a Google Play ship date, store listing URL, or remote CI 
 - Search: in-flight **取消导入 / 取消搜索** (`Job.cancel`) strings + TalkBack content descriptions.
 - `ProfileBackupOutcomes`: pure cancel / backup Toast / restore success·empty·invalid classification with JVM tests (`ProfileBackupOutcomesTest`).
 - Profile: in-flight **取消备份 / 取消恢复** (`Job.cancel`) strings + TalkBack content descriptions.
+- `BookDetailExportOutcomes`: pure cancel / export Toast classification with JVM tests (`BookDetailExportOutcomesTest`).
+- Book detail: in-flight **取消导出** (`Job.cancel`) strings + TalkBack content descriptions.
 
 ### Changed
 
@@ -31,6 +33,7 @@ They do **not** assert a Google Play ship date, store listing URL, or remote CI 
 - README: Compose reader leave-save uses process-lifetime IO scope (not per-`onDispose` `CoroutineScope`) and `rememberUpdatedState` for latest 0…1000 progress.
 - README: `SearchActivity` shares cancel / `canAcceptUi` conventions with Remote/Web import (local URI + HTTPS Wikisource).
 - README: `ProfileScreen` CreateDocument/OpenDocument backup shares cancel / `canAcceptUi` / polite `liveRegion` conventions.
+- README: `BookDetailActivity` CreateDocument single-book TXT export shares cancel / `canAcceptUi` / polite `liveRegion` conventions.
 
 ### Fixed
 
@@ -41,6 +44,7 @@ They do **not** assert a Google Play ship date, store listing URL, or remote CI 
 - `ReaderScreen` `DisposableEffect(book.id)` `onDispose`: no unstructured `CoroutineScope(Dispatchers.IO).launch` per leave; clamp progress 0…1000; skip non-positive reading duration for `ReadingStats`.
 - `SearchActivity`: track local shelf / SAF-URI import / HTTPS Wikisource work as `Job`s on `rememberCoroutineScope`; rethrow `CancellationException` so cancel/back/leave is never fail Toast or error liveRegion; clear busy flags; skip Toast/state when host cannot accept UI; back stays enabled while busy.
 - `ProfileScreen`: track CreateDocument backup / OpenDocument restore as `Job`s on `rememberCoroutineScope` + `Dispatchers.IO`; rethrow `CancellationException` so cancel/leave is never fail Toast or error dialog; clear busy flags; skip Toast/state when host cannot accept UI; soft cancel via dialog button / dismiss; polite `liveRegion` on loading and error dialog text.
+- `BookDetailActivity`: track CreateDocument TXT export (`LibraryStore.exportBook`) as a `Job` on `rememberCoroutineScope` + `Dispatchers.IO`; rethrow `CancellationException` so cancel/leave is never fail Toast; clear busy flags; skip Toast/state when host cannot accept UI; soft cancel via dialog button / dismiss; polite `liveRegion` on loading status.
 
 ## [1.0.1] — versionCode 2
 
