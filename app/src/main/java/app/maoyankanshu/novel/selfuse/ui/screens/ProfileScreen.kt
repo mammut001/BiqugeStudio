@@ -1,7 +1,9 @@
 package app.maoyankanshu.novel.selfuse.ui.screens
 
+import android.app.Activity
 import android.content.Intent
 import android.provider.Settings
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -17,6 +19,7 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -37,6 +40,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -54,21 +58,36 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import app.maoyankanshu.novel.selfuse.BuildConfig
 import app.maoyankanshu.novel.selfuse.LibraryStore
+import app.maoyankanshu.novel.selfuse.ProfileBackupOutcomes
 import app.maoyankanshu.novel.selfuse.R
 import app.maoyankanshu.novel.selfuse.ReaderPreferences
+import app.maoyankanshu.novel.selfuse.canAcceptUi
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/**
+ * Profile / settings: reading prefs, SAF backup (CreateDocument) and restore (OpenDocument).
+ *
+ * Export / import run on [rememberCoroutineScope] as tracked [Job]s on [Dispatchers.IO].
+ * User cancel or leaving composition cancels those Jobs; [CancellationException] is rethrown
+ * and **not** shown as failure Toast / error dialog. Host Activity already
+ * `finishing`/`destroyed` skips Toast / state ([canAcceptUi]).
+ */
 @Composable
 fun ProfileScreen(
     contentPadding: PaddingValues,
@@ -76,6 +95,8 @@ fun ProfileScreen(
     onDarkThemeChanged: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
+    val activity = context as? Activity
+    // Cancelled when ProfileScreen leaves composition (tab switch / process path).
     val scope = rememberCoroutineScope()
     val appName = stringResource(R.string.app_name)
     val preferences = remember { ReaderPreferences.get(context) }
@@ -86,6 +107,10 @@ fun ProfileScreen(
     var isLoading by remember { mutableStateOf(false) }
     var loadingText by remember { mutableStateOf("") }
     var loadingCd by remember { mutableStateOf("") }
+    /** True while export Job is active; false while restore Job is active. */
+    var loadingIsBackup by remember { mutableStateOf(true) }
+    var backupJob by remember { mutableStateOf<Job?>(null) }
+    var restoreJob by remember { mutableStateOf<Job?>(null) }
 
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
@@ -97,6 +122,10 @@ fun ProfileScreen(
     val restoreInProgressCd = stringResource(R.string.profile_restore_in_progress_cd)
     val restoreEmptyFail = stringResource(R.string.profile_restore_empty_fail)
     val restoreInvalidFormat = stringResource(R.string.profile_restore_invalid_format)
+    val cancelBackupLabel = stringResource(R.string.profile_cancel_backup)
+    val cancelBackupCd = stringResource(R.string.profile_cancel_backup_cd)
+    val cancelRestoreLabel = stringResource(R.string.profile_cancel_restore)
+    val cancelRestoreCd = stringResource(R.string.profile_cancel_restore_cd)
 
     val smallerCd = stringResource(R.string.profile_font_smaller)
     val largerCd = stringResource(R.string.profile_font_larger)
@@ -104,27 +133,61 @@ fun ProfileScreen(
         if (nightMode) R.string.profile_night_off else R.string.profile_night_on
     )
 
+    fun clearBusyFlags() {
+        isLoading = false
+        backupJob = null
+        restoreJob = null
+    }
+
+    fun cancelActiveWork() {
+        backupJob?.cancel()
+        restoreJob?.cancel()
+        clearBusyFlags()
+        // Soft cancel: no fail Toast / error dialog (CancellationException path is silent too).
+    }
+
     val createBackup = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/zip"),
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
+        if (isLoading) return@rememberLauncherForActivityResult
+        errorMessage = null
         isLoading = true
+        loadingIsBackup = true
         loadingText = backupInProgress
         loadingCd = backupInProgressCd
-        scope.launch(Dispatchers.IO) {
+        backupJob = scope.launch {
             try {
-                context.contentResolver.openOutputStream(uri)?.use { stream ->
-                    LibraryStore.get(context).exportTo(stream)
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri)?.use { stream ->
+                        LibraryStore.get(context).exportTo(stream)
+                    } ?: throw IllegalStateException("openOutputStream returned null")
                 }
-                withContext(Dispatchers.Main) {
-                    isLoading = false
-                    Toast.makeText(context, backupOk, Toast.LENGTH_SHORT).show()
+                ensureActive()
+                if (!activity.canAcceptUi()) return@launch
+                when (ProfileBackupOutcomes.backupNotice(cancelled = false, hardError = false)) {
+                    ProfileBackupOutcomes.BackupNotice.SUCCESS -> {
+                        isLoading = false
+                        backupJob = null
+                        Toast.makeText(context, backupOk, Toast.LENGTH_SHORT).show()
+                    }
+                    ProfileBackupOutcomes.BackupNotice.NONE,
+                    ProfileBackupOutcomes.BackupNotice.FAIL,
+                    -> Unit
                 }
+            } catch (cancel: CancellationException) {
+                // User cancel / leave composition: never backup_fail dialog.
+                if (activity.canAcceptUi()) {
+                    clearBusyFlags()
+                }
+                throw cancel
             } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    isLoading = false
-                    errorMessage = backupFail + if (e.localizedMessage != null) "\n(${e.localizedMessage})" else ""
-                }
+                if (!activity.canAcceptUi()) return@launch
+                if (!ProfileBackupOutcomes.shouldSurfaceAsFailure(e)) throw e
+                Log.e("YueJianProfile", "Unable to export library backup", e)
+                isLoading = false
+                backupJob = null
+                errorMessage = ProfileBackupOutcomes.failMessage(backupFail, e)
             }
         }
     }
@@ -133,33 +196,60 @@ fun ProfileScreen(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
+        if (isLoading) return@rememberLauncherForActivityResult
+        errorMessage = null
         isLoading = true
+        loadingIsBackup = false
         loadingText = restoreInProgress
         loadingCd = restoreInProgressCd
-        scope.launch(Dispatchers.IO) {
+        restoreJob = scope.launch {
             try {
-                val count = context.contentResolver.openInputStream(uri)?.use { stream ->
-                    LibraryStore.get(context).importFrom(stream)
-                } ?: 0
-                withContext(Dispatchers.Main) {
-                    isLoading = false
-                    if (count > 0) {
+                val count = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use { stream ->
+                        LibraryStore.get(context).importFrom(stream)
+                    } ?: 0
+                }
+                ensureActive()
+                if (!activity.canAcceptUi()) return@launch
+                when (
+                    ProfileBackupOutcomes.restoreNotice(
+                        cancelled = false,
+                        count = count,
+                        hardError = false,
+                    )
+                ) {
+                    ProfileBackupOutcomes.RestoreNotice.SUCCESS -> {
+                        isLoading = false
+                        restoreJob = null
                         Toast.makeText(
                             context,
                             context.getString(R.string.profile_restore_ok, count),
                             Toast.LENGTH_SHORT,
                         ).show()
                         onLibraryRestored()
-                    } else {
+                    }
+                    ProfileBackupOutcomes.RestoreNotice.EMPTY -> {
+                        isLoading = false
+                        restoreJob = null
                         errorMessage = restoreEmptyFail
                     }
+                    ProfileBackupOutcomes.RestoreNotice.NONE,
+                    ProfileBackupOutcomes.RestoreNotice.INVALID,
+                    -> Unit
                 }
+            } catch (cancel: CancellationException) {
+                // User cancel / leave: never restore fail dialog.
+                if (activity.canAcceptUi()) {
+                    clearBusyFlags()
+                }
+                throw cancel
             } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    isLoading = false
-                    val detail = e.localizedMessage ?: ""
-                    errorMessage = restoreInvalidFormat + if (detail.isNotEmpty()) "\n($detail)" else ""
-                }
+                if (!activity.canAcceptUi()) return@launch
+                if (!ProfileBackupOutcomes.shouldSurfaceAsFailure(e)) throw e
+                Log.e("YueJianProfile", "Unable to restore library backup", e)
+                isLoading = false
+                restoreJob = null
+                errorMessage = ProfileBackupOutcomes.failMessage(restoreInvalidFormat, e)
             }
         }
     }
@@ -315,27 +405,48 @@ fun ProfileScreen(
         }
 
         if (isLoading) {
-            Dialog(onDismissRequest = {}) {
+            // Back / outside tap soft-cancels the Job (no fail Toast / dialog).
+            Dialog(onDismissRequest = { cancelActiveWork() }) {
                 Surface(
                     shape = MaterialTheme.shapes.medium,
                     color = MaterialTheme.colorScheme.surface,
                     tonalElevation = 6.dp,
-                    modifier = Modifier.semantics { contentDescription = loadingCd },
+                    modifier = Modifier.semantics {
+                        contentDescription = loadingCd
+                        liveRegion = LiveRegionMode.Polite
+                    },
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier.padding(24.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(36.dp),
-                            strokeWidth = 3.dp,
-                        )
-                        Spacer(Modifier.width(16.dp))
-                        Text(
-                            text = loadingText,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(36.dp),
+                                strokeWidth = 3.dp,
+                            )
+                            Spacer(Modifier.width(16.dp))
+                            Text(
+                                text = loadingText,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.semantics {
+                                    contentDescription = loadingCd
+                                    liveRegion = LiveRegionMode.Polite
+                                },
+                            )
+                        }
+                        val cancelLabel = if (loadingIsBackup) cancelBackupLabel else cancelRestoreLabel
+                        val cancelCd = if (loadingIsBackup) cancelBackupCd else cancelRestoreCd
+                        OutlinedButton(
+                            onClick = { cancelActiveWork() },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                                .semantics { contentDescription = cancelCd },
+                        ) {
+                            Text(cancelLabel)
+                        }
                     }
                 }
             }
@@ -369,7 +480,15 @@ fun ProfileScreen(
         AlertDialog(
             onDismissRequest = { errorMessage = null },
             title = { Text(stringResource(R.string.profile_error_dialog_title)) },
-            text = { Text(msg) },
+            text = {
+                Text(
+                    text = msg,
+                    modifier = Modifier.semantics {
+                        contentDescription = msg
+                        liveRegion = LiveRegionMode.Polite
+                    },
+                )
+            },
             confirmButton = {
                 TextButton(
                     onClick = { errorMessage = null },

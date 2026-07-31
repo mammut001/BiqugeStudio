@@ -305,6 +305,10 @@
     <string name="profile_restore_in_progress">正在还原书库...</string>
     <string name="profile_backup_in_progress_cd">正在生成备份 Zip 文件，请稍候</string>
     <string name="profile_restore_in_progress_cd">正在解压并恢复书库，请稍候</string>
+    <string name="profile_cancel_backup">取消备份</string>
+    <string name="profile_cancel_backup_cd">取消正在进行的书库备份导出</string>
+    <string name="profile_cancel_restore">取消恢复</string>
+    <string name="profile_cancel_restore_cd">取消正在进行的书库恢复</string>
     <string name="profile_restore_empty_fail">恢复失败：备份文件不包含有效书籍</string>
     <string name="profile_restore_invalid_format">恢复失败：请选择由本应用导出的 .zip 备份包</string>
     <string name="profile_error_dialog_title">操作提示</string>
