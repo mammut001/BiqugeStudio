@@ -142,10 +142,12 @@ private fun SearchScreen(
     var libraryVersion by remember { mutableIntStateOf(0) }
     var searchToken by remember { mutableIntStateOf(0) }
     var listState by remember { mutableStateOf<SearchListState>(SearchListState.LocalBooks(emptyList())) }
-    var pendingPicker by remember { mutableStateOf(openImportOnStart) }
     var localImporting by remember { mutableStateOf(false) }
     var wikiImportingTitle by remember { mutableStateOf<String?>(null) }
     var importErrorMessage by remember { mutableStateOf<String?>(null) }
+    // One-shot flag: LaunchedEffect(pendingPicker) re-ran when flipping true→false and
+    // could open the SAF document picker twice on EXTRA_IMPORT startup.
+    var autoOpenPickerDone by remember { mutableStateOf(false) }
 
     val isBusy = listState is SearchListState.WikiLoading ||
         listState is SearchListState.LocalLoading ||
@@ -266,6 +268,7 @@ private fun SearchScreen(
     fun importUri(uri: Uri) = importUris(listOf(uri))
 
     // VIEW / SEND / SEND_MULTIPLE (and onNewIntent via intentUrisState recomposition).
+    // Key on list contents so an identical recompose does not re-import the same batch.
     LaunchedEffect(initialUris) {
         if (initialUris.isNotEmpty()) {
             importUris(initialUris)
@@ -284,10 +287,12 @@ private fun SearchScreen(
         openDocument.launch(arrayOf("text/plain", "application/epub+zip"))
     }
 
-    LaunchedEffect(pendingPicker) {
-        if (pendingPicker) {
-            pendingPicker = false
-            pickLocalFile()
+    // Open SAF at most once when started with EXTRA_IMPORT (AppIntents.importLocal).
+    // Skip if the intent already carries VIEW/SEND URIs (multi-import path).
+    LaunchedEffect(Unit) {
+        if (openImportOnStart && !autoOpenPickerDone && initialUris.isEmpty()) {
+            autoOpenPickerDone = true
+            openDocument.launch(arrayOf("text/plain", "application/epub+zip"))
         }
     }
 
