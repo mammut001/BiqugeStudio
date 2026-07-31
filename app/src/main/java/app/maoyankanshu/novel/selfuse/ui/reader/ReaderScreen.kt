@@ -10,8 +10,10 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -26,6 +28,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -40,6 +43,7 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.FormatSize
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -72,8 +76,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
@@ -140,6 +146,7 @@ fun ReaderScreen(
     }
 
     val scrollState = rememberScrollState()
+    val controlsScrollState = rememberScrollState()
     var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
     var progress by remember { mutableIntStateOf(book.position.coerceIn(0, 1000)) }
     var currentChapter by remember { mutableIntStateOf(0) }
@@ -409,80 +416,85 @@ fun ReaderScreen(
                             .padding(horizontal = 16.dp, vertical = 2.dp)
                             .semantics { contentDescription = sliderProgressCd },
                     )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 56.dp)
-                            .padding(horizontal = 4.dp, vertical = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                    ControlLabel(
-                        text = stringResource(R.string.reader_prev_chapter),
-                        enabled = currentChapter > 0,
-                        color = palette.onBar,
-                        onClick = {
-                            if (currentChapter > 0) {
-                                scrollToOffset(chapters[currentChapter - 1].start)
-                            }
-                        },
-                    )
-                    ControlLabel(
-                        text = stringResource(R.string.reader_font_smaller),
-                        enabled = fontSizeSp > 14,
-                        color = palette.onBar,
-                        onClick = {
-                            fontSizeSp = (fontSizeSp - 1).coerceAtLeast(14)
-                            preferences.setFontSize(fontSizeSp)
-                        },
-                        contentDescription = fontSmallerCd,
-                    )
-                    ControlLabel(
-                        text = stringResource(R.string.reader_font_larger),
-                        enabled = fontSizeSp < 30,
-                        color = palette.onBar,
-                        onClick = {
-                            fontSizeSp = (fontSizeSp + 1).coerceAtMost(30)
-                            preferences.setFontSize(fontSizeSp)
-                        },
-                        contentDescription = fontLargerCd,
-                    )
-                    ControlLabel(
-                        text = stringResource(R.string.reader_line_height_smaller),
-                        enabled = lineHeightMultiplier > ReaderPreferences.MIN_LINE_HEIGHT,
-                        color = palette.onBar,
-                        onClick = {
-                            lineHeightMultiplier = (lineHeightMultiplier - 0.15f)
-                                .coerceAtLeast(ReaderPreferences.MIN_LINE_HEIGHT)
-                            preferences.setLineHeightMultiplier(lineHeightMultiplier)
-                        },
-                        contentDescription = lineHeightSmallerCd,
-                    )
-                    ControlLabel(
-                        text = stringResource(R.string.reader_line_height_larger),
-                        enabled = lineHeightMultiplier < ReaderPreferences.MAX_LINE_HEIGHT,
-                        color = palette.onBar,
-                        onClick = {
-                            lineHeightMultiplier = (lineHeightMultiplier + 0.15f)
-                                .coerceAtMost(ReaderPreferences.MAX_LINE_HEIGHT)
-                            preferences.setLineHeightMultiplier(lineHeightMultiplier)
-                        },
-                        contentDescription = lineHeightLargerCd,
-                    )
-                    ControlLabel(
-                        text = stringResource(R.string.reader_next_chapter),
-                        enabled = currentChapter < chapters.lastIndex,
-                        color = palette.onBar,
-                        onClick = {
-                            if (currentChapter < chapters.lastIndex) {
-                                scrollToOffset(chapters[currentChapter + 1].start)
-                            }
-                        },
-                    )
+                    // Six controls need ≥48dp targets; SpaceEvenly when they fit,
+                    // horizontalScroll when the bar is narrower than the labels.
+                    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier
+                                .widthIn(min = maxWidth)
+                                .horizontalScroll(controlsScrollState)
+                                .heightIn(min = 56.dp)
+                                .padding(horizontal = 4.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            ControlLabel(
+                                text = stringResource(R.string.reader_prev_chapter),
+                                enabled = currentChapter > 0,
+                                color = palette.onBar,
+                                onClick = {
+                                    if (currentChapter > 0) {
+                                        scrollToOffset(chapters[currentChapter - 1].start)
+                                    }
+                                },
+                            )
+                            ControlLabel(
+                                text = stringResource(R.string.reader_font_smaller),
+                                enabled = fontSizeSp > 14,
+                                color = palette.onBar,
+                                onClick = {
+                                    fontSizeSp = (fontSizeSp - 1).coerceAtLeast(14)
+                                    preferences.setFontSize(fontSizeSp)
+                                },
+                                contentDescription = fontSmallerCd,
+                            )
+                            ControlLabel(
+                                text = stringResource(R.string.reader_font_larger),
+                                enabled = fontSizeSp < 30,
+                                color = palette.onBar,
+                                onClick = {
+                                    fontSizeSp = (fontSizeSp + 1).coerceAtMost(30)
+                                    preferences.setFontSize(fontSizeSp)
+                                },
+                                contentDescription = fontLargerCd,
+                            )
+                            ControlLabel(
+                                text = stringResource(R.string.reader_line_height_smaller),
+                                enabled = lineHeightMultiplier > ReaderPreferences.MIN_LINE_HEIGHT,
+                                color = palette.onBar,
+                                onClick = {
+                                    lineHeightMultiplier = (lineHeightMultiplier - 0.15f)
+                                        .coerceAtLeast(ReaderPreferences.MIN_LINE_HEIGHT)
+                                    preferences.setLineHeightMultiplier(lineHeightMultiplier)
+                                },
+                                contentDescription = lineHeightSmallerCd,
+                            )
+                            ControlLabel(
+                                text = stringResource(R.string.reader_line_height_larger),
+                                enabled = lineHeightMultiplier < ReaderPreferences.MAX_LINE_HEIGHT,
+                                color = palette.onBar,
+                                onClick = {
+                                    lineHeightMultiplier = (lineHeightMultiplier + 0.15f)
+                                        .coerceAtMost(ReaderPreferences.MAX_LINE_HEIGHT)
+                                    preferences.setLineHeightMultiplier(lineHeightMultiplier)
+                                },
+                                contentDescription = lineHeightLargerCd,
+                            )
+                            ControlLabel(
+                                text = stringResource(R.string.reader_next_chapter),
+                                enabled = currentChapter < chapters.lastIndex,
+                                color = palette.onBar,
+                                onClick = {
+                                    if (currentChapter < chapters.lastIndex) {
+                                        scrollToOffset(chapters[currentChapter + 1].start)
+                                    }
+                                },
+                            )
+                        }
+                    }
                 }
             }
         }
-    }
     }
 
     if (showToc) {
@@ -653,6 +665,10 @@ fun ReaderScreen(
     }
 }
 
+/**
+ * Material 3 text control for the reader bottom bar.
+ * ≥48dp touch target, TalkBack [contentDescription] + [Role.Button].
+ */
 @Composable
 private fun ControlLabel(
     text: String,
@@ -661,18 +677,26 @@ private fun ControlLabel(
     onClick: () -> Unit,
     contentDescription: String = text,
 ) {
-    Box(
+    TextButton(
+        onClick = onClick,
+        enabled = enabled,
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+        colors = ButtonDefaults.textButtonColors(
+            contentColor = color,
+            disabledContentColor = color.copy(alpha = 0.35f),
+        ),
         modifier = Modifier
             .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 12.dp)
-            .semantics { this.contentDescription = contentDescription },
-        contentAlignment = Alignment.Center,
+            .semantics {
+                this.contentDescription = contentDescription
+                this.role = Role.Button
+            },
     ) {
         Text(
             text = text,
-            color = if (enabled) color else color.copy(alpha = 0.35f),
             style = MaterialTheme.typography.labelLarge,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
