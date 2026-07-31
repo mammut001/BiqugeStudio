@@ -19,8 +19,17 @@ import java.util.zip.ZipInputStream;
  * Minimal EPUB reader that follows the package spine (XHTML/HTML) instead of ZIP entry order.
  * Decodes chapter bytes via UTF-8/UTF-16 BOM, UTF-16 XML signature, or XML {@code encoding=},
  * then strips tags and HTML entities (including NBSP). Pure Java — minSdk 23 + JVM unit tests.
+ *
+ * <p>{@link ZipInputStream} expansion is capped at {@link #MAX_BYTES} (32 MiB) per entry and
+ * total uncompressed — same limit / {@link IllegalArgumentException} message as
+ * {@code LocalBookImport}.
  */
 public final class EpubReader {
+    /** Matches LocalBookImport 32 MiB cap (per ZIP entry and total uncompressed). */
+    public static final int MAX_BYTES = 32 * 1024 * 1024;
+
+    private static final String TOO_LARGE = "file too large, max 32MB";
+
     private static final Pattern ENTITY_PATTERN =
             Pattern.compile("&(#x[0-9a-fA-F]+|#\\d+|[A-Za-z][A-Za-z0-9]+);");
     private static final Pattern XML_ENCODING =
@@ -37,11 +46,19 @@ public final class EpubReader {
 
     public static String read(InputStream source) throws Exception {
         Map<String, byte[]> files = new LinkedHashMap<>();
+        long totalUncompressed = 0L;
         try (ZipInputStream zip = new ZipInputStream(source)) {
             ZipEntry entry;
             while ((entry = zip.getNextEntry()) != null) {
                 if (entry.isDirectory()) continue;
-                files.put(normalize(entry.getName()), readAll(zip));
+                long declared = entry.getSize();
+                if (declared > MAX_BYTES) {
+                    throw new IllegalArgumentException(TOO_LARGE);
+                }
+                long[] total = new long[] { totalUncompressed };
+                byte[] data = readAllBounded(zip, total);
+                totalUncompressed = total[0];
+                files.put(normalize(entry.getName()), data);
                 zip.closeEntry();
             }
         }
@@ -293,11 +310,27 @@ public final class EpubReader {
         return m;
     }
 
-    private static byte[] readAll(InputStream input) throws Exception {
+    /**
+     * Read a ZIP entry body with a 32 MiB per-entry and running total cap.
+     * {@code totalUncompressed[0]} is updated with bytes read. Package-private for JVM tests.
+     */
+    static byte[] readAllBounded(InputStream input, long[] totalUncompressed) throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         byte[] buffer = new byte[8192];
         int n;
-        while ((n = input.read(buffer)) != -1) out.write(buffer, 0, n);
+        long entryBytes = 0L;
+        while ((n = input.read(buffer)) != -1) {
+            entryBytes += n;
+            if (entryBytes > MAX_BYTES) {
+                throw new IllegalArgumentException(TOO_LARGE);
+            }
+            long newTotal = totalUncompressed[0] + n;
+            if (newTotal > MAX_BYTES) {
+                throw new IllegalArgumentException(TOO_LARGE);
+            }
+            totalUncompressed[0] = newTotal;
+            out.write(buffer, 0, n);
+        }
         return out.toByteArray();
     }
 }

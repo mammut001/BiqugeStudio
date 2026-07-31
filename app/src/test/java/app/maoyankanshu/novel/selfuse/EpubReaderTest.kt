@@ -170,6 +170,90 @@ class EpubReaderTest {
         assertEquals("Hello & \"EPUB\"", text)
     }
 
+    @Test
+    fun maxBytes_matchesLocalBookImport32MiB() {
+        assertEquals(32 * 1024 * 1024, EpubReader.MAX_BYTES)
+    }
+
+    @Test
+    fun readAllBounded_rejectsWhenEntryExceeds32MiB() {
+        val payload = ByteArray(EpubReader.MAX_BYTES + 1) { 1 }
+        val total = longArrayOf(0L)
+        val ex = org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
+            EpubReader.readAllBounded(ByteArrayInputStream(payload), total)
+        }
+        assertTrue(ex.message?.contains("file too large") == true)
+        assertTrue(ex.message?.contains("32MB") == true)
+    }
+
+    @Test
+    fun readAllBounded_rejectsWhenTotalExceeds32MiB() {
+        val chunk = ByteArray(1024) { 2 }
+        val total = longArrayOf(EpubReader.MAX_BYTES - 512L)
+        val ex = org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
+            EpubReader.readAllBounded(ByteArrayInputStream(chunk), total)
+        }
+        assertTrue(ex.message?.contains("file too large") == true)
+    }
+
+    @Test
+    fun readAllBounded_allowsWithinLimit() {
+        val payload = byteArrayOf(1, 2, 3, 4, 5)
+        val total = longArrayOf(0L)
+        val out = EpubReader.readAllBounded(ByteArrayInputStream(payload), total)
+        assertEquals(5, out.size)
+        assertEquals(5L, total[0])
+    }
+
+    @Test
+    fun read_oversizedStoredEntryThrowsIllegalArgumentException() {
+        // STORED entry larger than 32 MiB: fail-fast via ZipEntry.getSize() or stream cap.
+        val oversized = ByteArray(EpubReader.MAX_BYTES + 1024)
+        val baos = ByteArrayOutputStream()
+        ZipOutputStream(baos).use { zip ->
+            zip.putNextEntry(ZipEntry("META-INF/container.xml"))
+            zip.write(
+                """<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>""".toByteArray(StandardCharsets.UTF_8),
+            )
+            zip.closeEntry()
+
+            zip.putNextEntry(ZipEntry("OEBPS/content.opf"))
+            zip.write(
+                """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0">
+  <manifest>
+    <item id="c1" href="chap1.html" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="c1"/>
+  </spine>
+</package>""".toByteArray(StandardCharsets.UTF_8),
+            )
+            zip.closeEntry()
+
+            val entry = ZipEntry("OEBPS/chap1.html")
+            entry.method = ZipEntry.STORED
+            entry.size = oversized.size.toLong()
+            val crc = java.util.zip.CRC32()
+            crc.update(oversized)
+            entry.crc = crc.value
+            zip.putNextEntry(entry)
+            zip.write(oversized)
+            zip.closeEntry()
+        }
+
+        val ex = org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
+            EpubReader.read(ByteArrayInputStream(baos.toByteArray()))
+        }
+        assertTrue(ex.message?.contains("file too large") == true)
+        assertTrue(ex.message?.contains("32MB") == true)
+    }
+
     private fun buildEpub(
         chaptersInZipOrder: List<Pair<String, String>>,
         spineIdRefs: List<String>,
