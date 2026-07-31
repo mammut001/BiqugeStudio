@@ -26,7 +26,9 @@
 | Android 8+ 自适应 | `mipmap-anydpi-v26/ic_launcher.xml`（前景来自 logo） |
 | API 23–25 | `mipmap-*/ic_launcher.png` 位图回退 |
 | Splash | `Theme.BiqugeStudio.Splash` → 前景 `@mipmap/ic_launcher_foreground` |
-| `versionCode` / `versionName` | 见 `app/build.gradle`（上架每次递增 `versionCode`） |
+| `versionCode` / `versionName` | 见 `app/build.gradle`（上架每次递增 `versionCode`；`versionName` 用 semver） |
+| 变更记录 | [`CHANGELOG.md`](./CHANGELOG.md)：发版前把 `[Unreleased]` 收成 `## [x.y.z]`，内容须与本次 git 变更一致 |
+| Git 标签 | 发版提交后打 annotated 标签 `v{versionName}`（例：`v1.0.1`）；**不要**在未打标签时编造发布页 URL |
 
 ---
 
@@ -97,17 +99,31 @@ cd BiqugeStudio
 | `keystore.properties` | **本地**；已 gitignore |
 | `keystore/*.jks` | **本地备份**；丢失则无法更新同包名应用 |
 | Play App Signing | [ ] 建议启用 Google 管理的应用签名 |
-| CI | 勿将 keystore 明文写入流水线日志 |
+| CI | 勿将 keystore 明文写入流水线日志；工作流定义见 `.github/workflows/`（勿凭 README 臆测远端是否全绿） |
+| Dependabot | [ ] 合并前审阅 `.github/dependabot.yml` 打开的 Gradle / Actions 更新 PR；本地跑 unit test + lint + `assembleDebug` |
 
 ---
 
-## 7. 上架前最后一遍
+## 7. Changelog、依赖与标签（发版卫生）
+
+| 项 | 动作 |
+|----|------|
+| `[Unreleased]` → 版本节 | [ ] 将本轮用户可见/安全/构建相关变更写入 [`CHANGELOG.md`](./CHANGELOG.md) 的 `## [versionName]`，并清空或重置 Unreleased |
+| 仅写有证据的内容 | [ ] 条目对应 git / 代码；不写未选许可证、未公开联系邮箱、未托管的发布 URL、未验证的远端 CI 结论 |
+| 依赖更新 | [ ] Dependabot（Gradle + GitHub Actions，weekly）PR 单独审合；重大 AGP/Kotlin/Compose bump 先本地全量构建 |
+| Git 标签 | [ ] `versionCode`/`versionName` 已提交后：`git tag -a v{versionName} -m "{versionName}"`；需要时再 `git push origin v{versionName}` |
+| 范围 | 本清单与依赖配置仅覆盖 **BiqugeStudio** 本仓库；勿改动无关应用工程 |
+
+---
+
+## 8. 上架前最后一遍
 
 1. [ ] 隐私 URL 可公网匿名打开  
 2. [ ] Data safety 与 `PRIVACY.md` 一致  
-3. [ ] `versionCode` 大于商店已上线版本  
+3. [ ] `versionCode` 大于商店已上线版本；`versionName` 与 `CHANGELOG.md` 新节一致  
 4. [ ] `bundleRelease` 成功并上传  
 5. [ ] 内部测试轨装包验证主路径  
 6. [ ] 商店文案无「笔趣阁」旧品牌混用（产品名：**阅笺**）  
+7. [ ] （可选）annotated Git 标签 `v{versionName}` 已创建  
 
 完成以上后提交审核。

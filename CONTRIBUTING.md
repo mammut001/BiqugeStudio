@@ -107,8 +107,10 @@ Release builds need a **local** `keystore.properties` pointing at a keystore out
 ## Documentation
 
 - Update [README.md](./README.md) when user-visible behavior, build steps, or CI commands change.
+- Record user-visible and release-relevant work under **`[Unreleased]`** in [CHANGELOG.md](./CHANGELOG.md); maintainers move that block into a version section when cutting a release (see [RELEASECHECKLIST.md](./RELEASECHECKLIST.md)).
 - Play / privacy process lives in [PRIVACY.md](./PRIVACY.md) and [RELEASECHECKLIST.md](./RELEASECHECKLIST.md); keep them consistent with code.
 - If you change where library/progress/prefs live, update Auto Backup XML (`backup_rules` + `data_extraction_rules`), [PRIVACY.md](./PRIVACY.md) §5, and the README data-safety row in the same change.
+- Dependency bumps: prefer Dependabot PRs from [`.github/dependabot.yml`](./.github/dependabot.yml) (Gradle + GitHub Actions, weekly); do not mix large version upgrades into unrelated feature PRs.
 
 ## Questions
 

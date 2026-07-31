@@ -7,11 +7,13 @@
 | 文档 | 说明 |
 |------|------|
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | Android Studio / Gradle 工作流、代码约定、测试、PR 范围、密钥与本地文件 |
+| [CHANGELOG.md](./CHANGELOG.md) | Keep a Changelog：`[Unreleased]` + 已按 `versionName` 归类的变更摘要 |
 | [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) | 贡献者行为准则（Contributor Covenant 2.1） |
 | [SECURITY.md](./SECURITY.md) | 漏洞**私密**报告（联系方式未发布前勿猜测邮箱） |
 | [PRIVACY.md](./PRIVACY.md) | 隐私政策正文 |
-| [RELEASECHECKLIST.md](./RELEASECHECKLIST.md) | Play 上架检查清单 |
-| [`.github/workflows/android.yml`](./.github/workflows/android.yml) | CI：JDK 17 上 unit test + lint + `assembleDebug` |
+| [RELEASECHECKLIST.md](./RELEASECHECKLIST.md) | Play 上架检查清单；含版本号、changelog、标签与依赖更新 |
+| [`.github/workflows/android.yml`](./.github/workflows/android.yml) | CI 工作流定义：JDK 17 上 unit test + lint + `assembleDebug` |
+| [`.github/dependabot.yml`](./.github/dependabot.yml) | Dependabot：Gradle 与 GitHub Actions **每周**检查更新 |
 
 **许可证：** 尚未选定开源许可证，属**维护者明确决策**。在仓库出现 `LICENSE` 文件之前，请勿假定 MIT / Apache / GPL 等任一协议。
 
@@ -135,18 +137,38 @@ chmod +x gradlew
 
 ### CI（GitHub Actions）
 
-- 工作流：[`.github/workflows/android.yml`](./.github/workflows/android.yml)
+- 工作流定义：[`.github/workflows/android.yml`](./.github/workflows/android.yml)
 - 触发：`push` 与 `pull_request`
 - 环境：Ubuntu、**JDK 17**（Temurin）、Android SDK
 - 任务：`./gradlew :app:testDebugUnitTest :app:lint :app:assembleDebug`
 - 不在 CI 跑 instrumented / 连接设备测试；不执行 release 签名构建
+- 本 README **不**声称远端 Actions 运行结果；以你仓库中实际 workflow 运行记录为准
+
+### 依赖更新（Dependabot）
+
+- 配置：[`.github/dependabot.yml`](./.github/dependabot.yml)
+- 生态：**Gradle**（`/`）与 **GitHub Actions**（`/`），计划 **weekly**
+- 合并前在本地（或按 PR 检查）跑：`./gradlew :app:testDebugUnitTest :app:lint :app:assembleDebug`
+- 依赖 bump 单独成 PR；勿与功能改动混在同一 diff（见 [CONTRIBUTING.md](./CONTRIBUTING.md)）
+
+### 版本、Changelog 与 Git 标签
+
+| 项 | 约定 |
+|----|------|
+| 应用版本 | 仅改 `app/build.gradle` 的 `versionCode`（每次上架递增）与 `versionName`（semver） |
+| 变更记录 | 开发中写入 [`CHANGELOG.md`](./CHANGELOG.md) 的 **`[Unreleased]`**；发版时把该段迁到 `## [x.y.z]` |
+| Git 标签 | 发版后打 **annotated** 标签，与 `versionName` 对齐，例如 `v1.0.1`（`git tag -a v1.0.1 -m "1.0.1"`） |
+| 勿发明 | 未托管前不要写商店/发布页 URL；未选定前不要添加 `LICENSE` 或虚构联系邮箱 |
+
+完整上架勾选见 [`RELEASECHECKLIST.md`](./RELEASECHECKLIST.md)。
 
 ### Play 上架摘要
 
 1. 托管 [`PRIVACY.md`](./PRIVACY.md) 得到 **HTTPS 隐私政策 URL**。  
 2. Play Console 填 Data safety（见上表）与商店文案（名称 **阅笺**、截图、图标 512²）。  
 3. 上传 **AAB**（`bundleRelease`），启用 Play App Signing。  
-4. 完整勾选清单：[`RELEASECHECKLIST.md`](./RELEASECHECKLIST.md)。
+4. 同步 `versionCode` / `versionName`、[`CHANGELOG.md`](./CHANGELOG.md) 与可选 `v*` Git 标签。  
+5. 完整勾选清单：[`RELEASECHECKLIST.md`](./RELEASECHECKLIST.md)。
 
 ### 测试分层
 
