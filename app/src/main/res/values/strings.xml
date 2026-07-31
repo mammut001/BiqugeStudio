@@ -108,7 +108,12 @@
     <string name="search_import_local">导入本地 TXT / EPUB 文件</string>
     <string name="search_import_local_cd">通过系统选择器导入本地 TXT 或 EPUB</string>
     <string name="search_importing_local">正在读取文件…</string>
-    <string name="search_importing_local_cd">正在读取本地文件</string>
+    <string name="search_cancel_local">取消导入</string>
+    <string name="search_cancel_local_cd">取消正在进行的本地文件导入</string>
+    <string name="search_cancel_wiki_search">取消搜索</string>
+    <string name="search_cancel_wiki_search_cd">取消正在进行的维基文库搜索</string>
+    <string name="search_cancel_wiki_import">取消导入</string>
+    <string name="search_cancel_wiki_import_cd">取消正在进行的维基文库导入</string>
     <string name="search_wikisource">搜索维基文库公版文本</string>
     <string name="search_wikisource_cd">在中文维基文库搜索公版文本</string>
     <string name="search_featured">导入推荐公版《三国演义》</string>

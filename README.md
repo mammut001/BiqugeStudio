@@ -45,7 +45,7 @@ Issue 模板：Bug / Feature（`.github/ISSUE_TEMPLATE/`）。PR 模板：`.gith
 - **导入**：本地 **TXT / EPUB**（SAF；扩展名或 `application/epub+zip` MIME）；可选 HTTPS 维基 / 直链 / 网页。EPUB 优先 OPF `dc:title` / `dc:creator`，可选封面落盘。
 - **书架**：继续阅读区 + 进度筛选 / 排序；可选按作者分组（默认扁平，不落库）。
 - **无障碍**：关键控件 `contentDescription` / `heading`，触控目标 ≥ 48dp；`RemoteImport` / `WebImport` 校验、加载中文案与导入失败对 TalkBack 使用 polite `liveRegion`。
-- **HTTPS 导入协程**：`RemoteImportActivity` / `WebImportActivity` 用 `rememberCoroutineScope` 跟踪 `Job` 跑 IO；加载中可 **取消下载/导入** 或返回（`Job.cancel`），**不**把 `CancellationException` 当成导入失败（无失败 Toast / 失败 liveRegion）；Activity 已 `finishing`/`destroyed` 时不再 Toast / `finish`（`ImportUiGate.canAcceptUi`，minSdk 23 可用 `isDestroyed`）。
+- **HTTPS / 搜索导入协程**：`RemoteImportActivity` / `WebImportActivity` / `SearchActivity` 用 `rememberCoroutineScope` 跟踪 `Job` 跑 IO；加载中可 **取消** 或返回（`Job.cancel`），**不**把 `CancellationException` 当成失败（无失败 Toast / 失败 liveRegion）；Activity 已 `finishing`/`destroyed` 时不再 Toast / 写状态（`ImportUiGate.canAcceptUi`，minSdk 23 可用 `isDestroyed`）。搜索页：本地 `content://`·`file://` 导入与 HTTPS 维基搜索/导入共用该约定；批次 Toast 由 `SearchWorkOutcomes` 纯函数判定（JVM 可测）。
 - **启动**：Android 12+ SplashScreen；自适应图标 `@mipmap/ic_launcher`（API 23+ 有 mipmap 回退）。
 
 上架步骤见 [`RELEASECHECKLIST.md`](./RELEASECHECKLIST.md)。

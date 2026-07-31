@@ -1,5 +1,6 @@
 package app.maoyankanshu.novel.selfuse
 
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -56,15 +57,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.maoyankanshu.novel.selfuse.ui.theme.BiqugeTheme
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -76,6 +82,12 @@ import kotlinx.coroutines.withContext
  * single Uri or ArrayList, capped at [ImportIntentUris.MAX_URIS]).
  * [EXTRA_IMPORT] = `"open_import"` — open SAF picker on launch ([AppIntents.importLocal]).
  * [onNewIntent] handles further shares while [singleTop].
+ *
+ * Local shelf filter, SAF/share import, and HTTPS Wikisource work run on
+ * [rememberCoroutineScope] as tracked [Job]s. User cancel, back, or leaving
+ * composition cancel those Jobs; [CancellationException] is rethrown and **not**
+ * shown as search/import failure (no fail Toast / error liveRegion).
+ * Activity already `finishing`/`destroyed` skips Toast / state ([canAcceptUi]).
  */
 class SearchActivity : ComponentActivity() {
 
@@ -136,7 +148,9 @@ private fun SearchScreen(
     onClose: () -> Unit,
 ) {
     val context = LocalContext.current
+    val activity = context as? Activity
     val keyboardController = LocalSoftwareKeyboardController.current
+    // Cancelled when SearchScreen leaves composition (back / finish / process death path).
     val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf("") }
     var libraryVersion by remember { mutableIntStateOf(0) }
@@ -148,6 +162,10 @@ private fun SearchScreen(
     // One-shot flag: LaunchedEffect(pendingPicker) re-ran when flipping true→false and
     // could open the SAF document picker twice on EXTRA_IMPORT startup.
     var autoOpenPickerDone by remember { mutableStateOf(false) }
+    var localImportJob by remember { mutableStateOf<Job?>(null) }
+    var wikiSearchJob by remember { mutableStateOf<Job?>(null) }
+    var wikiImportJob by remember { mutableStateOf<Job?>(null) }
+    var localSearchJob by remember { mutableStateOf<Job?>(null) }
 
     val isBusy = listState is SearchListState.WikiLoading ||
         listState is SearchListState.LocalLoading ||
@@ -166,30 +184,83 @@ private fun SearchScreen(
     val wikiNone = stringResource(R.string.search_wikisource_none)
     val wikiFail = stringResource(R.string.search_wikisource_fail)
     val wikiLoading = stringResource(R.string.search_wikisource_loading)
+    val localLoadingLabel = stringResource(R.string.search_local_loading)
     val localImportingLabel = stringResource(R.string.search_importing_local)
     val searchClearCd = stringResource(R.string.search_clear_cd)
+    val cancelLocalLabel = stringResource(R.string.search_cancel_local)
+    val cancelLocalCd = stringResource(R.string.search_cancel_local_cd)
+    val cancelWikiSearchLabel = stringResource(R.string.search_cancel_wiki_search)
+    val cancelWikiSearchCd = stringResource(R.string.search_cancel_wiki_search_cd)
+    val cancelWikiImportLabel = stringResource(R.string.search_cancel_wiki_import)
+    val cancelWikiImportCd = stringResource(R.string.search_cancel_wiki_import_cd)
+
+    fun clearBusyFlagsKeepingList() {
+        localImporting = false
+        wikiImportingTitle = null
+        localImportJob = null
+        wikiSearchJob = null
+        wikiImportJob = null
+        localSearchJob = null
+        if (listState is SearchListState.WikiLoading || listState is SearchListState.LocalLoading) {
+            // Drop loading sentinel so UI is not stuck busy after soft cancel.
+            listState = SearchListState.LocalBooks(emptyList())
+        }
+    }
 
     fun refreshLocal() {
         if (localImporting || wikiImportingTitle != null || listState is SearchListState.WikiLoading) return
         importErrorMessage = null
+        localSearchJob?.cancel()
         val currentToken = ++searchToken
         val term = query.trim().lowercase()
         listState = SearchListState.LocalLoading
-        scope.launch {
-            val books = withContext(Dispatchers.IO) {
-                LibraryStore.get(context).books().filter { book ->
-                    term.isEmpty() ||
-                        book.title.lowercase().contains(term) ||
-                        book.author.lowercase().contains(term)
+        localSearchJob = scope.launch {
+            try {
+                val books = withContext(Dispatchers.IO) {
+                    LibraryStore.get(context).books().filter { book ->
+                        term.isEmpty() ||
+                            book.title.lowercase().contains(term) ||
+                            book.author.lowercase().contains(term)
+                    }
                 }
-            }
-            if (currentToken == searchToken) {
-                listState = if (books.isEmpty()) {
-                    SearchListState.Message(emptyLocal)
-                } else {
-                    SearchListState.LocalBooks(books)
+                if (!activity.canAcceptUi()) return@launch
+                if (currentToken == searchToken) {
+                    listState = if (books.isEmpty()) {
+                        SearchListState.Message(emptyLocal)
+                    } else {
+                        SearchListState.LocalBooks(books)
+                    }
                 }
+            } catch (cancel: CancellationException) {
+                // Superseded search or leave: never treat as failure UI.
+                if (activity.canAcceptUi() && currentToken == searchToken) {
+                    if (listState is SearchListState.LocalLoading) {
+                        listState = SearchListState.LocalBooks(emptyList())
+                    }
+                    localSearchJob = null
+                }
+                throw cancel
             }
+        }
+    }
+
+    fun cancelActiveWork(leave: Boolean) {
+        val abortedListLoad =
+            listState is SearchListState.WikiLoading || listState is SearchListState.LocalLoading
+        localImportJob?.cancel()
+        wikiSearchJob?.cancel()
+        wikiImportJob?.cancel()
+        localSearchJob?.cancel()
+        clearBusyFlagsKeepingList()
+        if (leave) {
+            onClose()
+            return
+        }
+        // Soft cancel of an in-flight list load: restore local shelf.
+        // Soft cancel of local/wiki *import* keeps the current list (e.g. WikiResults).
+        if (abortedListLoad && activity.canAcceptUi()) {
+            importErrorMessage = null
+            refreshLocal()
         }
     }
 
@@ -197,15 +268,17 @@ private fun SearchScreen(
 
     fun importUris(uris: List<Uri>) {
         if (uris.isEmpty()) return
+        if (localImporting || wikiImportingTitle != null || listState is SearchListState.WikiLoading) return
         localImporting = true
         importErrorMessage = null
-        scope.launch {
+        localImportJob = scope.launch {
             var ok = 0
             var fail = 0
             var lastTitle: String? = null
             var lastErrorOversized = false
             try {
                 for (uri in uris) {
+                    ensureActive()
                     try {
                         val imported = withContext(Dispatchers.IO) {
                             val res = LocalBookImport.fromUri(
@@ -225,37 +298,40 @@ private fun SearchScreen(
                         }
                         ok++
                         lastTitle = imported.title
+                    } catch (cancel: CancellationException) {
+                        throw cancel
                     } catch (e: Exception) {
+                        if (!SearchWorkOutcomes.shouldSurfaceAsFailure(e)) throw e
                         Log.e("SearchActivity", "Failed to import local book", e)
                         fail++
-                        lastErrorOversized = e is IllegalArgumentException &&
-                            (e.message?.contains("too large") == true || e.message?.contains("32MB") == true)
+                        lastErrorOversized = SearchWorkOutcomes.isOversizedImportError(e)
                     }
                 }
+                if (!activity.canAcceptUi()) return@launch
                 if (ok > 0) libraryVersion++
-                when {
-                    ok == 1 && fail == 0 && lastTitle != null -> {
+                when (SearchWorkOutcomes.localBatchNotice(ok, fail, cancelled = false)) {
+                    SearchWorkOutcomes.LocalBatchNotice.SINGLE_OK -> {
                         Toast.makeText(
                             context,
                             context.getString(R.string.search_local_ok, lastTitle),
                             Toast.LENGTH_SHORT,
                         ).show()
                     }
-                    ok > 0 && fail == 0 -> {
+                    SearchWorkOutcomes.LocalBatchNotice.MULTI_OK -> {
                         Toast.makeText(
                             context,
                             context.getString(R.string.search_local_ok_multi, ok),
                             Toast.LENGTH_SHORT,
                         ).show()
                     }
-                    ok > 0 && fail > 0 -> {
+                    SearchWorkOutcomes.LocalBatchNotice.PARTIAL -> {
                         Toast.makeText(
                             context,
                             context.getString(R.string.search_local_ok_multi_partial, ok, fail),
                             Toast.LENGTH_LONG,
                         ).show()
                     }
-                    fail > 0 -> {
+                    SearchWorkOutcomes.LocalBatchNotice.ALL_FAIL -> {
                         val msgRes = if (lastErrorOversized) {
                             R.string.search_local_file_too_large
                         } else {
@@ -263,9 +339,25 @@ private fun SearchScreen(
                         }
                         importErrorMessage = context.getString(msgRes)
                     }
+                    SearchWorkOutcomes.LocalBatchNotice.NONE -> Unit
                 }
+            } catch (cancel: CancellationException) {
+                // User cancel / back / leave: no fail Toast; keep books already added.
+                if (activity.canAcceptUi()) {
+                    if (ok > 0) libraryVersion++
+                    localImporting = false
+                    localImportJob = null
+                }
+                throw cancel
+            } catch (e: Exception) {
+                if (!activity.canAcceptUi()) return@launch
+                Log.e("SearchActivity", "Failed local import batch", e)
+                importErrorMessage = context.getString(R.string.search_local_fail)
             } finally {
-                localImporting = false
+                if (activity.canAcceptUi()) {
+                    localImporting = false
+                    localImportJob = null
+                }
             }
         }
     }
@@ -310,20 +402,34 @@ private fun SearchScreen(
             return
         }
         listState = SearchListState.WikiLoading
-        scope.launch {
+        wikiSearchJob = scope.launch {
             try {
                 val hits = withContext(Dispatchers.IO) {
                     WikisourceClient.search(term, userAgent)
                 }
+                ensureActive()
+                if (!activity.canAcceptUi()) return@launch
                 listState = if (hits.isEmpty()) {
                     SearchListState.Message("$wikiHeader\n$wikiNone")
                 } else {
                     SearchListState.WikiResults(hits)
                 }
+                wikiSearchJob = null
+            } catch (cancel: CancellationException) {
+                // Cancel / back / leave: never wikiFail Toast or error liveRegion.
+                if (activity.canAcceptUi()) {
+                    if (listState is SearchListState.WikiLoading) {
+                        listState = SearchListState.LocalBooks(emptyList())
+                    }
+                    wikiSearchJob = null
+                }
+                throw cancel
             } catch (e: Exception) {
+                if (!activity.canAcceptUi()) return@launch
                 Log.e("SearchActivity", "Failed to search Wikisource", e)
                 importErrorMessage = wikiFail
                 listState = SearchListState.Message(wikiFail)
+                wikiSearchJob = null
             }
         }
     }
@@ -332,24 +438,39 @@ private fun SearchScreen(
         if (isBusy) return
         wikiImportingTitle = pageTitle
         importErrorMessage = null
-        Toast.makeText(
-            context,
-            context.getString(R.string.search_importing_page, pageTitle),
-            Toast.LENGTH_SHORT,
-        ).show()
-        scope.launch {
+        if (activity.canAcceptUi()) {
+            Toast.makeText(
+                context,
+                context.getString(R.string.search_importing_page, pageTitle),
+                Toast.LENGTH_SHORT,
+            ).show()
+        }
+        wikiImportJob = scope.launch {
             try {
                 withContext(Dispatchers.IO) {
                     val page = WikisourceClient.importPage(pageTitle, userAgent, wikiAuthor)
                     LibraryStore.get(context).add(page.title, page.author, page.text)
                 }
+                ensureActive()
+                if (!activity.canAcceptUi()) return@launch
                 libraryVersion++
                 Toast.makeText(context, context.getString(R.string.search_import_ok), Toast.LENGTH_SHORT).show()
+            } catch (cancel: CancellationException) {
+                // Cancel / back / leave: never search_import_fail.
+                if (activity.canAcceptUi()) {
+                    wikiImportingTitle = null
+                    wikiImportJob = null
+                }
+                throw cancel
             } catch (e: Exception) {
+                if (!activity.canAcceptUi()) return@launch
                 Log.e("SearchActivity", "Failed to import Wikisource page", e)
                 importErrorMessage = context.getString(R.string.search_import_fail)
             } finally {
-                wikiImportingTitle = null
+                if (activity.canAcceptUi()) {
+                    wikiImportingTitle = null
+                    wikiImportJob = null
+                }
             }
         }
     }
@@ -358,7 +479,6 @@ private fun SearchScreen(
     val queryCd = stringResource(R.string.search_query_cd)
     val searchCd = stringResource(R.string.search_action_cd)
     val importLocalCd = stringResource(R.string.search_import_local_cd)
-    val importingLocalCd = stringResource(R.string.search_importing_local_cd)
     val wikiCd = stringResource(R.string.search_wikisource_cd)
     val featuredCd = stringResource(R.string.search_featured_cd)
     val epubCd = stringResource(R.string.search_featured_epub_cd)
@@ -374,8 +494,9 @@ private fun SearchScreen(
                 },
                 navigationIcon = {
                     IconButton(
-                        onClick = onClose,
-                        enabled = !isBusy,
+                        onClick = {
+                            if (isBusy) cancelActiveWork(leave = true) else onClose()
+                        },
                         modifier = Modifier
                             .heightIn(min = 48.dp)
                             .semantics { contentDescription = backCd },
@@ -456,19 +577,33 @@ private fun SearchScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 4.dp)
-                        .semantics { contentDescription = importErrorMessage!! },
+                        .semantics {
+                            contentDescription = importErrorMessage!!
+                            liveRegion = LiveRegionMode.Polite
+                        },
                 )
             }
             Spacer(Modifier.height(10.dp))
-            OutlinedButton(
-                onClick = { pickLocalFile() },
-                enabled = !isBusy,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 48.dp)
-                    .semantics { contentDescription = if (localImporting) importingLocalCd else importLocalCd },
-            ) {
-                if (localImporting) {
+            if (localImporting) {
+                Text(
+                    text = localImportingLabel,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .semantics {
+                            contentDescription = localImportingLabel
+                            liveRegion = LiveRegionMode.Polite
+                        },
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = { cancelActiveWork(leave = false) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .semantics { contentDescription = cancelLocalCd },
+                ) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -477,22 +612,30 @@ private fun SearchScreen(
                             modifier = Modifier.size(18.dp),
                             strokeWidth = 2.dp,
                         )
-                        Text(localImportingLabel)
+                        Text(cancelLocalLabel)
                     }
-                } else {
+                }
+            } else {
+                OutlinedButton(
+                    onClick = { pickLocalFile() },
+                    enabled = !isBusy,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .semantics { contentDescription = importLocalCd },
+                ) {
                     Text(stringResource(R.string.search_import_local))
                 }
             }
             Spacer(Modifier.height(8.dp))
-            OutlinedButton(
-                onClick = { searchWiki() },
-                enabled = !isBusy,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 48.dp)
-                    .semantics { contentDescription = wikiCd },
-            ) {
-                if (listState is SearchListState.WikiLoading) {
+            if (listState is SearchListState.WikiLoading) {
+                OutlinedButton(
+                    onClick = { cancelActiveWork(leave = false) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .semantics { contentDescription = cancelWikiSearchCd },
+                ) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -501,22 +644,30 @@ private fun SearchScreen(
                             modifier = Modifier.size(18.dp),
                             strokeWidth = 2.dp,
                         )
-                        Text(stringResource(R.string.search_wikisource))
+                        Text(cancelWikiSearchLabel)
                     }
-                } else {
+                }
+            } else {
+                OutlinedButton(
+                    onClick = { searchWiki() },
+                    enabled = !isBusy,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .semantics { contentDescription = wikiCd },
+                ) {
                     Text(stringResource(R.string.search_wikisource))
                 }
             }
             Spacer(Modifier.height(8.dp))
-            OutlinedButton(
-                onClick = { importWikiPage(featuredTitle) },
-                enabled = !isBusy,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 48.dp)
-                    .semantics { contentDescription = featuredCd },
-            ) {
-                if (wikiImportingTitle == featuredTitle) {
+            if (wikiImportingTitle == featuredTitle) {
+                OutlinedButton(
+                    onClick = { cancelActiveWork(leave = false) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .semantics { contentDescription = cancelWikiImportCd },
+                ) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -525,9 +676,18 @@ private fun SearchScreen(
                             modifier = Modifier.size(18.dp),
                             strokeWidth = 2.dp,
                         )
-                        Text(stringResource(R.string.search_featured))
+                        Text(cancelWikiImportLabel)
                     }
-                } else {
+                }
+            } else {
+                OutlinedButton(
+                    onClick = { importWikiPage(featuredTitle) },
+                    enabled = !isBusy,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .semantics { contentDescription = featuredCd },
+                ) {
                     Text(stringResource(R.string.search_featured))
                 }
             }
@@ -557,14 +717,19 @@ private fun SearchScreen(
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(top = 12.dp),
+                        modifier = Modifier
+                            .padding(top = 12.dp)
+                            .semantics {
+                                contentDescription = localLoadingLabel
+                                liveRegion = LiveRegionMode.Polite
+                            },
                     ) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(20.dp),
                             strokeWidth = 2.dp,
                         )
                         Text(
-                            text = stringResource(R.string.search_local_loading),
+                            text = localLoadingLabel,
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -575,6 +740,10 @@ private fun SearchScreen(
                         text = wikiLoading,
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.semantics {
+                            contentDescription = wikiLoading
+                            liveRegion = LiveRegionMode.Polite
+                        },
                     )
                 }
                 is SearchListState.Message -> {
