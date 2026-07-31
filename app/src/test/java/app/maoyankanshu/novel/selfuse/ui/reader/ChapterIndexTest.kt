@@ -64,6 +64,48 @@ class ChapterIndexTest {
     }
 
     @Test
+    fun findChapters_englishChapterRomanNumerals() {
+        val text = """
+            Preface blurb
+            
+            Chapter IV — The Gate
+            body of four
+            
+            Chapter XII The Road
+            body of twelve
+            
+            chapter ix lower roman
+            body of nine
+        """.trimIndent()
+        val chapters = ChapterIndex.findChapters(text)
+        assertEquals(3, chapters.size)
+        assertTrue(chapters[0].title.contains("Chapter IV", ignoreCase = true))
+        assertTrue(chapters[0].title.contains("The Gate"))
+        assertTrue(chapters[1].title.contains("XII", ignoreCase = true))
+        assertTrue(chapters[2].title.contains("ix", ignoreCase = true))
+        assertTrue(chapters[0].start > 0)
+        assertStrictlyIncreasingStarts(chapters)
+        assertEquals(0, ChapterIndex.chapterAtOffset(chapters, chapters[0].start))
+        assertEquals(1, ChapterIndex.chapterAtOffset(chapters, chapters[1].start + 3))
+        assertEquals(2, ChapterIndex.chapterAtOffset(chapters, chapters[2].start))
+    }
+
+    @Test
+    fun findChapters_rejectsSentenceFalsePositives() {
+        // Not a heading: "chapter" mid-sentence / no numeral; "Prologue is …" sentence.
+        val text = """
+            the chapter begins here
+            and more text about chapters in general.
+            Prologue is mentioned in this paragraph
+            so we keep reading.
+        """.trimIndent()
+        val chapters = ChapterIndex.findChapters(text, fullTextLabel = "全文")
+        assertEquals(1, chapters.size)
+        assertEquals("全文", chapters[0].title)
+        assertEquals(0, chapters[0].start)
+    }
+
+    @Test
     fun findChapters_prologueAndEpilogue() {
         val text = """
             Prologue Dawn
@@ -85,6 +127,21 @@ class ChapterIndexTest {
         assertEquals(0, ChapterIndex.chapterAtOffset(chapters, 0))
         assertEquals(1, ChapterIndex.chapterAtOffset(chapters, chapters[1].start))
         assertEquals(2, ChapterIndex.chapterAtOffset(chapters, chapters[2].start + 1))
+    }
+
+    @Test
+    fun findChapters_prologueAloneAndWithPunctuationTitle() {
+        val text = """
+            Prologue
+            a
+            
+            Epilogue: The End
+            b
+        """.trimIndent()
+        val chapters = ChapterIndex.findChapters(text)
+        assertEquals(2, chapters.size)
+        assertEquals("Prologue", chapters[0].title)
+        assertTrue(chapters[1].title.startsWith("Epilogue", ignoreCase = true))
     }
 
     @Test

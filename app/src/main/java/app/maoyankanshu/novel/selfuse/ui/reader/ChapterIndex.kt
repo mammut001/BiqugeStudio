@@ -14,21 +14,27 @@ data class Chapter(
  *
  * Recognized line-start headings (after optional leading spaces):
  * - Chinese: `第…章/节/回/卷` (1–18 chars between 第 and marker)
- * - English: `Chapter` / `CHAPTER` + number (optional title rest of line)
- * - English: `Prologue` / `Epilogue` (optional title rest of line)
+ * - English: `Chapter` + Arabic (`1`) or Roman (`IV`) numerals, e.g. `Chapter IV — The Gate`
+ * - English: `Prologue` / `Epilogue` as a heading (alone, with `:`/`—` title, or Capitalized title)
  * - Chinese front/back matter: 序章、序言、楔子、前言、尾声、后记
+ *
+ * Not matched (false positives): mid-sentence lines like
+ * `the chapter begins here` or `Prologue is mentioned in this paragraph`.
  */
 object ChapterIndex {
     /**
-     * Multiline, case-insensitive for Latin Chapter/Prologue/Epilogue.
-     * UNICODE_CASE keeps behavior stable for mixed scripts on older Android.
+     * Line-anchored. Latin keywords use local `(?i:…)` so Roman/title capital checks stay exact.
+     * Roman digits: I V X L C D M (case-insensitive).
      */
     private val PATTERN: Pattern = Pattern.compile(
         "(?m)^\\s*(?:" +
             "第.{1,18}[章节回卷].*" +
-            "|Chapter\\s+\\d+.*" +
-            "|Prologue\\b.*" +
-            "|Epilogue\\b.*" +
+            // Chapter 1 / Chapter IV — The Gate (not bare "chapter" in a sentence)
+            "|(?i:Chapter)\\s+(?:\\d+|(?i:[IVXLCDM]+))\\b.*" +
+            // Prologue/Epilogue heading only: EOL, punct title, or Capitalized title word
+            // Rejects "Prologue is mentioned…" (next word is lowercase)
+            "|(?i:Prologue)(?:\\s*$|\\s*[-—:.]\\s*.+|\\s+(?=\\p{Lu}).+)" +
+            "|(?i:Epilogue)(?:\\s*$|\\s*[-—:.]\\s*.+|\\s+(?=\\p{Lu}).+)" +
             "|序章.*" +
             "|序言.*" +
             "|楔子.*" +
@@ -38,7 +44,7 @@ object ChapterIndex {
             "|尾声.*" +
             "|后记.*" +
             ")$",
-        Pattern.CASE_INSENSITIVE or Pattern.UNICODE_CASE,
+        Pattern.UNICODE_CASE,
     )
 
     fun findChapters(text: String, fullTextLabel: String = "全文"): List<Chapter> {
