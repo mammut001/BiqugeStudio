@@ -44,7 +44,8 @@ Issue 模板：Bug / Feature（`.github/ISSUE_TEMPLATE/`）。PR 模板：`.gith
 - **主题**：壳跟随 `ReaderPreferences.nightMode`；阅读页有纸张/夜间/护眼。
 - **导入**：本地 **TXT / EPUB**（SAF；扩展名或 `application/epub+zip` MIME）；可选 HTTPS 维基 / 直链 / 网页。EPUB 优先 OPF `dc:title` / `dc:creator`，可选封面落盘。
 - **书架**：继续阅读区 + 进度筛选 / 排序；可选按作者分组（默认扁平，不落库）。
-- **无障碍**：关键控件 `contentDescription` / `heading`，触控目标 ≥ 48dp。
+- **无障碍**：关键控件 `contentDescription` / `heading`，触控目标 ≥ 48dp；`RemoteImport` / `WebImport` 校验与导入失败文案对 TalkBack 使用 polite `liveRegion`。
+- **HTTPS 导入协程**：`RemoteImportActivity` / `WebImportActivity` 用 `rememberCoroutineScope` 跑 IO；离开界面会取消协程，**不**把 `CancellationException` 当成导入失败；Activity 已 `finishing`/`destroyed` 时不再 Toast / `finish`。
 - **启动**：Android 12+ SplashScreen；自适应图标 `@mipmap/ic_launcher`（API 23+ 有 mipmap 回退）。
 
 上架步骤见 [`RELEASECHECKLIST.md`](./RELEASECHECKLIST.md)。
@@ -199,7 +200,7 @@ chmod +x gradlew
 | minSdk | 23 |
 | versionCode / versionName | **2** / **1.0.1** |
 | JVM target | 17 |
-| 明文 HTTP | **禁止**（`networkSecurityConfig` + Remote/Web 仅 HTTPS）；本地 TXT/EPUB 离线 |
+| 明文 HTTP | **禁止**：Manifest `usesCleartextTraffic=false` + `networkSecurityConfig`（**API 24+** 生效；minSdk **23** 上该属性会被系统忽略，属已知 lint 提示）+ 应用层 `RemoteImport`/`WebImport` 仅 `https://`（含重定向后协议复检）；本地 TXT/EPUB 离线 |
 
 未使用 beta / alpha 依赖。
 

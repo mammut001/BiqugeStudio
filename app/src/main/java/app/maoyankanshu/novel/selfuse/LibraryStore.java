@@ -264,9 +264,8 @@ public final class LibraryStore {
             // 4-field rows only — covers stay as side files (old clients ignore them).
             output.append(book.id).append('|').append(encode(book.title)).append('|').append(encode(book.author)).append('|').append(book.position).append('\n');
         }
-        if (prefs.edit() != null) {
-            prefs.edit().putString(KEY, output.toString()).apply();
-        }
+        // Single edit() → apply() so CommitPrefEdits lint stays clean (API 23+ SharedPreferences).
+        prefs.edit().putString(KEY, output.toString()).apply();
     }
 
     private File bookDir() {

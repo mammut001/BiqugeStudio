@@ -15,10 +15,18 @@ They do **not** assert a Google Play ship date, store listing URL, or remote CI 
 
 - `CHANGELOG.md` (this file) with Keep a Changelog layout.
 - Dependabot weekly updates for Gradle and GitHub Actions (`.github/dependabot.yml`).
+- JVM tests: blank/whitespace/HTTP remote URL rejection; Activity `canAcceptUi` finishing/destroyed matrix.
 
 ### Changed
 
 - README and `RELEASECHECKLIST.md`: changelog, dependency-update, and release-tag guidance.
+- README: document API 23 vs `networkSecurityConfig` (API 24+), HTTPS import coroutine cancel policy, TalkBack `liveRegion` on remote/web errors.
+
+### Fixed
+
+- `RemoteImportActivity` / `WebImportActivity`: rethrow `CancellationException` from `rememberCoroutineScope` work; skip Toast / state / finish when the host Activity cannot accept UI.
+- TalkBack: polite `liveRegion` on remote/web URL validation and import failure messages.
+- `LibraryStore.save`: single `SharedPreferences.edit().apply()` (CommitPrefEdits lint).
 
 ## [1.0.1] — versionCode 2
 

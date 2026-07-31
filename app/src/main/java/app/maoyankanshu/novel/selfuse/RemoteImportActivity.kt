@@ -1,5 +1,6 @@
 package app.maoyankanshu.novel.selfuse
 
+import android.app.Activity
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
@@ -42,20 +43,27 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import app.maoyankanshu.novel.selfuse.ui.reader.ProgressMath
 import app.maoyankanshu.novel.selfuse.ui.theme.BiqugeTheme
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
  * Compose HTTPS direct-link TXT/EPUB import.
  * Intent extras unchanged: [EXTRA_TITLE], [EXTRA_URL].
+ *
+ * Download work runs on [rememberCoroutineScope] (cancelled when this composition leaves).
+ * [CancellationException] is rethrown so leave-during-download is not shown as import failure.
  */
 class RemoteImportActivity : ComponentActivity() {
 
@@ -82,6 +90,13 @@ class RemoteImportActivity : ComponentActivity() {
     }
 }
 
+/** True when the host Activity can still accept UI side-effects (Toast / finish / state). */
+internal fun Activity?.canAcceptUi(): Boolean {
+    if (this == null) return false
+    if (isFinishing) return false
+    return !isDestroyed
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RemoteImportScreen(
@@ -91,6 +106,8 @@ private fun RemoteImportScreen(
     onImported: () -> Unit,
 ) {
     val context = LocalContext.current
+    val activity = context as? Activity
+    // Cancelled when RemoteImportScreen leaves composition (back / finish / process death path).
     val scope = rememberCoroutineScope()
     var title by remember { mutableStateOf(initialTitle) }
     var url by remember { mutableStateOf(initialUrl) }
@@ -130,6 +147,8 @@ private fun RemoteImportScreen(
                         authorTxt = authorTxt,
                     )
                 }
+                ensureActive()
+                if (!activity.canAcceptUi()) return@launch
                 LibraryStore.get(context).add(
                     result.title,
                     result.author,
@@ -142,7 +161,11 @@ private fun RemoteImportScreen(
                     Toast.LENGTH_SHORT,
                 ).show()
                 onImported()
+            } catch (cancel: CancellationException) {
+                // Leave screen mid-download: do not treat as remote_import_fail for TalkBack.
+                throw cancel
             } catch (error: Exception) {
+                if (!activity.canAcceptUi()) return@launch
                 Log.e("YueJianRemoteImport", "Unable to import direct file", error)
                 errorMessage = context.getString(R.string.remote_import_fail)
                 loading = false
@@ -220,7 +243,10 @@ private fun RemoteImportScreen(
                         Text(
                             text = urlError!!,
                             color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.semantics { contentDescription = urlError!! },
+                            modifier = Modifier.semantics {
+                                contentDescription = urlError!!
+                                liveRegion = LiveRegionMode.Polite
+                            },
                         )
                     }
                 } else null,
@@ -236,7 +262,10 @@ private fun RemoteImportScreen(
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .semantics { contentDescription = errorMessage!! },
+                        .semantics {
+                            contentDescription = errorMessage!!
+                            liveRegion = LiveRegionMode.Polite
+                        },
                 )
             }
             Spacer(Modifier.height(8.dp))

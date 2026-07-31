@@ -1,5 +1,6 @@
 package app.maoyankanshu.novel.selfuse
 
+import android.app.Activity
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
@@ -42,20 +43,27 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import app.maoyankanshu.novel.selfuse.ui.reader.ProgressMath
 import app.maoyankanshu.novel.selfuse.ui.theme.BiqugeTheme
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
  * Compose HTTPS single-page HTML import (replaces LinearLayout Java UI).
- * Manifest component remains `.WebImportActivity`. SearchActivity stays Java.
+ * Manifest component remains `.WebImportActivity`.
+ *
+ * Fetch work uses [rememberCoroutineScope] (cancelled when composition leaves).
+ * [CancellationException] is rethrown so leave-during-import is not a false failure for TalkBack.
  */
 class WebImportActivity : ComponentActivity() {
 
@@ -80,6 +88,7 @@ private fun WebImportScreen(
     onImported: () -> Unit,
 ) {
     val context = LocalContext.current
+    val activity = context as? Activity
     val scope = rememberCoroutineScope()
     var title by remember { mutableStateOf("") }
     var url by remember { mutableStateOf("") }
@@ -114,6 +123,8 @@ private fun WebImportScreen(
                         defaultTitle = defaultTitle,
                     )
                 }
+                ensureActive()
+                if (!activity.canAcceptUi()) return@launch
                 val author = "$authorPrefix\n${result.sourceUrl}"
                 val text = result.body + context.getString(R.string.web_source_footer, result.sourceUrl)
                 LibraryStore.get(context).add(result.title, author, text)
@@ -123,7 +134,10 @@ private fun WebImportScreen(
                     Toast.LENGTH_SHORT,
                 ).show()
                 onImported()
+            } catch (cancel: CancellationException) {
+                throw cancel
             } catch (error: Exception) {
+                if (!activity.canAcceptUi()) return@launch
                 Log.e("YueJianWebImport", "Unable to import web page", error)
                 errorMessage = context.getString(R.string.web_import_fail)
                 loading = false
@@ -201,7 +215,10 @@ private fun WebImportScreen(
                         Text(
                             text = urlError!!,
                             color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.semantics { contentDescription = urlError!! },
+                            modifier = Modifier.semantics {
+                                contentDescription = urlError!!
+                                liveRegion = LiveRegionMode.Polite
+                            },
                         )
                     }
                 } else null,
@@ -217,7 +234,10 @@ private fun WebImportScreen(
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .semantics { contentDescription = errorMessage!! },
+                        .semantics {
+                            contentDescription = errorMessage!!
+                            liveRegion = LiveRegionMode.Polite
+                        },
                 )
             }
             Spacer(Modifier.height(8.dp))

@@ -40,6 +40,48 @@ class RemoteAndWebImportHttpsTest {
     }
 
     @Test
+    fun remoteImportDownloader_rejectsBlankAndWhitespaceUrl() {
+        assertThrows(IllegalArgumentException::class.java) {
+            RemoteImportDownloader.download(
+                rawUrl = "",
+                preferredTitle = "",
+                userAgent = "TestAgent",
+                defaultEpubTitle = "EPUB",
+                defaultTxtTitle = "TXT",
+                authorEpub = "Author",
+                authorTxt = "Author",
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            RemoteImportDownloader.download(
+                rawUrl = "   ",
+                preferredTitle = "",
+                userAgent = "TestAgent",
+                defaultEpubTitle = "EPUB",
+                defaultTxtTitle = "TXT",
+                authorEpub = "Author",
+                authorTxt = "Author",
+            )
+        }
+    }
+
+    @Test
+    fun remoteImportDownloader_rejectsHttpDespiteLeadingSpace() {
+        // UI trims before download; downloader still rejects if caller forgets.
+        assertThrows(IllegalArgumentException::class.java) {
+            RemoteImportDownloader.download(
+                rawUrl = "  http://example.com/book.epub  ",
+                preferredTitle = "",
+                userAgent = "TestAgent",
+                defaultEpubTitle = "EPUB",
+                defaultTxtTitle = "TXT",
+                authorEpub = "Author",
+                authorTxt = "Author",
+            )
+        }
+    }
+
+    @Test
     fun webImportFetcher_rejectsHttpUrl() {
         assertThrows(IllegalArgumentException::class.java) {
             WebImportFetcher.fetch(
