@@ -99,6 +99,7 @@ Issue 模板：Bug / Feature（`.github/ISSUE_TEMPLATE/`）。PR 模板：`.gith
 | 是否出售数据 | **否**。 |
 | 是否用于广告 | **否**。 |
 | 权限 | `INTERNET`（可选在线导入）；无精准位置、通讯录、相机强制权限。 |
+| 系统自动备份 | `allowBackup=true`；include-only 规则见 `res/xml/backup_rules.xml`（legacy）与 `data_extraction_rules.xml`（API 31+）。**纳入**：书库文本/封面、进度、书签、阅读偏好与历史。**其余**（缓存、`no_backup`、外部目录等）默认不备份。 |
 
 完整叙述见 [`PRIVACY.md`](./PRIVACY.md)。若功能变更（例如接入统计 SDK），须同步更新政策与本表。
 

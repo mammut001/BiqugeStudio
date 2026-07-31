@@ -2,7 +2,7 @@
 
 **产品名称：** 阅笺  
 **应用包名：** `app.maoyankanshu.novel.selfuse`  
-**最后更新：** 2026-07-27  
+**最后更新：** 2026-07-31  
 
 本应用是本地优先的离线阅读工具。以下说明我们如何处理数据，供用户阅读与 Google Play「数据安全」声明对照。
 
@@ -45,9 +45,14 @@
 
 ## 5. 安全与备份
 
-- 书库文件位于应用私有目录。  
-- Android 备份：`android:allowBackup="true"`，可能随系统备份策略备份应用数据（视设备与用户设置）。  
-- 应用内「备份本地书库」由你选择保存 ZIP 的位置。
+- 书库正文与封面位于应用私有目录：`files/books/`、`files/covers/`。  
+- 元数据与阅读状态保存在本机 SharedPreferences：`local_library`（含进度）、`bookmarks`、`reader_preferences`、`reading_history`、`reading_stats`。  
+- **Android 自动备份**（`android:allowBackup="true"`，视设备与用户系统设置）：
+  - API 31+：`android:dataExtractionRules` → `@xml/data_extraction_rules`（云备份 + 设备迁移同一策略）。  
+  - 更低 API：`android:fullBackupContent` → `@xml/backup_rules`。  
+  - **会纳入备份（用户数据）**：仅列出的 SharedPreferences，以及 `books/`、`covers/` 下的文本与封面（include-only 策略）。  
+  - **不纳入备份**：未列入规则的路径均不备份，包括缓存、`no_backup`、数据库、外部应用目录等瞬时数据；签名密钥与 `local.properties` 等仅存在于开发机，不在已安装应用数据中。  
+- 应用内「备份本地书库」由你选择保存 ZIP 的位置（与系统自动备份相互独立）。
 
 ## 6. 儿童
 

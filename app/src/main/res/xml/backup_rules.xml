@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Legacy Auto Backup rules (API 23–30). API 31+ uses data_extraction_rules.xml.
+
+  Include-only policy: only listed SharedPreferences and library files are
+  backed up. Caches, no_backup, databases, external storage, and other
+  transient paths are omitted by not being included (signing / machine-local
+  files never live in installed app data).
+-->
+<full-backup-content>
+    <!-- SharedPreferences: library + progress, bookmarks, reader UI, history, stats -->
+    <include domain="sharedpref" path="local_library.xml" />
+    <include domain="sharedpref" path="bookmarks.xml" />
+    <include domain="sharedpref" path="reader_preferences.xml" />
+    <include domain="sharedpref" path="reading_history.xml" />
+    <include domain="sharedpref" path="reading_stats.xml" />
+
+    <!-- getFilesDir(): book bodies and cover blobs -->
+    <include domain="file" path="books" />
+    <include domain="file" path="covers" />
+</full-backup-content>

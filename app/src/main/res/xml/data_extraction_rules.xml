@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cloud backup + device-to-device transfer (API 31+).
+  Same include-only policy as backup_rules.xml (legacy fullBackupContent).
+
+  Caches, no_backup, databases, external storage, and other transient paths
+  are omitted by not being included.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <include domain="sharedpref" path="local_library.xml" />
+        <include domain="sharedpref" path="bookmarks.xml" />
+        <include domain="sharedpref" path="reader_preferences.xml" />
+        <include domain="sharedpref" path="reading_history.xml" />
+        <include domain="sharedpref" path="reading_stats.xml" />
+
+        <include domain="file" path="books" />
+        <include domain="file" path="covers" />
+    </cloud-backup>
+
+    <device-transfer>
+        <include domain="sharedpref" path="local_library.xml" />
+        <include domain="sharedpref" path="bookmarks.xml" />
+        <include domain="sharedpref" path="reader_preferences.xml" />
+        <include domain="sharedpref" path="reading_history.xml" />
+        <include domain="sharedpref" path="reading_stats.xml" />
+
+        <include domain="file" path="books" />
+        <include domain="file" path="covers" />
+    </device-transfer>
+</data-extraction-rules>

@@ -61,6 +61,9 @@ Instrumented / Compose UI tests need a device or emulator and are **not** requir
   | `ReaderActivity.EXTRA_ID` / `LegacyReaderActivity.EXTRA_ID` | Always `"book_id"` |
   | Library / SharedPreferences keys | No renames without a migration plan |
   | Display name | Change only `app_name` in `strings.xml` |
+  | Auto Backup policy | Include-only lists in `res/xml/backup_rules.xml` + `data_extraction_rules.xml` must stay aligned with real storage paths; do not add orphan `<exclude>` paths (lint `FullBackupContent`). Update both XML files and `AndroidManifest` attributes together |
+
+- **On-device storage map** (for backup and privacy docs): SharedPreferences `local_library`, `bookmarks`, `reader_preferences`, `reading_history`, `reading_stats`; files under `getFilesDir()/books` and `covers`.
 
 - Network imports stay **HTTPS-only** (no cleartext HTTP). Local TXT/EPUB remain offline.
 - Prefer small, focused diffs. Avoid drive-by refactors, dependency upgrades, or formatting-only churn in feature PRs.
@@ -105,6 +108,7 @@ Release builds need a **local** `keystore.properties` pointing at a keystore out
 
 - Update [README.md](./README.md) when user-visible behavior, build steps, or CI commands change.
 - Play / privacy process lives in [PRIVACY.md](./PRIVACY.md) and [RELEASECHECKLIST.md](./RELEASECHECKLIST.md); keep them consistent with code.
+- If you change where library/progress/prefs live, update Auto Backup XML (`backup_rules` + `data_extraction_rules`), [PRIVACY.md](./PRIVACY.md) §5, and the README data-safety row in the same change.
 
 ## Questions
 
