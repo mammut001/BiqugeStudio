@@ -8,6 +8,7 @@
 |------|------|
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | Android Studio / Gradle 工作流、代码约定、测试、PR 范围、密钥与本地文件 |
 | [CHANGELOG.md](./CHANGELOG.md) | Keep a Changelog：`[Unreleased]` + 已按 `versionName` 归类的变更摘要 |
+| [ROADMAP.md](./ROADMAP.md) | 已知方向与缺口（许可证 / 隐私 URL / TTS→Compose / 下载队列 / CI 诚实声明等）；**非**发版日程 |
 | [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) | 贡献者行为准则（Contributor Covenant 2.1） |
 | [SECURITY.md](./SECURITY.md) | 漏洞**私密**报告（联系方式未发布前勿猜测邮箱） |
 | [PRIVACY.md](./PRIVACY.md) | 隐私政策正文 |
@@ -253,9 +254,12 @@ app/src/main/java/app/maoyankanshu/novel/selfuse/
 
 ## 待继续迁移
 
-1. 将 **TTS / 语速 / 自动滚动** 安全迁入 Compose 后，再评估是否弱化（非删除）`LegacyReaderActivity`。（`BookDetail` / `Search` / `RemoteImport` / `WebImport` **已完成** Compose，无需再列。）
+**权威列表：** [`ROADMAP.md`](./ROADMAP.md)（含仓库成熟度：许可证、隐私 HTTPS URL、安全联系渠道、CI/Dependabot 声明；以及产品向后续项）。摘要如下：
+
+1. 将 **TTS / 语速 / 自动滚动** 安全迁入 Compose 后，再评估是否弱化（非删除）`LegacyReaderActivity`。（`BookDetail` / `Search` / `RemoteImport` / `WebImport` / `Profile` 备份恢复 / 详情 TXT 导出 **已完成** Compose 与 Job 取消约定，无需再列。）
 2. 更多文本编码检测；翻页动画。
 3. **下载队列**与仅接入你有权使用的内容服务。
 4. 若要恢复评论、书单、登录等功能，需要独立的新服务端。
+5. **上架/OSS 成熟度（非代码必做）：** 选定 `LICENSE`（维护者决策）；托管 `PRIVACY.md` 得到公开 HTTPS URL；在 `SECURITY.md` 发布私密联系渠道前勿编造邮箱；以 GitHub Actions **实际运行记录**为准，勿在文档中声称远端 CI 全绿。
 
-（已落地、勿再列入待办：EPUB OPF 书名/作者、封面抽取与备份、MIME-only EPUB 识别、书架可选作者分组。）
+（已落地、勿再列入待办：EPUB OPF 书名/作者、封面抽取与备份、MIME-only EPUB 识别、书架可选作者分组；Remote/Web/Search/Profile/BookDetail 的 `Job` 取消与 `canAcceptUi`。）

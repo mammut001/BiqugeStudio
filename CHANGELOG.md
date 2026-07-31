@@ -14,6 +14,7 @@ They do **not** assert a Google Play ship date, store listing URL, or remote CI 
 ### Added
 
 - `CHANGELOG.md` (this file) with Keep a Changelog layout.
+- `ROADMAP.md`: known direction and gaps (license decision, privacy HTTPS URL, security contact placeholder, TTS→Compose / download queue, CI honesty — not a ship schedule); linked from README and `RELEASECHECKLIST.md`.
 - Dependabot weekly updates for Gradle and GitHub Actions (`.github/dependabot.yml`).
 - JVM tests: blank/whitespace/HTTP remote URL rejection; pure `canAcceptUi` finishing/destroyed matrix (`ImportUiGate`).
 - Remote/Web import: in-flight **取消下载 / 取消导入** (`Job.cancel`) with strings + TalkBack content descriptions; loading status polite `liveRegion`.
@@ -27,7 +28,8 @@ They do **not** assert a Google Play ship date, store listing URL, or remote CI 
 
 ### Changed
 
-- README and `RELEASECHECKLIST.md`: changelog, dependency-update, and release-tag guidance.
+- README and `RELEASECHECKLIST.md`: changelog, dependency-update, and release-tag guidance; pointer to `ROADMAP.md` for maturity and migration gaps.
+
 - README: document API 23 vs `networkSecurityConfig` (API 24+), HTTPS import `Job` cancel (button + back), TalkBack `liveRegion` on remote/web loading and errors.
 - `canAcceptUi` extracted to `ImportUiGate.kt` for shared use and JVM tests.
 - README: Compose reader leave-save uses process-lifetime IO scope (not per-`onDispose` `CoroutineScope`) and `rememberUpdatedState` for latest 0…1000 progress.

@@ -88,7 +88,7 @@ cd BiqugeStudio
 | 备份 | 本地 ZIP（含可选封面文件），用户自选路径 |
 | 权限 | 仅 `INTERNET`（可选在线导入） |
 | 测试 | `./gradlew :app:testDebugUnitTest` 通过；有设备时 `connectedDebugAndroidTest` |
-| 上架前已知缺口 | TTS 仍经 `LegacyReaderActivity`；**无**下载队列（见 README「待继续迁移」） |
+| 上架前已知缺口 | TTS 仍经 `LegacyReaderActivity`；**无**下载队列；许可证未选、隐私 HTTPS URL 未托管等见 [`ROADMAP.md`](./ROADMAP.md) 与 README「待继续迁移」 |
 
 ---
 
@@ -99,7 +99,7 @@ cd BiqugeStudio
 | `keystore.properties` | **本地**；已 gitignore |
 | `keystore/*.jks` | **本地备份**；丢失则无法更新同包名应用 |
 | Play App Signing | [ ] 建议启用 Google 管理的应用签名 |
-| CI | 勿将 keystore 明文写入流水线日志；工作流定义见 `.github/workflows/`（勿凭 README 臆测远端是否全绿） |
+| CI | 勿将 keystore 明文写入流水线日志；工作流定义见 `.github/workflows/`（**以 Actions 运行记录为准**，勿凭 README/徽章臆测远端是否全绿；路线图说明见 [`ROADMAP.md`](./ROADMAP.md)） |
 | Dependabot | [ ] 合并前审阅 `.github/dependabot.yml` 打开的 Gradle / Actions 更新 PR；本地跑 unit test + lint + `assembleDebug` |
 
 ---
