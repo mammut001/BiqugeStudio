@@ -37,6 +37,23 @@ public final class AppIntents {
         return intent;
     }
 
+    /**
+     * ACTION_SEND_MULTIPLE with EXTRA_STREAM ArrayList&lt;Uri&gt; (capped at
+     * {@link ImportIntentUris#MAX_URIS} when handled).
+     */
+    public static Intent sendBookStreams(
+            Context context,
+            java.util.ArrayList<android.net.Uri> streamUris,
+            String mimeType
+    ) {
+        Intent intent = new Intent(context, SearchActivity.class)
+                .setAction(Intent.ACTION_SEND_MULTIPLE)
+                .setType(mimeType != null ? mimeType : "*/*")
+                .putParcelableArrayListExtra(Intent.EXTRA_STREAM, streamUris)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        return intent;
+    }
+
     public static Intent bookDetail(Context context, String bookId) {
         return new Intent(context, BookDetailActivity.class).putExtra(BookDetailActivity.EXTRA_ID, bookId);
     }

@@ -8,8 +8,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * JVM unit tests for TXT/EPUB import Intent resolution (VIEW / SEND / schemes).
- * Uses string helpers only — no Uri.parse (unmocked on pure JVM android.jar).
+ * JVM unit tests for TXT/EPUB import Intent resolution (VIEW / SEND / SEND_MULTIPLE).
+ * String helpers only — no Uri.parse (unmocked on pure JVM android.jar).
  */
 class ImportIntentUrisTest {
 
@@ -17,6 +17,11 @@ class ImportIntentUrisTest {
     fun extraImport_matchesSearchActivity() {
         assertEquals("open_import", ImportIntentUris.EXTRA_IMPORT)
         assertEquals(ImportIntentUris.EXTRA_IMPORT, SearchActivity.EXTRA_IMPORT)
+    }
+
+    @Test
+    fun maxUris_isTwenty() {
+        assertEquals(20, ImportIntentUris.MAX_URIS)
     }
 
     @Test
@@ -109,16 +114,81 @@ class ImportIntentUrisTest {
     }
 
     @Test
+    fun resolveUriStrings_sendMultiple_arrayListOfContentUris() {
+        val streams = listOf(
+            "content://a/1.txt",
+            "content://b/2.epub",
+            "file:///sdcard/3.txt",
+            "https://skip.me/x.txt",
+            "content://a/1.txt", // duplicate
+        )
+        val out = ImportIntentUris.resolveUriStrings(
+            action = Intent.ACTION_SEND_MULTIPLE,
+            dataUri = null,
+            streamUris = streams,
+        )
+        assertEquals(
+            listOf(
+                "content://a/1.txt",
+                "content://b/2.epub",
+                "file:///sdcard/3.txt",
+            ),
+            out,
+        )
+    }
+
+    @Test
+    fun resolveUriStrings_sendMultiple_fallsBackToClipData() {
+        val out = ImportIntentUris.resolveUriStrings(
+            action = Intent.ACTION_SEND_MULTIPLE,
+            dataUri = null,
+            streamUris = emptyList(),
+            clipUris = listOf(
+                "content://clip/a.txt",
+                "file:///tmp/b.epub",
+                "http://nope",
+            ),
+        )
+        assertEquals(
+            listOf("content://clip/a.txt", "file:///tmp/b.epub"),
+            out,
+        )
+    }
+
+    @Test
+    fun resolveUriStrings_capsAtMaxUris20() {
+        val many = (1..30).map { "content://docs/book$it.txt" }
+        val out = ImportIntentUris.resolveUriStrings(
+            action = Intent.ACTION_SEND_MULTIPLE,
+            dataUri = null,
+            streamUris = many,
+            maxUris = ImportIntentUris.MAX_URIS,
+        )
+        assertEquals(20, out.size)
+        assertEquals("content://docs/book1.txt", out.first())
+        assertEquals("content://docs/book20.txt", out.last())
+    }
+
+    @Test
+    fun filterSupportedUriStrings_emptyAndHttpDropped() {
+        assertTrue(
+            ImportIntentUris.filterSupportedUriStrings(
+                listOf(null, "", "  ", "https://x", "ftp://y"),
+            ).isEmpty(),
+        )
+    }
+
+    @Test
     fun wantsOpenImportPicker_fromExtra() {
         assertTrue(ImportIntentUris.wantsOpenImportPicker(true))
         assertFalse(ImportIntentUris.wantsOpenImportPicker(false))
     }
 
     @Test
-    fun actionConstants_viewAndSend() {
-        // Document Manifest / SearchActivity contract for tests without building Intents.
+    fun actionConstants_viewSendAndSendMultiple() {
         assertEquals("android.intent.action.VIEW", Intent.ACTION_VIEW)
         assertEquals("android.intent.action.SEND", Intent.ACTION_SEND)
+        assertEquals("android.intent.action.SEND_MULTIPLE", Intent.ACTION_SEND_MULTIPLE)
         assertEquals("android.intent.extra.STREAM", Intent.EXTRA_STREAM)
     }
 

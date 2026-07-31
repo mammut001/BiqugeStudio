@@ -71,27 +71,27 @@ import kotlinx.coroutines.withContext
 /**
  * Compose search / local import / Wikisource.
  *
- * Manifest: [Intent.ACTION_VIEW] (`content://` / `file://` TXT·EPUB) and
- * [Intent.ACTION_SEND] ([Intent.EXTRA_STREAM] content URI).
+ * Manifest: [Intent.ACTION_VIEW] (`content://` / `file://` TXT·EPUB),
+ * [Intent.ACTION_SEND] and [Intent.ACTION_SEND_MULTIPLE] ([Intent.EXTRA_STREAM]
+ * single Uri or ArrayList, capped at [ImportIntentUris.MAX_URIS]).
  * [EXTRA_IMPORT] = `"open_import"` — open SAF picker on launch ([AppIntents.importLocal]).
+ * [onNewIntent] handles further shares while [singleTop].
  */
 class SearchActivity : ComponentActivity() {
 
-    private var intentUriState = mutableStateOf<Uri?>(null)
+    private var intentUrisState = mutableStateOf<List<Uri>>(emptyList())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         val openImport = intent?.getBooleanExtra(EXTRA_IMPORT, false) ?: false
-        val uri = extractUriFromIntent(intent)
-        ImportIntentUris.takeReadPermissionIfPossible(this, intent, uri)
-        intentUriState.value = uri
+        applyImportIntent(intent)
 
         setContent {
             BiqugeTheme(darkTheme = ReaderPreferences.get(this).nightMode()) {
                 SearchScreen(
                     openImportOnStart = openImport,
-                    initialUri = intentUriState.value,
+                    initialUris = intentUrisState.value,
                     onClose = { finish() },
                 )
             }
@@ -101,9 +101,13 @@ class SearchActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        val uri = extractUriFromIntent(intent)
-        ImportIntentUris.takeReadPermissionIfPossible(this, intent, uri)
-        intentUriState.value = uri
+        applyImportIntent(intent)
+    }
+
+    private fun applyImportIntent(intent: Intent?) {
+        val uris = extractUrisFromIntent(intent)
+        ImportIntentUris.takeReadPermissionsIfPossible(this, intent, uris)
+        intentUrisState.value = uris
     }
 
     companion object {
@@ -111,6 +115,8 @@ class SearchActivity : ComponentActivity() {
         const val EXTRA_IMPORT: String = ImportIntentUris.EXTRA_IMPORT
 
         fun extractUriFromIntent(intent: Intent?): Uri? = ImportIntentUris.extractUri(intent)
+
+        fun extractUrisFromIntent(intent: Intent?): List<Uri> = ImportIntentUris.extractUris(intent)
     }
 }
 
@@ -126,7 +132,7 @@ private sealed interface SearchListState {
 @Composable
 private fun SearchScreen(
     openImportOnStart: Boolean,
-    initialUri: Uri?,
+    initialUris: List<Uri>,
     onClose: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -137,7 +143,6 @@ private fun SearchScreen(
     var searchToken by remember { mutableIntStateOf(0) }
     var listState by remember { mutableStateOf<SearchListState>(SearchListState.LocalBooks(emptyList())) }
     var pendingPicker by remember { mutableStateOf(openImportOnStart) }
-    var pendingUri by remember(initialUri) { mutableStateOf(initialUri) }
     var localImporting by remember { mutableStateOf(false) }
     var wikiImportingTitle by remember { mutableStateOf<String?>(null) }
     var importErrorMessage by remember { mutableStateOf<String?>(null) }
@@ -188,44 +193,82 @@ private fun SearchScreen(
 
     LaunchedEffect(libraryVersion) { refreshLocal() }
 
-    fun importUri(uri: Uri) {
+    fun importUris(uris: List<Uri>) {
+        if (uris.isEmpty()) return
         localImporting = true
         importErrorMessage = null
         scope.launch {
+            var ok = 0
+            var fail = 0
+            var lastTitle: String? = null
+            var lastErrorOversized = false
             try {
-                val imported = withContext(Dispatchers.IO) {
-                    val res = LocalBookImport.fromUri(
-                        context = context,
-                        uri = uri,
-                        defaultName = localDefault,
-                        authorEpub = authorEpub,
-                        authorTxt = authorTxt,
-                    )
-                    LibraryStore.get(context).add(res.title, res.author, res.text)
-                    res
+                for (uri in uris) {
+                    try {
+                        val imported = withContext(Dispatchers.IO) {
+                            val res = LocalBookImport.fromUri(
+                                context = context,
+                                uri = uri,
+                                defaultName = localDefault,
+                                authorEpub = authorEpub,
+                                authorTxt = authorTxt,
+                            )
+                            LibraryStore.get(context).add(res.title, res.author, res.text)
+                            res
+                        }
+                        ok++
+                        lastTitle = imported.title
+                    } catch (e: Exception) {
+                        Log.e("SearchActivity", "Failed to import local book", e)
+                        fail++
+                        lastErrorOversized = e is IllegalArgumentException &&
+                            (e.message?.contains("too large") == true || e.message?.contains("32MB") == true)
+                    }
                 }
-                libraryVersion++
-                Toast.makeText(
-                    context,
-                    context.getString(R.string.search_local_ok, imported.title),
-                    Toast.LENGTH_SHORT,
-                ).show()
-            } catch (e: Exception) {
-                Log.e("SearchActivity", "Failed to import local book", e)
-                val isOversized = e is IllegalArgumentException && (e.message?.contains("too large") == true || e.message?.contains("32MB") == true)
-                val msgRes = if (isOversized) R.string.search_local_file_too_large else R.string.search_local_fail
-                importErrorMessage = context.getString(msgRes)
+                if (ok > 0) libraryVersion++
+                when {
+                    ok == 1 && fail == 0 && lastTitle != null -> {
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.search_local_ok, lastTitle),
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                    ok > 0 && fail == 0 -> {
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.search_local_ok_multi, ok),
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                    ok > 0 && fail > 0 -> {
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.search_local_ok_multi_partial, ok, fail),
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                    fail > 0 -> {
+                        val msgRes = if (lastErrorOversized) {
+                            R.string.search_local_file_too_large
+                        } else {
+                            R.string.search_local_fail
+                        }
+                        importErrorMessage = context.getString(msgRes)
+                    }
+                }
             } finally {
                 localImporting = false
             }
         }
     }
 
-    LaunchedEffect(pendingUri) {
-        val uri = pendingUri
-        if (uri != null) {
-            pendingUri = null
-            importUri(uri)
+    fun importUri(uri: Uri) = importUris(listOf(uri))
+
+    // VIEW / SEND / SEND_MULTIPLE (and onNewIntent via intentUrisState recomposition).
+    LaunchedEffect(initialUris) {
+        if (initialUris.isNotEmpty()) {
+            importUris(initialUris)
         }
     }
 
