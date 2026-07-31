@@ -2,6 +2,21 @@
 
 这是一个可由 Android Studio 直接打开、独立维护的本地阅读器工程。反编译产物只作为功能迁移参考，不会被直接当作可维护源码使用。
 
+## 社区与仓库文档
+
+| 文档 | 说明 |
+|------|------|
+| [CONTRIBUTING.md](./CONTRIBUTING.md) | Android Studio / Gradle 工作流、代码约定、测试、PR 范围、密钥与本地文件 |
+| [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) | 贡献者行为准则（Contributor Covenant 2.1） |
+| [SECURITY.md](./SECURITY.md) | 漏洞**私密**报告（联系方式未发布前勿猜测邮箱） |
+| [PRIVACY.md](./PRIVACY.md) | 隐私政策正文 |
+| [RELEASECHECKLIST.md](./RELEASECHECKLIST.md) | Play 上架检查清单 |
+| [`.github/workflows/android.yml`](./.github/workflows/android.yml) | CI：JDK 17 上 unit test + lint + `assembleDebug` |
+
+**许可证：** 尚未选定开源许可证，属**维护者明确决策**。在仓库出现 `LICENSE` 文件之前，请勿假定 MIT / Apache / GPL 等任一协议。
+
+Issue 模板：Bug / Feature（`.github/ISSUE_TEMPLATE/`）。PR 模板：`.github/pull_request_template.md`。
+
 ## 显示名称与包名
 
 | 项 | 值 |
@@ -89,17 +104,25 @@
 
 ## 打开与构建
 
-1. 在 Android Studio 选择 **Open**，打开本文件夹。
-2. 首次同步时，选择本机 Android SDK；工程使用 **compileSdk / targetSdk 36**（API 36 家族，本机可为 `platforms;android-36` 或 `android-36.1`）、**JDK 17+**（推荐 Android Studio 自带 JBR）。
+1. 在 Android Studio 选择 **Open**，打开本文件夹（`BiqugeStudio` 仓库根）。
+2. 首次同步时，选择本机 Android SDK；工程使用 **compileSdk / targetSdk 36**（API 36 家族，本机可为 `platforms;android-36` 或 `android-36.1`）、**JDK 17**（推荐 Android Studio 自带 JBR）。
 3. 选择模拟器或已连接手机，点击 Run。
 
-命令行构建与测试（需设置 `JAVA_HOME` 为 JDK 17+）：
+更完整的约定、PR 范围与密钥规则见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+
+### 本地命令行（与 CI 对齐）
+
+需 `JAVA_HOME` 指向 **JDK 17**，并始终使用仓库内 **Gradle Wrapper**：
 
 ```bash
 export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"  # macOS 示例
+chmod +x gradlew
 
-# 日常开发
-./gradlew :app:clean :app:testDebugUnitTest :app:assembleDebug
+# 与 GitHub Actions 相同的核心检查
+./gradlew :app:testDebugUnitTest :app:lint :app:assembleDebug
+
+# 日常可加 clean
+./gradlew :app:clean :app:testDebugUnitTest :app:lint :app:assembleDebug
 
 # 可选：需已连接设备/模拟器（API 35/36 需 Espresso 3.7+，工程已 force）
 # ./gradlew :app:connectedDebugAndroidTest
@@ -108,6 +131,14 @@ export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"  
 ./gradlew :app:assembleRelease          # app/build/outputs/apk/release/app-release.apk
 ./gradlew :app:bundleRelease            # app/build/outputs/bundle/release/app-release.aab  ← Play 推荐
 ```
+
+### CI（GitHub Actions）
+
+- 工作流：[`.github/workflows/android.yml`](./.github/workflows/android.yml)
+- 触发：`push` 与 `pull_request`
+- 环境：Ubuntu、**JDK 17**（Temurin）、Android SDK
+- 任务：`./gradlew :app:testDebugUnitTest :app:lint :app:assembleDebug`
+- 不在 CI 跑 instrumented / 连接设备测试；不执行 release 签名构建
 
 ### Play 上架摘要
 

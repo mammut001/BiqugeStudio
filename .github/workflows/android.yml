@@ -1,0 +1,42 @@
+# CI for BiqugeStudio (:app) — JVM unit tests, Android Lint, debug APK.
+name: Android CI
+
+"on":
+  push:
+  pull_request:
+
+concurrency:
+  group: android-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: test + lint + assembleDebug
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Grant execute permission for Gradle wrapper
+        run: chmod +x gradlew
+
+      - name: Unit tests, lint, assembleDebug
+        run: >
+          ./gradlew
+          :app:testDebugUnitTest
+          :app:lint
+          :app:assembleDebug
+          --stacktrace
+          --no-daemon
