@@ -42,6 +42,44 @@ class EpubReaderTest {
     }
 
     @Test
+    fun decodeText_utf32LeBom() {
+        val body = "UTF-32LE 章节正文"
+        val bom = byteArrayOf(0xFF.toByte(), 0xFE.toByte(), 0x00, 0x00)
+        val payload = body.toByteArray(Charset.forName("UTF-32LE"))
+        assertEquals(body, EpubReader.decodeText(bom + payload))
+    }
+
+    @Test
+    fun decodeText_utf32BeBom() {
+        val body = "UTF-32BE 章节正文"
+        val bom = byteArrayOf(0x00, 0x00, 0xFE.toByte(), 0xFF.toByte())
+        val payload = body.toByteArray(Charset.forName("UTF-32BE"))
+        assertEquals(body, EpubReader.decodeText(bom + payload))
+    }
+
+    @Test
+    fun decodeText_utf32LeBomOnly_empty() {
+        val bom = byteArrayOf(0xFF.toByte(), 0xFE.toByte(), 0x00, 0x00)
+        assertEquals("", EpubReader.decodeText(bom))
+    }
+
+    @Test
+    fun decodeText_utf32LeNotMisreadAsUtf16() {
+        val body = "无NUL"
+        val bom = byteArrayOf(0xFF.toByte(), 0xFE.toByte(), 0x00, 0x00)
+        val payload = body.toByteArray(Charset.forName("UTF-32LE"))
+        val decoded = EpubReader.decodeText(bom + payload)
+        assertEquals(body, decoded)
+        assertFalse(decoded.contains('\u0000'))
+    }
+
+    @Test
+    fun decodeText_nullAndEmpty_returnEmpty() {
+        assertEquals("", EpubReader.decodeText(null))
+        assertEquals("", EpubReader.decodeText(ByteArray(0)))
+    }
+
+    @Test
     fun decodeText_utf16LeXmlSignatureWithoutBom() {
         val xml = "<?xml version=\"1.0\"?><p>十六位</p>"
         val bytes = xml.toByteArray(Charset.forName("UTF-16LE"))

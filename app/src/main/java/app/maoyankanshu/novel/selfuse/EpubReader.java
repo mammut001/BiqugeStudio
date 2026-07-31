@@ -239,7 +239,9 @@ public final class EpubReader {
 
     /**
      * Package-private for JVM tests: decode EPUB/XML/HTML bytes.
-     * Order: UTF-8/UTF-16 BOM → UTF-16 XML signature → XML encoding= → UTF-8.
+     * Order: UTF-8 BOM → UTF-32 LE/BE BOM (before UTF-16) → UTF-16 LE/BE BOM →
+     * UTF-16 XML signature → XML encoding= → UTF-8.
+     * UTF-32 uses guarded {@link Charset#forName} (minSdk 23 / host variance).
      */
     static String decodeText(byte[] data) {
         if (data == null || data.length == 0) return "";
@@ -250,6 +252,31 @@ public final class EpubReader {
                 && (data[1] & 0xff) == 0xbb
                 && (data[2] & 0xff) == 0xbf) {
             return new String(data, 3, data.length - 3, StandardCharsets.UTF_8);
+        }
+        // UTF-32LE BOM: FF FE 00 00 — must precede UTF-16LE (FF FE).
+        if (data.length >= 4
+                && (data[0] & 0xff) == 0xff
+                && (data[1] & 0xff) == 0xfe
+                && (data[2] & 0xff) == 0x00
+                && (data[3] & 0xff) == 0x00) {
+            Charset utf32le = charsetOrNull("UTF-32LE");
+            if (utf32le != null) {
+                return new String(data, 4, data.length - 4, utf32le);
+            }
+            // Unsupported: strip BOM; do not mis-decode as UTF-16LE.
+            return new String(data, 4, data.length - 4, StandardCharsets.UTF_8);
+        }
+        // UTF-32BE BOM: 00 00 FE FF
+        if (data.length >= 4
+                && (data[0] & 0xff) == 0x00
+                && (data[1] & 0xff) == 0x00
+                && (data[2] & 0xff) == 0xfe
+                && (data[3] & 0xff) == 0xff) {
+            Charset utf32be = charsetOrNull("UTF-32BE");
+            if (utf32be != null) {
+                return new String(data, 4, data.length - 4, utf32be);
+            }
+            return new String(data, 4, data.length - 4, StandardCharsets.UTF_8);
         }
         // UTF-16LE BOM
         if (data.length >= 2 && (data[0] & 0xff) == 0xff && (data[1] & 0xff) == 0xfe) {
@@ -282,6 +309,15 @@ public final class EpubReader {
             }
         }
         return new String(data, StandardCharsets.UTF_8);
+    }
+
+    /** Guarded charset lookup for optional encodings (UTF-32, exotic XML labels). */
+    private static Charset charsetOrNull(String name) {
+        try {
+            return Charset.forName(name);
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     /** Package-private for JVM tests: strip tags + decode entities (NBSP → U+0020). */

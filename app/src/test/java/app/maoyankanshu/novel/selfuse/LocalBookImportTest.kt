@@ -97,6 +97,56 @@ class LocalBookImportTest {
     }
 
     @Test
+    fun testUtf32LeWithBom() {
+        val originalText = "UTF-32LE 编码小说文本"
+        val bom = byteArrayOf(0xFF.toByte(), 0xFE.toByte(), 0x00, 0x00)
+        val payload = originalText.toByteArray(Charset.forName("UTF-32LE"))
+        val imported = LocalBookImport.fromStream(
+            stream = ByteArrayInputStream(bom + payload),
+            rawName = "utf32le.txt",
+            defaultName = "默认书名",
+            authorEpub = "EPUB作者",
+            authorTxt = "TXT作者",
+        )
+        assertEquals("utf32le", imported.title)
+        assertEquals(originalText, imported.text)
+    }
+
+    @Test
+    fun testUtf32BeWithBom() {
+        val originalText = "UTF-32BE 编码小说文本"
+        val bom = byteArrayOf(0x00, 0x00, 0xFE.toByte(), 0xFF.toByte())
+        val payload = originalText.toByteArray(Charset.forName("UTF-32BE"))
+        val imported = LocalBookImport.fromStream(
+            stream = ByteArrayInputStream(bom + payload),
+            rawName = "utf32be.txt",
+            defaultName = "默认书名",
+            authorEpub = "EPUB作者",
+            authorTxt = "TXT作者",
+        )
+        assertEquals("utf32be", imported.title)
+        assertEquals(originalText, imported.text)
+    }
+
+    @Test
+    fun testUtf32LeBomOnly_emptyBody() {
+        val bom = byteArrayOf(0xFF.toByte(), 0xFE.toByte(), 0x00, 0x00)
+        // Empty body after BOM: decode yields empty; import rejects empty text.
+        assertEquals("", LocalBookImport.readText(ByteArrayInputStream(bom)))
+    }
+
+    @Test
+    fun testUtf32LeNotMisreadAsUtf16() {
+        // FF FE 00 00 + UTF-32LE payload must not be treated as UTF-16LE (which would inject NULs).
+        val originalText = "无NUL正文"
+        val bom = byteArrayOf(0xFF.toByte(), 0xFE.toByte(), 0x00, 0x00)
+        val payload = originalText.toByteArray(Charset.forName("UTF-32LE"))
+        val text = LocalBookImport.readText(ByteArrayInputStream(bom + payload))
+        assertEquals(originalText, text)
+        assertFalse(text.contains('\u0000'))
+    }
+
+    @Test
     fun testEpubImport() {
         val epubBytes = createMinimalEpubZip("第一章 概述\n欢迎阅读 EPUB 电子书。")
         val imported = LocalBookImport.fromStream(

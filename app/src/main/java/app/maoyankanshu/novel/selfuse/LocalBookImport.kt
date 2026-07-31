@@ -4,8 +4,6 @@ import android.content.Context
 import android.net.Uri
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
-import java.nio.charset.Charset
-import java.nio.charset.StandardCharsets
 
 /** SAF local TXT / EPUB import helpers (call off the main thread for large files if needed). */
 object LocalBookImport {
@@ -142,31 +140,7 @@ object LocalBookImport {
         while (stream.read(buffer).also { count = it } != -1) {
             output.write(buffer, 0, count)
         }
-        val data = output.toByteArray()
-        if (data.isEmpty()) return ""
-
-        if (data.size >= 2 && (data[0].toInt() and 0xff) == 0xff && (data[1].toInt() and 0xff) == 0xfe) {
-            return String(data, 2, data.size - 2, Charset.forName("UTF-16LE"))
-        }
-        if (data.size >= 2 && (data[0].toInt() and 0xff) == 0xfe && (data[1].toInt() and 0xff) == 0xff) {
-            return String(data, 2, data.size - 2, Charset.forName("UTF-16BE"))
-        }
-        val offset =
-            if (data.size >= 3 &&
-                (data[0].toInt() and 0xff) == 0xef &&
-                (data[1].toInt() and 0xff) == 0xbb &&
-                (data[2].toInt() and 0xff) == 0xbf
-            ) {
-                3
-            } else {
-                0
-            }
-        val utf8 = String(data, offset, data.size - offset, StandardCharsets.UTF_8)
-        return if (utf8.indexOf('\uFFFD') >= 0) {
-            String(data, offset, data.size - offset, Charset.forName("GB18030"))
-        } else {
-            utf8
-        }
+        return PlainTextDecoder.decode(output.toByteArray())
     }
 
     private class BoundedInputStream(

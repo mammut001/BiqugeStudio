@@ -4,7 +4,6 @@ import java.io.ByteArrayInputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLDecoder
-import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
 
 /** Blocking HTTPS download + TXT/EPUB decode (call off the main thread). */
@@ -209,30 +208,11 @@ object RemoteImportDownloader {
         }
     }
 
-    private fun decodeText(data: ByteArray): String {
-        if (data.size >= 2 && (data[0].toInt() and 0xff) == 0xff && (data[1].toInt() and 0xff) == 0xfe) {
-            return String(data, 2, data.size - 2, Charset.forName("UTF-16LE"))
-        }
-        if (data.size >= 2 && (data[0].toInt() and 0xff) == 0xfe && (data[1].toInt() and 0xff) == 0xff) {
-            return String(data, 2, data.size - 2, Charset.forName("UTF-16BE"))
-        }
-        val offset =
-            if (data.size >= 3 &&
-                (data[0].toInt() and 0xff) == 0xef &&
-                (data[1].toInt() and 0xff) == 0xbb &&
-                (data[2].toInt() and 0xff) == 0xbf
-            ) {
-                3
-            } else {
-                0
-            }
-        val utf8 = String(data, offset, data.size - offset, StandardCharsets.UTF_8)
-        return if (utf8.indexOf('\uFFFD') >= 0) {
-            String(data, offset, data.size - offset, Charset.forName("GB18030"))
-        } else {
-            utf8
-        }
-    }
+    /**
+     * Plain TXT body decode (BOM + UTF-8/UTF-16/UTF-32/GB18030).
+     * Internal for JVM encoding tests — no network.
+     */
+    internal fun decodeText(data: ByteArray): String = PlainTextDecoder.decode(data)
 
     private val FILENAME_STAR_REGEX =
         Regex("""filename\*\s*=\s*(?:UTF-8|utf-8)''([^;\s]+)""", RegexOption.IGNORE_CASE)
