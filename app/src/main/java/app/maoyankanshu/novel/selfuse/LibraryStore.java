@@ -12,8 +12,8 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -126,7 +126,16 @@ public final class LibraryStore {
         save(all);
     }
     public void savePosition(String id, int progress) { List<Book> all = books(); for (Book book : all) if (book.id.equals(id)) book.position = Math.max(0, Math.min(progress, 1000)); save(all); }
-    public void remove(String id) { List<Book> all = books(); all.removeIf(book -> book.id.equals(id)); File file = new File(bookDir(), id + ".txt"); if (file.exists()) file.delete(); save(all); }
+    public void remove(String id) {
+        List<Book> all = books();
+        Iterator<Book> iterator = all.iterator();
+        while (iterator.hasNext()) {
+            if (iterator.next().id.equals(id)) iterator.remove();
+        }
+        File file = new File(bookDir(), id + ".txt");
+        if (file.exists()) file.delete();
+        save(all);
+    }
 
     /** Exports all local books and progress into a portable ZIP backup. */
     public void exportTo(OutputStream output) throws IOException {
@@ -238,10 +247,11 @@ public final class LibraryStore {
     }
 
     private static String encode(String value) {
-        return Base64.getEncoder().encodeToString(value.getBytes(StandardCharsets.UTF_8));
+        // TextBase64: API-23-safe, JVM-unit-testable; same wire format as android.util.Base64.NO_WRAP
+        return TextBase64.encode(value.getBytes(StandardCharsets.UTF_8));
     }
 
     private static String decode(String value) {
-        return new String(Base64.getDecoder().decode(value), StandardCharsets.UTF_8);
+        return new String(TextBase64.decode(value), StandardCharsets.UTF_8);
     }
 }

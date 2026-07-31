@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 
 /** Device-only recent-reading list, independent from the shelf order. */
@@ -15,7 +16,10 @@ public final class ReadingHistory {
     public static ReadingHistory get(Context context) { return new ReadingHistory(context); }
     public void record(String bookId) {
         List<Entry> entries = list();
-        entries.removeIf(entry -> entry.bookId.equals(bookId));
+        Iterator<Entry> iterator = entries.iterator();
+        while (iterator.hasNext()) {
+            if (iterator.next().bookId.equals(bookId)) iterator.remove();
+        }
         entries.add(0, new Entry(bookId, System.currentTimeMillis()));
         while (entries.size() > 30) entries.remove(entries.size() - 1);
         StringBuilder raw = new StringBuilder(); for (Entry entry : entries) raw.append(entry.bookId).append('|').append(entry.at).append('\n');
