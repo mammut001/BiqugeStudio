@@ -64,17 +64,19 @@ public final class EpubReader {
             }
         }
 
+        // Spine order; each chapter is stripHtml'd (already single-\n inside).
+        // Join with one '\n' and collapse any accidental blank lines from tags.
         StringBuilder result = new StringBuilder();
         for (String chapter : chapters) {
             byte[] data = files.get(normalize(chapter));
             if (data == null) continue;
             String cleaned = stripHtml(decodeText(data));
-            if (!cleaned.isEmpty()) {
-                if (result.length() > 0) result.append('\n');
-                result.append(cleaned);
-            }
+            if (cleaned.isEmpty()) continue;
+            if (result.length() > 0) result.append('\n');
+            result.append(cleaned);
         }
-        return result.toString().trim();
+        // Guarantee "ch1\nch2" not "ch1\n\nch2" if a chapter ends/starts with a block newline.
+        return normalizeWhitespace(result.toString());
     }
 
     /**

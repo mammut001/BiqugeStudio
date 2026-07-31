@@ -120,6 +120,8 @@ class EpubReaderTest {
 
     @Test
     fun read_followsSpineNotZipOrder() {
+        // ZIP stores second.html first; spine is first → second.
+        // stripHtml turns </p> into \n then trims; join must be single \n, not \n\n.
         val zip = buildEpub(
             chaptersInZipOrder = listOf(
                 "OEBPS/second.html" to "<p>第二</p>",
@@ -134,7 +136,8 @@ class EpubReaderTest {
             withBom = false,
         )
         val text = EpubReader.read(ByteArrayInputStream(zip))
-        assertTrue(text.indexOf("第一") < text.indexOf("第二"))
+        assertTrue("spine order", text.indexOf("第一") < text.indexOf("第二"))
+        assertFalse("no blank line between chapters", text.contains("\n\n"))
         assertEquals("第一\n第二", text)
     }
 
