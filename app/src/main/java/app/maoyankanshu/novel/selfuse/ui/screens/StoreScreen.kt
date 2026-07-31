@@ -1,5 +1,6 @@
 package app.maoyankanshu.novel.selfuse.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -11,16 +12,26 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import app.maoyankanshu.novel.selfuse.AppIntents
@@ -37,10 +48,13 @@ fun StoreScreen(
     val context = LocalContext.current
     val importLocal = stringResource(R.string.import_local_txt_epub)
     val importLocalCd = stringResource(R.string.import_local_txt_epub_cd)
+    val importLocalSub = stringResource(R.string.store_import_local_subtitle)
     val importRemote = stringResource(R.string.import_remote_txt_epub)
     val importRemoteCd = stringResource(R.string.import_remote_txt_epub_cd)
+    val importRemoteSub = stringResource(R.string.store_import_remote_subtitle)
     val importWeb = stringResource(R.string.import_web_article)
     val importWebCd = stringResource(R.string.import_web_article_cd)
+    val importWebSub = stringResource(R.string.store_import_web_subtitle)
     val summary = stringResource(R.string.store_library_summary, books.size)
     val summaryCd = stringResource(R.string.store_library_summary_cd, books.size)
 
@@ -66,41 +80,47 @@ fun StoreScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.semantics { contentDescription = summaryCd },
                 )
-                Spacer(Modifier.height(12.dp))
-                Button(
-                    onClick = {
-                        context.startActivity(AppIntents.importLocal(context))
-                    },
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    text = stringResource(R.string.store_import_section),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                        .semantics { contentDescription = importLocalCd },
-                ) {
-                    Text(importLocal)
-                }
-                Spacer(Modifier.height(8.dp))
-                OutlinedButton(
-                    onClick = {
-                        context.startActivity(AppIntents.remoteImport(context))
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                        .semantics { contentDescription = importRemoteCd },
-                ) {
-                    Text(importRemote)
-                }
-                Spacer(Modifier.height(8.dp))
-                OutlinedButton(
-                    onClick = {
-                        context.startActivity(AppIntents.webImport(context))
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                        .semantics { contentDescription = importWebCd },
-                ) {
-                    Text(importWeb)
+                        .padding(start = 4.dp, bottom = 6.dp)
+                        .semantics { heading() },
+                )
+                OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+                    Column {
+                        StoreImportListItem(
+                            icon = Icons.AutoMirrored.Filled.InsertDriveFile,
+                            title = importLocal,
+                            subtitle = importLocalSub,
+                            contentDescription = importLocalCd,
+                            onClick = {
+                                context.startActivity(AppIntents.importLocal(context))
+                            },
+                        )
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        StoreImportListItem(
+                            icon = Icons.Filled.CloudDownload,
+                            title = importRemote,
+                            subtitle = importRemoteSub,
+                            contentDescription = importRemoteCd,
+                            onClick = {
+                                context.startActivity(AppIntents.remoteImport(context))
+                            },
+                        )
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        StoreImportListItem(
+                            icon = Icons.Filled.Language,
+                            title = importWeb,
+                            subtitle = importWebSub,
+                            contentDescription = importWebCd,
+                            onClick = {
+                                context.startActivity(AppIntents.webImport(context))
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -144,4 +164,51 @@ fun StoreScreen(
             )
         }
     }
+}
+
+/**
+ * Material 3 import row: ≥48dp target, TalkBack [contentDescription], AppIntents via [onClick].
+ */
+@Composable
+private fun StoreImportListItem(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    contentDescription: String,
+    onClick: () -> Unit,
+) {
+    ListItem(
+        headlineContent = {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        },
+        supportingContent = {
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        leadingContent = {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        },
+        colors = ListItemDefaults.colors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .defaultMinSize(minWidth = 48.dp, minHeight = 56.dp)
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics {
+                this.contentDescription = contentDescription
+                role = Role.Button
+            },
+    )
 }
