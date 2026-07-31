@@ -1,7 +1,5 @@
 package app.maoyankanshu.novel.selfuse
 
-import java.io.ByteArrayOutputStream
-import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.Charset
@@ -13,7 +11,8 @@ import java.util.regex.Pattern
  * Max body size matches the previous Java activity: 12 MiB.
  */
 object WebImportFetcher {
-    private const val MAX_BYTES = 12 * 1024 * 1024
+    /** Public for JVM size-limit tests; same as [HttpsBodyLimits.WEB_MAX_BYTES]. */
+    const val MAX_BYTES: Int = HttpsBodyLimits.WEB_MAX_BYTES
 
     data class Result(
         val title: String,
@@ -45,7 +44,12 @@ object WebImportFetcher {
             if (!"https".equals(finalProtocol, ignoreCase = true)) {
                 throw IllegalArgumentException("HTTPS protocol required")
             }
-            val data = connection.inputStream.use { readAll(it) }
+            // Fail fast on declared Content-Length before reading the body (API 23-safe).
+            HttpsBodyLimits.rejectIfDeclaredTooLarge(
+                HttpsBodyLimits.contentLengthOf(connection),
+                MAX_BYTES,
+            )
+            val data = connection.inputStream.use { HttpsBodyLimits.readAll(it, MAX_BYTES) }
             val html = decode(data)
             val body = toText(html)
             if (body.length < 20) throw IllegalStateException("empty")
@@ -56,17 +60,6 @@ object WebImportFetcher {
         } finally {
             connection.disconnect()
         }
-    }
-
-    private fun readAll(input: InputStream): ByteArray {
-        val out = ByteArrayOutputStream()
-        val buffer = ByteArray(8192)
-        var n: Int
-        while (input.read(buffer).also { n = it } != -1) {
-            if (out.size() + n > MAX_BYTES) throw IllegalStateException("too large")
-            out.write(buffer, 0, n)
-        }
-        return out.toByteArray()
     }
 
     private fun decode(data: ByteArray): String {

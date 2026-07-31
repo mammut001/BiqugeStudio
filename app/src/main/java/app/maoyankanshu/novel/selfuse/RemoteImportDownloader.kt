@@ -1,8 +1,6 @@
 package app.maoyankanshu.novel.selfuse
 
 import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
-import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.Charset
@@ -10,7 +8,8 @@ import java.nio.charset.StandardCharsets
 
 /** Blocking HTTPS download + TXT/EPUB decode (call off the main thread). */
 object RemoteImportDownloader {
-    private const val MAX_BYTES = 50 * 1024 * 1024
+    /** Public for JVM size-limit tests; same as [HttpsBodyLimits.REMOTE_MAX_BYTES]. */
+    const val MAX_BYTES: Int = HttpsBodyLimits.REMOTE_MAX_BYTES
 
     data class Result(
         val title: String,
@@ -45,8 +44,13 @@ object RemoteImportDownloader {
             if (!"https".equals(finalProtocol, ignoreCase = true)) {
                 throw IllegalArgumentException("HTTPS protocol required")
             }
+            // Fail fast on declared Content-Length before reading the body (API 23-safe).
+            HttpsBodyLimits.rejectIfDeclaredTooLarge(
+                HttpsBodyLimits.contentLengthOf(connection),
+                MAX_BYTES,
+            )
             val contentType = connection.contentType
-            val data = connection.inputStream.use { readAll(it) }
+            val data = connection.inputStream.use { HttpsBodyLimits.readAll(it, MAX_BYTES) }
             val epub = cleanUrl.lowercase().contains(".epub") ||
                 (contentType != null && contentType.contains("epub"))
             val text = if (epub) EpubReader.read(ByteArrayInputStream(data)) else decodeText(data)
@@ -64,17 +68,6 @@ object RemoteImportDownloader {
         } finally {
             connection.disconnect()
         }
-    }
-
-    private fun readAll(input: InputStream): ByteArray {
-        val out = ByteArrayOutputStream()
-        val buffer = ByteArray(8192)
-        var n: Int
-        while (input.read(buffer).also { n = it } != -1) {
-            if (out.size() + n > MAX_BYTES) throw IllegalStateException("too large")
-            out.write(buffer, 0, n)
-        }
-        return out.toByteArray()
     }
 
     private fun decodeText(data: ByteArray): String {
