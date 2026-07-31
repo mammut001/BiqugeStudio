@@ -6,6 +6,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -53,8 +54,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -223,15 +226,18 @@ fun ProfileScreen(
                             title = stringResource(R.string.profile_night_title),
                             subtitle = stringResource(R.string.profile_night_subtitle),
                             enabled = !isLoading,
+                            toggleChecked = nightMode,
+                            onToggle = { checked ->
+                                preferences.setNightMode(checked)
+                                nightMode = preferences.nightMode()
+                                onDarkThemeChanged(nightMode)
+                            },
                             contentDescription = nightCd,
                             trailingContent = {
+                                // Row owns interaction (Role.Switch); Switch is visual state only.
                                 Switch(
                                     checked = nightMode,
-                                    onCheckedChange = { enabled ->
-                                        preferences.setNightMode(enabled)
-                                        nightMode = preferences.nightMode()
-                                        onDarkThemeChanged(nightMode)
-                                    },
+                                    onCheckedChange = null,
                                     enabled = !isLoading,
                                     modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
                                 )
@@ -389,6 +395,14 @@ private fun ProfileSectionHeader(title: String) {
     )
 }
 
+/**
+ * Settings list row: ≥48×56dp target, Material 3 color roles.
+ *
+ * - [onClick]: TalkBack [Role.Button] via [Modifier.clickable] + [semantics]
+ *   (same pattern as StoreScreen import rows).
+ * - [toggleChecked]/[onToggle]: TalkBack [Role.Switch] via [Modifier.toggleable]
+ *   for night-mode style switch rows (trailing Switch is visual-only).
+ */
 @Composable
 private fun ProfileItemRow(
     icon: ImageVector,
@@ -396,22 +410,41 @@ private fun ProfileItemRow(
     subtitle: String,
     enabled: Boolean = true,
     onClick: (() -> Unit)? = null,
+    toggleChecked: Boolean? = null,
+    onToggle: ((Boolean) -> Unit)? = null,
     contentDescription: String? = null,
     trailingContent: @Composable (() -> Unit)? = null,
 ) {
+    val checked = toggleChecked
+    val toggle = onToggle
+    val interactionModifier = when {
+        checked != null && toggle != null -> Modifier.toggleable(
+            value = checked,
+            enabled = enabled,
+            role = Role.Switch,
+            onValueChange = toggle,
+        )
+        onClick != null -> Modifier.clickable(
+            enabled = enabled,
+            role = Role.Button,
+            onClick = onClick,
+        )
+        else -> Modifier
+    }
+    val semanticRole = when {
+        checked != null && toggle != null -> Role.Switch
+        onClick != null -> Role.Button
+        else -> null
+    }
+
     val itemModifier = Modifier
         .fillMaxWidth()
         .defaultMinSize(minWidth = 48.dp, minHeight = 56.dp)
-        .then(
-            if (onClick != null) {
-                Modifier.clickable(enabled = enabled, onClick = onClick)
-            } else {
-                Modifier
-            }
-        )
+        .then(interactionModifier)
         .padding(horizontal = 16.dp, vertical = 12.dp)
         .semantics {
             contentDescription?.let { this.contentDescription = it }
+            semanticRole?.let { this.role = it }
         }
 
     Row(
