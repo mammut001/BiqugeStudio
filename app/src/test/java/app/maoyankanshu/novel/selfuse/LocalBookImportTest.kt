@@ -346,7 +346,83 @@ class LocalBookImportTest {
         assertEquals("EPUB作者", importedEpub.author)
     }
 
-    private fun createMinimalEpubZip(chapterHtmlContent: String): ByteArray {
+    @Test
+    fun testEpubImport_prefersEmbeddedOpfMetadata() {
+        val epubBytes = createMinimalEpubZip(
+            chapterHtmlContent = "正文一章",
+            dcTitle = "三体",
+            dcCreator = "刘慈欣",
+        )
+        val imported = LocalBookImport.fromStream(
+            stream = ByteArrayInputStream(epubBytes),
+            rawName = "wrong_filename.epub",
+            defaultName = "默认书名",
+            authorEpub = "EPUB作者",
+            authorTxt = "TXT作者",
+        )
+        assertEquals("三体", imported.title)
+        assertEquals("刘慈欣", imported.author)
+        assertTrue(imported.text.contains("正文一章"))
+    }
+
+    @Test
+    fun testEpubImport_missingMetadata_fallsBackToFilenameAndAuthorEpub() {
+        val epubBytes = createMinimalEpubZip("无元数据正文")
+        val imported = LocalBookImport.fromStream(
+            stream = ByteArrayInputStream(epubBytes),
+            rawName = "fallback_book.epub",
+            defaultName = "默认书名",
+            authorEpub = "EPUB作者",
+            authorTxt = "TXT作者",
+        )
+        assertEquals("fallback_book", imported.title)
+        assertEquals("EPUB作者", imported.author)
+        assertTrue(imported.text.contains("无元数据正文"))
+    }
+
+    @Test
+    fun testEpubImport_blankMetadata_fallsBack() {
+        val epubBytes = createMinimalEpubZip(
+            chapterHtmlContent = "空白元数据",
+            dcTitle = "   ",
+            dcCreator = "",
+        )
+        val imported = LocalBookImport.fromStream(
+            stream = ByteArrayInputStream(epubBytes),
+            rawName = "blank_meta.epub",
+            defaultName = "默认书名",
+            authorEpub = "EPUB作者",
+            authorTxt = "TXT作者",
+        )
+        assertEquals("blank_meta", imported.title)
+        assertEquals("EPUB作者", imported.author)
+    }
+
+    @Test
+    fun testEpubImport_decodesEntitiesInMetadata() {
+        val epubBytes = createMinimalEpubZip(
+            chapterHtmlContent = "entity body",
+            dcTitle = "A&amp;B &quot;Gate&quot;",
+            dcCreator = "O&apos;Brien",
+            useDcPrefix = true,
+        )
+        val imported = LocalBookImport.fromStream(
+            stream = ByteArrayInputStream(epubBytes),
+            rawName = "entities.epub",
+            defaultName = "默认书名",
+            authorEpub = "EPUB作者",
+            authorTxt = "TXT作者",
+        )
+        assertEquals("A&B \"Gate\"", imported.title)
+        assertEquals("O'Brien", imported.author)
+    }
+
+    private fun createMinimalEpubZip(
+        chapterHtmlContent: String,
+        dcTitle: String? = null,
+        dcCreator: String? = null,
+        useDcPrefix: Boolean = false,
+    ): ByteArray {
         val baos = ByteArrayOutputStream()
         ZipOutputStream(baos).use { zip ->
             zip.putNextEntry(ZipEntry("META-INF/container.xml"))
@@ -359,10 +435,25 @@ class LocalBookImportTest {
             zip.write(container)
             zip.closeEntry()
 
+            val titleTag = if (useDcPrefix) "dc:title" else "title"
+            val creatorTag = if (useDcPrefix) "dc:creator" else "creator"
+            val metadata = buildString {
+                if (dcTitle != null || dcCreator != null) {
+                    append("  <metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\n")
+                    if (dcTitle != null) {
+                        append("    <$titleTag>$dcTitle</$titleTag>\n")
+                    }
+                    if (dcCreator != null) {
+                        append("    <$creatorTag>$dcCreator</$creatorTag>\n")
+                    }
+                    append("  </metadata>\n")
+                }
+            }
+
             zip.putNextEntry(ZipEntry("OEBPS/content.opf"))
             val opf = """<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="2.0">
-  <manifest>
+$metadata  <manifest>
     <item id="chapter1" href="chap1.html" media-type="application/xhtml+xml"/>
   </manifest>
   <spine>

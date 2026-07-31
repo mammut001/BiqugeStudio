@@ -171,6 +171,70 @@ class EpubReaderTest {
     }
 
     @Test
+    fun parsePackageMetadata_dcPrefixAndEntities() {
+        val opf = """
+            <package>
+              <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+                <dc:title>A&amp;B &quot;Title&quot;</dc:title>
+                <dc:creator>Jane&nbsp;Doe</dc:creator>
+              </metadata>
+            </package>
+        """.trimIndent()
+        val meta = EpubReader.parsePackageMetadata(opf)
+        assertEquals("A&B \"Title\"", meta[0])
+        assertEquals("Jane Doe", meta[1])
+    }
+
+    @Test
+    fun parsePackageMetadata_unprefixedAndMissing() {
+        val withTitleOnly = """
+            <metadata>
+              <title xmlns="http://purl.org/dc/elements/1.1/">Only Title</title>
+            </metadata>
+        """.trimIndent()
+        val meta = EpubReader.parsePackageMetadata(withTitleOnly)
+        assertEquals("Only Title", meta[0])
+        assertEquals(null, meta[1])
+
+        val empty = EpubReader.parsePackageMetadata("<package/>")
+        assertEquals(null, empty[0])
+        assertEquals(null, empty[1])
+    }
+
+    @Test
+    fun parsePackageMetadata_skipsBlankTitle() {
+        val opf = """
+            <metadata>
+              <dc:title>   </dc:title>
+              <dc:title>Second</dc:title>
+              <dc:creator>Auth</dc:creator>
+            </metadata>
+        """.trimIndent()
+        val meta = EpubReader.parsePackageMetadata(opf)
+        assertEquals("Second", meta[0])
+        assertEquals("Auth", meta[1])
+    }
+
+    @Test
+    fun readBook_returnsMetadataAndText() {
+        val zip = buildEpub(
+            chaptersInZipOrder = listOf("OEBPS/chap1.html" to "<p>Chapter body</p>"),
+            spineIdRefs = listOf("c1"),
+            manifest = listOf("c1" to "chap1.html"),
+            chapterCharset = StandardCharsets.UTF_8,
+            withBom = false,
+            dcTitle = "Embedded Title",
+            dcCreator = "Embedded Author",
+        )
+        val book = EpubReader.readBook(ByteArrayInputStream(zip))
+        assertEquals("Embedded Title", book.title)
+        assertEquals("Embedded Author", book.author)
+        assertTrue(book.text.contains("Chapter body"))
+        // read() remains text-only compatible
+        assertEquals(book.text, EpubReader.read(ByteArrayInputStream(zip)))
+    }
+
+    @Test
     fun maxBytes_matchesLocalBookImport32MiB() {
         assertEquals(32 * 1024 * 1024, EpubReader.MAX_BYTES)
     }
@@ -260,6 +324,8 @@ class EpubReaderTest {
         manifest: List<Pair<String, String>>,
         chapterCharset: Charset,
         withBom: Boolean,
+        dcTitle: String? = null,
+        dcCreator: String? = null,
     ): ByteArray {
         val baos = ByteArrayOutputStream()
         ZipOutputStream(baos).use { zip ->
@@ -280,11 +346,19 @@ class EpubReaderTest {
             val spineXml = spineIdRefs.joinToString("\n") { id ->
                 """    <itemref idref="$id"/>"""
             }
+            val metadata = buildString {
+                if (dcTitle != null || dcCreator != null) {
+                    append("  <metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\n")
+                    if (dcTitle != null) append("    <dc:title>$dcTitle</dc:title>\n")
+                    if (dcCreator != null) append("    <dc:creator>$dcCreator</dc:creator>\n")
+                    append("  </metadata>\n")
+                }
+            }
             zip.putNextEntry(ZipEntry("OEBPS/content.opf"))
             zip.write(
                 """<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="2.0">
-  <manifest>
+$metadata  <manifest>
 $manifestXml
   </manifest>
   <spine>

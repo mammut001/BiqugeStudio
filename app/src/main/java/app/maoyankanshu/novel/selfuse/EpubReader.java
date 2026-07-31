@@ -39,12 +39,45 @@ public final class EpubReader {
     private static final Pattern ROOTFILE_TAG = Pattern.compile("(?is)<rootfile\\b([^>]*)>");
     private static final Pattern ATTR_PATTERN =
             Pattern.compile("([A-Za-z_:][-A-Za-z0-9_:.]*)\\s*=\\s*(['\"])(.*?)\\2", Pattern.DOTALL);
+    /**
+     * Dublin Core title/creator, prefix-tolerant: {@code dc:title}, {@code title},
+     * {@code opf:dc:title}-style local names ending in title/creator.
+     */
+    private static final Pattern DC_TITLE = Pattern.compile(
+            "(?is)<(?:[\\w.-]+:)?title(?:\\s[^>]*)?>(.*?)</(?:[\\w.-]+:)?title\\s*>");
+    private static final Pattern DC_CREATOR = Pattern.compile(
+            "(?is)<(?:[\\w.-]+:)?creator(?:\\s[^>]*)?>(.*?)</(?:[\\w.-]+:)?creator\\s*>");
 
     private static final Map<String, String> NAMED_ENTITIES = namedEntities();
 
+    /**
+     * EPUB package + chapter text. [title]/[author] may be null when OPF omits them
+     * (callers should fall back to filename / default labels).
+     */
+    public static final class Book {
+        public final String title;
+        public final String author;
+        public final String text;
+
+        public Book(String title, String author, String text) {
+            this.title = title;
+            this.author = author;
+            this.text = text == null ? "" : text;
+        }
+    }
+
     private EpubReader() { }
 
+    /** Spine text only (source-compatible with existing callers). */
     public static String read(InputStream source) throws Exception {
+        return readBook(source).text;
+    }
+
+    /**
+     * Read package metadata ({@code dc:title} / {@code dc:creator}) and spine chapter text.
+     * Metadata values have HTML/XML entities decoded; blank after trim → null.
+     */
+    public static Book readBook(InputStream source) throws Exception {
         Map<String, byte[]> files = new LinkedHashMap<>();
         long totalUncompressed = 0L;
         try (ZipInputStream zip = new ZipInputStream(source)) {
@@ -72,9 +105,11 @@ public final class EpubReader {
                 }
             }
         }
+        String opfXml = opfPath == null ? "" : decodeText(files.get(opfPath));
+        String[] meta = parsePackageMetadata(opfXml);
         List<String> chapters = opfPath == null
                 ? new ArrayList<>()
-                : spineFiles(decodeText(files.get(opfPath)), opfPath);
+                : spineFiles(opfXml, opfPath);
         if (chapters.isEmpty()) {
             for (String name : files.keySet()) {
                 if (isHtml(name)) chapters.add(name);
@@ -93,7 +128,32 @@ public final class EpubReader {
             result.append(cleaned);
         }
         // Guarantee "ch1\nch2" not "ch1\n\nch2" if a chapter ends/starts with a block newline.
-        return normalizeWhitespace(result.toString());
+        String text = normalizeWhitespace(result.toString());
+        return new Book(meta[0], meta[1], text);
+    }
+
+    /**
+     * Package-private for JVM tests: first non-blank dc:title / dc:creator from OPF XML.
+     * Returns {@code {titleOrNull, authorOrNull}}; entities decoded, inner tags stripped.
+     */
+    static String[] parsePackageMetadata(String opf) {
+        if (opf == null || opf.isEmpty()) return new String[] { null, null };
+        String title = firstDcField(DC_TITLE, opf);
+        String author = firstDcField(DC_CREATOR, opf);
+        return new String[] { title, author };
+    }
+
+    private static String firstDcField(Pattern pattern, String opf) {
+        Matcher m = pattern.matcher(opf);
+        while (m.find()) {
+            String raw = m.group(1);
+            if (raw == null) continue;
+            // Inner markup rare in DC fields; strip tags then entities.
+            String cleaned = normalizeWhitespace(
+                    decodeHtmlEntities(raw.replaceAll("(?s)<[^>]+>", "")));
+            if (!cleaned.isEmpty()) return cleaned;
+        }
+        return null;
     }
 
     /**

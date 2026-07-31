@@ -47,8 +47,21 @@ object LocalBookImport {
         }
         val epub = isEpub(rawName, mimeType)
         val boundedStream = BoundedInputStream(stream, MAX_IMPORT_BYTES.toLong())
-        val content = try {
-            if (epub) EpubReader.read(boundedStream) else readText(boundedStream)
+        val content: String
+        var title = name
+        var author = if (epub) authorEpub else authorTxt
+        try {
+            if (epub) {
+                val book = EpubReader.readBook(boundedStream)
+                content = book.text
+                // Prefer OPF dc:title / dc:creator when non-blank; else filename/default + authorEpub.
+                val embeddedTitle = book.title?.trim().orEmpty()
+                if (embeddedTitle.isNotEmpty()) title = embeddedTitle
+                val embeddedAuthor = book.author?.trim().orEmpty()
+                if (embeddedAuthor.isNotEmpty()) author = embeddedAuthor
+            } else {
+                content = readText(boundedStream)
+            }
         } catch (e: IllegalArgumentException) {
             throw e
         } catch (e: Exception) {
@@ -56,8 +69,8 @@ object LocalBookImport {
         }
         if (content.trim().isEmpty()) throw IllegalArgumentException("empty")
         return Imported(
-            title = name,
-            author = if (epub) authorEpub else authorTxt,
+            title = title,
+            author = author,
             text = content,
         )
     }
