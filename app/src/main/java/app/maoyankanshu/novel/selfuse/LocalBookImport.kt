@@ -30,9 +30,9 @@ object LocalBookImport {
     fun isEpub(rawName: String?, mimeType: String? = null): Boolean {
         if (rawName != null && rawName.lowercase().endsWith(".epub")) return true
         val mime = mimeType?.trim()?.lowercase() ?: return false
-        if (mime == MIME_EPUB) return true
-        // e.g. application/epub+zip; charset=binary
-        return mime.startsWith("$MIME_EPUB;")
+        // type/subtype only; ignore "; …" parameters and surrounding spaces
+        val base = mime.substringBefore(';').trim()
+        return base == MIME_EPUB
     }
 
     fun fromStream(

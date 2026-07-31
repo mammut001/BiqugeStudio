@@ -118,12 +118,15 @@ class LocalBookImportTest {
         assertTrue(LocalBookImport.isEpub(null, "application/epub+zip"))
         assertTrue(LocalBookImport.isEpub("doc", "application/epub+zip"))
         assertTrue(LocalBookImport.isEpub("doc", "application/epub+zip; charset=binary"))
+        assertTrue(LocalBookImport.isEpub("doc", "  application/epub+zip ; charset=binary  "))
+        assertTrue(LocalBookImport.isEpub("doc", "APPLICATION/EPUB+ZIP"))
         assertTrue(LocalBookImport.isEpub("x.epub", "text/plain")) // extension wins
         assertFalse(LocalBookImport.isEpub("doc", null))
         assertFalse(LocalBookImport.isEpub("story.txt", "text/plain"))
         assertFalse(LocalBookImport.isEpub("story.txt", "application/octet-stream"))
         assertFalse(LocalBookImport.isEpub(null, null))
         assertFalse(LocalBookImport.isEpub(null, "application/zip"))
+        assertFalse(LocalBookImport.isEpub(null, "application/x-epub-hint"))
     }
 
     /**
