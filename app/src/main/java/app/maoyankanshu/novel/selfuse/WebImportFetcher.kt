@@ -27,7 +27,11 @@ object WebImportFetcher {
         userAgent: String,
         defaultTitle: String,
     ): Result {
-        val connection = (URL(rawUrl).openConnection() as HttpURLConnection).apply {
+        val cleanUrl = rawUrl.trim()
+        if (!cleanUrl.startsWith("https://", ignoreCase = true)) {
+            throw IllegalArgumentException("HTTPS URL required")
+        }
+        val connection = (URL(cleanUrl).openConnection() as HttpURLConnection).apply {
             connectTimeout = 15_000
             readTimeout = 30_000
             instanceFollowRedirects = true
@@ -37,6 +41,10 @@ object WebImportFetcher {
         try {
             val code = connection.responseCode
             if (code !in 200..299) throw IllegalStateException("HTTP $code")
+            val finalProtocol = connection.url.protocol
+            if (!"https".equals(finalProtocol, ignoreCase = true)) {
+                throw IllegalArgumentException("HTTPS protocol required")
+            }
             val data = connection.inputStream.use { readAll(it) }
             val html = decode(data)
             val body = toText(html)
@@ -44,7 +52,7 @@ object WebImportFetcher {
             var name = preferredTitle.trim()
             if (name.isEmpty()) name = pageTitle(html)
             if (name.isEmpty()) name = defaultTitle
-            return Result(title = name, body = body, sourceUrl = rawUrl)
+            return Result(title = name, body = body, sourceUrl = cleanUrl)
         } finally {
             connection.disconnect()
         }

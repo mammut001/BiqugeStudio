@@ -28,7 +28,11 @@ object RemoteImportDownloader {
         authorEpub: String,
         authorTxt: String,
     ): Result {
-        val connection = (URL(rawUrl).openConnection() as HttpURLConnection).apply {
+        val cleanUrl = rawUrl.trim()
+        if (!cleanUrl.startsWith("https://", ignoreCase = true)) {
+            throw IllegalArgumentException("HTTPS URL required")
+        }
+        val connection = (URL(cleanUrl).openConnection() as HttpURLConnection).apply {
             connectTimeout = 15_000
             readTimeout = 30_000
             instanceFollowRedirects = true
@@ -37,15 +41,19 @@ object RemoteImportDownloader {
         try {
             val code = connection.responseCode
             if (code !in 200..299) throw IllegalStateException("HTTP $code")
+            val finalProtocol = connection.url.protocol
+            if (!"https".equals(finalProtocol, ignoreCase = true)) {
+                throw IllegalArgumentException("HTTPS protocol required")
+            }
             val contentType = connection.contentType
             val data = connection.inputStream.use { readAll(it) }
-            val epub = rawUrl.lowercase().contains(".epub") ||
+            val epub = cleanUrl.lowercase().contains(".epub") ||
                 (contentType != null && contentType.contains("epub"))
             val text = if (epub) EpubReader.read(ByteArrayInputStream(data)) else decodeText(data)
             if (text.trim().isEmpty()) throw IllegalStateException("empty")
             var bookTitle = preferredTitle.trim()
             if (bookTitle.isEmpty()) {
-                bookTitle = fileName(rawUrl, if (epub) defaultEpubTitle else defaultTxtTitle)
+                bookTitle = fileName(cleanUrl, if (epub) defaultEpubTitle else defaultTxtTitle)
             }
             return Result(
                 title = bookTitle,

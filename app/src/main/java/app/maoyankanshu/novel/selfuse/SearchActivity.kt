@@ -26,6 +26,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
@@ -54,10 +56,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.maoyankanshu.novel.selfuse.ui.theme.BiqugeTheme
@@ -155,6 +160,7 @@ private fun SearchScreen(
     onClose: () -> Unit,
 ) {
     val context = LocalContext.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf("") }
     var libraryVersion by remember { mutableIntStateOf(0) }
@@ -164,6 +170,7 @@ private fun SearchScreen(
     var pendingUri by remember(initialUri) { mutableStateOf(initialUri) }
     var localImporting by remember { mutableStateOf(false) }
     var wikiImportingTitle by remember { mutableStateOf<String?>(null) }
+    var importErrorMessage by remember { mutableStateOf<String?>(null) }
 
     val isBusy = listState is SearchListState.WikiLoading ||
         listState is SearchListState.LocalLoading ||
@@ -187,6 +194,7 @@ private fun SearchScreen(
 
     fun refreshLocal() {
         if (localImporting || wikiImportingTitle != null || listState is SearchListState.WikiLoading) return
+        importErrorMessage = null
         val currentToken = ++searchToken
         val term = query.trim().lowercase()
         listState = SearchListState.LocalLoading
@@ -212,6 +220,7 @@ private fun SearchScreen(
 
     fun importUri(uri: Uri) {
         localImporting = true
+        importErrorMessage = null
         scope.launch {
             try {
                 val imported = withContext(Dispatchers.IO) {
@@ -235,7 +244,7 @@ private fun SearchScreen(
                 Log.e("SearchActivity", "Failed to import local book", e)
                 val isOversized = e is IllegalArgumentException && (e.message?.contains("too large") == true || e.message?.contains("32MB") == true)
                 val msgRes = if (isOversized) R.string.search_local_file_too_large else R.string.search_local_fail
-                Toast.makeText(context, context.getString(msgRes), Toast.LENGTH_SHORT).show()
+                importErrorMessage = context.getString(msgRes)
             } finally {
                 localImporting = false
             }
@@ -271,9 +280,10 @@ private fun SearchScreen(
 
     fun searchWiki() {
         if (isBusy) return
+        importErrorMessage = null
         val term = query.trim()
         if (term.isEmpty()) {
-            Toast.makeText(context, context.getString(R.string.search_query_required), Toast.LENGTH_SHORT).show()
+            importErrorMessage = context.getString(R.string.search_query_required)
             return
         }
         listState = SearchListState.WikiLoading
@@ -287,7 +297,9 @@ private fun SearchScreen(
                 } else {
                     SearchListState.WikiResults(hits)
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Log.e("SearchActivity", "Failed to search Wikisource", e)
+                importErrorMessage = wikiFail
                 listState = SearchListState.Message(wikiFail)
             }
         }
@@ -296,6 +308,7 @@ private fun SearchScreen(
     fun importWikiPage(pageTitle: String) {
         if (isBusy) return
         wikiImportingTitle = pageTitle
+        importErrorMessage = null
         Toast.makeText(
             context,
             context.getString(R.string.search_importing_page, pageTitle),
@@ -309,8 +322,9 @@ private fun SearchScreen(
                 }
                 libraryVersion++
                 Toast.makeText(context, context.getString(R.string.search_import_ok), Toast.LENGTH_SHORT).show()
-            } catch (_: Exception) {
-                Toast.makeText(context, context.getString(R.string.search_import_fail), Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Log.e("SearchActivity", "Failed to import Wikisource page", e)
+                importErrorMessage = context.getString(R.string.search_import_fail)
             } finally {
                 wikiImportingTitle = null
             }
@@ -367,15 +381,24 @@ private fun SearchScreen(
             ) {
                 OutlinedTextField(
                     value = query,
-                    onValueChange = { query = it },
+                    onValueChange = {
+                        query = it
+                        importErrorMessage = null
+                    },
                     enabled = !isBusy,
                     singleLine = true,
                     label = { Text(stringResource(R.string.search_shelf)) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = {
+                        refreshLocal()
+                        keyboardController?.hide()
+                    }),
                     trailingIcon = if (query.isNotEmpty()) {
                         {
                             IconButton(
                                 onClick = {
                                     query = ""
+                                    importErrorMessage = null
                                     refreshLocal()
                                 },
                                 enabled = !isBusy,
@@ -400,6 +423,18 @@ private fun SearchScreen(
                 ) {
                     Text(stringResource(R.string.search_action))
                 }
+            }
+            if (importErrorMessage != null) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = importErrorMessage!!,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp)
+                        .semantics { contentDescription = importErrorMessage!! },
+                )
             }
             Spacer(Modifier.height(10.dp))
             OutlinedButton(

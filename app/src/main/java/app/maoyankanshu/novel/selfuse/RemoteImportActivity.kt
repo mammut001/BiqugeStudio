@@ -8,18 +8,21 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -35,6 +38,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -91,6 +95,8 @@ private fun RemoteImportScreen(
     var title by remember { mutableStateOf(initialTitle) }
     var url by remember { mutableStateOf(initialUrl) }
     var loading by remember { mutableStateOf(false) }
+    var urlError by remember { mutableStateOf<String?>(null) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
 
     val backCd = stringResource(R.string.remote_back_cd)
     val titleCd = stringResource(R.string.remote_title_cd)
@@ -103,9 +109,11 @@ private fun RemoteImportScreen(
     val defaultTxt = stringResource(R.string.remote_default_txt)
 
     fun startDownload() {
+        urlError = null
+        errorMessage = null
         val rawUrl = url.trim()
         if (!ProgressMath.isHttpsUrl(rawUrl)) {
-            Toast.makeText(context, context.getString(R.string.https_url_required), Toast.LENGTH_SHORT).show()
+            urlError = context.getString(R.string.https_url_required)
             return
         }
         loading = true
@@ -131,11 +139,7 @@ private fun RemoteImportScreen(
                 onImported()
             } catch (error: Exception) {
                 Log.e("YueJianRemoteImport", "Unable to import direct file", error)
-                Toast.makeText(
-                    context,
-                    context.getString(R.string.remote_import_fail, error.javaClass.simpleName),
-                    Toast.LENGTH_LONG,
-                ).show()
+                errorMessage = context.getString(R.string.remote_import_fail)
                 loading = false
             }
         }
@@ -184,7 +188,10 @@ private fun RemoteImportScreen(
             )
             OutlinedTextField(
                 value = title,
-                onValueChange = { title = it },
+                onValueChange = {
+                    title = it
+                    errorMessage = null
+                },
                 enabled = !loading,
                 singleLine = true,
                 label = { Text(stringResource(R.string.remote_title_hint)) },
@@ -194,15 +201,39 @@ private fun RemoteImportScreen(
             )
             OutlinedTextField(
                 value = url,
-                onValueChange = { url = it },
+                onValueChange = {
+                    url = it
+                    urlError = null
+                    errorMessage = null
+                },
                 enabled = !loading,
                 singleLine = true,
                 label = { Text(stringResource(R.string.https_hint_remote)) },
+                isError = urlError != null,
+                supportingText = if (urlError != null) {
+                    {
+                        Text(
+                            text = urlError!!,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.semantics { contentDescription = urlError!! },
+                        )
+                    }
+                } else null,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                 modifier = Modifier
                     .fillMaxWidth()
                     .semantics { contentDescription = urlCd },
             )
+            if (errorMessage != null) {
+                Text(
+                    text = errorMessage!!,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .semantics { contentDescription = errorMessage!! },
+                )
+            }
             Spacer(Modifier.height(8.dp))
             Button(
                 onClick = { startDownload() },
@@ -212,13 +243,21 @@ private fun RemoteImportScreen(
                     .heightIn(min = 48.dp)
                     .semantics { contentDescription = downloadCd },
             ) {
-                Text(
-                    if (loading) {
-                        stringResource(R.string.remote_downloading)
-                    } else {
-                        stringResource(R.string.remote_download)
-                    },
-                )
+                if (loading) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+                        Text(stringResource(R.string.remote_downloading))
+                    }
+                } else {
+                    Text(stringResource(R.string.remote_download))
+                }
             }
         }
     }

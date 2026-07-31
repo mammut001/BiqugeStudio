@@ -31,24 +31,28 @@
 
 上架步骤见 [`RELEASECHECKLIST.md`](./RELEASECHECKLIST.md)。
 
-## 阅读页：纯 Compose 实现
+## 阅读页：Compose 架构与经典朗读 (TTS) 回退
 
-阅读功能已全面重构为纯 Compose 架构。
+阅读功能主要由 **Compose `ReaderActivity`**（`ReaderScreen`）提供，用于本地 **TXT / EPUB** 文本的沉浸阅读。系统 TTS 朗读与自动滚动功能通过 **`LegacyReaderActivity`** 提供，在 `ReaderScreen` 顶部工具栏设有专属的经典朗读快捷入口按钮。
 
 | 组件 | 路径 | 职责 |
 |------|------|------|
-| **Compose 阅读器** | `ReaderActivity.kt` + `ui/reader/*` | 唯一阅读入口。沉浸式正文、纸张/夜间/护眼主题、可选中文本、字号、目录、书签、书内查找、进度 0…1000 连续保存 |
-| **Intent 契约** | `ReaderActivity.EXTRA_ID` | 恒为 **`"book_id"`**（历史常量，禁止改成 `bookid` 等，否则断链） |
+| **Compose 阅读器** | `ReaderActivity.kt` + `ui/reader/*` | 主阅读入口。支持 TXT/EPUB 本地文本渲染、纸张/夜间/护眼主题、字号与行高调节、目录、书签、书内查找、经典朗读入口按钮、0…1000 进度连续落库 |
+| **经典朗读 (TTS)** | `LegacyReaderActivity.java` | 朗读与自动滚动界面。由 `ReaderScreen` 顶栏 `VolumeUp` 图标启动，支持系统 TTS 连续朗读、语速调节与定时/自动滚动 |
+| **Intent 契约** | `ReaderActivity.EXTRA_ID` / `LegacyReaderActivity.EXTRA_ID` | 恒为 **`"book_id"`**（历史常量，禁止改成 `bookid` 等，否则断链） |
 | **数据层** | `LibraryStore` / `BookmarkStore` / `ReaderPreferences` / `ReadingHistory` / `ReadingStats` | 共用数据组件；进度刻度仍为 **0…1000** |
 
 ```
 书架 / 详情 / 「继续阅读」
         │  putExtra("book_id", id)
         ▼
-  ReaderActivity（Compose，独立窗口/Activity）
+   ReaderActivity（Compose 主阅读器：TXT / EPUB）
+        │  [经典朗读按钮 / AppIntents.legacyReader]
+        ▼
+ LegacyReaderActivity（Java 连续 TTS 朗读、语速与自动滚动）
 ```
 
-**Compose 功能全覆盖**：edge-to-edge 阅读面、轻点显隐顶/底栏、页脚时间+百分比、章节正则、目录 sheet、上一章/下一章、书签增删跳、书内查找跳转、外观三主题与字号、阅读亮度窗口属性。
+**Compose 功能全覆盖**：edge-to-edge 阅读面、轻点显隐顶/底栏、页脚时间+百分比、章节正则索引、目录 sheet、上一章/下一章、书签增删跳、书内查找跳转、外观三主题、字号/行高调节、阅读亮度窗口属性、经典朗读 (TTS) 快捷入口。
 
 **不要做的事**：不要改 `EXTRA_ID` 字符串；不要把用户书库格式/SharedPreferences key 改掉而不做迁移。
 
@@ -164,7 +168,8 @@ app/src/main/java/app/maoyankanshu/novel/selfuse/
 
 | 类型 | 组件 |
 |------|------|
-| **Compose** | 主壳四 Tab；`SearchActivity`；`BookDetailActivity`；`RemoteImportActivity`；`WebImportActivity`；`ReaderActivity` |
+| **Compose** | 主壳四 Tab；`SearchActivity`；`BookDetailActivity`；`RemoteImportActivity`；`WebImportActivity`；`ReaderActivity`（含 `ReaderScreen`） |
+| **Java Activity 回退** | `LegacyReaderActivity`（经典朗读与自动滚动） |
 | **Java 非 UI** | `LibraryStore`、`Book`、`BookmarkStore`、`EpubReader`、`AppIntents` 等 |
 
 ## 已实现
@@ -173,7 +178,8 @@ app/src/main/java/app/maoyankanshu/novel/selfuse/
 - **Compose 搜索与导入**：本地书架过滤；SAF 导入 TXT / EPUB；HTTPS 维基搜索与导入；推荐公版与完整 EPUB 直链。
 - **Compose 详情**：继续/开始阅读、编辑元数据、导出 TXT、删除（二次确认）。
 - **Compose 直链 / 网页导入**：仅 HTTPS；User-Agent；LibraryStore 落库。
-- **Compose 阅读页**：0…1000 进度、章节/目录/书签/查找、纸张·夜间·护眼、可选中文本。
+- **Compose 阅读页**：0…1000 进度、章节/目录/书签/查找、纸张·夜间·护眼、可选中文本、经典朗读入口。
+- **经典朗读回退**：`ReaderScreen` 顶栏提供入口启动 `LegacyReaderActivity`，支持连续 TTS 朗读与自动滚动。
 - 本地书库 ZIP 备份与恢复；今日阅读时长；最近阅读记录。
 
 ## 迁移参考
@@ -187,8 +193,7 @@ app/src/main/java/app/maoyankanshu/novel/selfuse/
 
 ## 待继续迁移
 
-1. 将 **TTS / 语速 / 自动滚动** 安全迁入 Compose 后，再评估是否弱化（非删除）`LegacyReaderActivity`。  
-   （`BookDetail` / `Search` / `RemoteImport` / `WebImport` **已完成** Compose，无需再列。）
+1. 将 **TTS / 语速 / 自动滚动** 安全迁入 Compose 后，再评估是否弱化（非删除）`LegacyReaderActivity`。（`BookDetail` / `Search` / `RemoteImport` / `WebImport` **已完成** Compose，无需再列。）
 2. 更多文本编码、EPUB 封面与书籍分组；翻页动画。
 3. 下载队列与仅接入你有权使用的内容服务。
 4. 若要恢复评论、书单、登录等功能，需要独立的新服务端。

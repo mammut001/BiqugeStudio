@@ -7,6 +7,7 @@ import android.content.SharedPreferences;
 public final class ReaderPreferences {
     private static final String PREFS = "reader_preferences";
     private static final String FONT = "font_size";
+    private static final String LINE_HEIGHT = "line_height_multiplier";
     private static final String NIGHT = "night_mode";
     private static final String THEME = "reader_theme";
     private static final String BRIGHTNESS = "reader_brightness";
@@ -14,25 +15,86 @@ public final class ReaderPreferences {
     public static final int THEME_PAPER = 0;
     public static final int THEME_NIGHT = 1;
     public static final int THEME_EYE_CARE = 2;
+
+    public static final float DEFAULT_LINE_HEIGHT = 1.85f;
+    public static final float MIN_LINE_HEIGHT = 1.2f;
+    public static final float MAX_LINE_HEIGHT = 2.6f;
+
     private final SharedPreferences prefs;
 
-    private ReaderPreferences(Context context) { prefs = context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE); }
-    public static ReaderPreferences get(Context context) { return new ReaderPreferences(context); }
-    public int fontSize() { return prefs.getInt(FONT, 18); }
-    public void setFontSize(int size) { prefs.edit().putInt(FONT, Math.max(14, Math.min(30, size))).apply(); }
-    public boolean nightMode() { return prefs.getBoolean(NIGHT, false); }
-    public void setNightMode(boolean enabled) { setTheme(enabled ? THEME_NIGHT : THEME_PAPER); }
+    public ReaderPreferences(SharedPreferences prefs) {
+        this.prefs = prefs;
+    }
+
+    private ReaderPreferences(Context context) {
+        this(context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE));
+    }
+
+    public static ReaderPreferences get(Context context) {
+        return new ReaderPreferences(context);
+    }
+
+    public static ReaderPreferences get(SharedPreferences prefs) {
+        return new ReaderPreferences(prefs);
+    }
+
+    public int fontSize() {
+        return prefs.getInt(FONT, 18);
+    }
+
+    public void setFontSize(int size) {
+        prefs.edit().putInt(FONT, Math.max(14, Math.min(30, size))).apply();
+    }
+
+    public float lineHeightMultiplier() {
+        float val = prefs.getFloat(LINE_HEIGHT, DEFAULT_LINE_HEIGHT);
+        if (!Float.isFinite(val)) {
+            return DEFAULT_LINE_HEIGHT;
+        }
+        return Math.max(MIN_LINE_HEIGHT, Math.min(MAX_LINE_HEIGHT, val));
+    }
+
+    public void setLineHeightMultiplier(float multiplier) {
+        if (!Float.isFinite(multiplier)) {
+            prefs.edit().putFloat(LINE_HEIGHT, DEFAULT_LINE_HEIGHT).apply();
+            return;
+        }
+        float clamped = Math.max(MIN_LINE_HEIGHT, Math.min(MAX_LINE_HEIGHT, multiplier));
+        prefs.edit().putFloat(LINE_HEIGHT, clamped).apply();
+    }
+
+    public boolean nightMode() {
+        return prefs.getBoolean(NIGHT, false);
+    }
+
+    public void setNightMode(boolean enabled) {
+        setTheme(enabled ? THEME_NIGHT : THEME_PAPER);
+    }
+
     public int theme() {
         if (!prefs.contains(THEME)) return nightMode() ? THEME_NIGHT : THEME_PAPER;
         return Math.max(THEME_PAPER, Math.min(THEME_EYE_CARE, prefs.getInt(THEME, THEME_PAPER)));
     }
+
     public void setTheme(int value) {
         int theme = Math.max(THEME_PAPER, Math.min(THEME_EYE_CARE, value));
         prefs.edit().putInt(THEME, theme).putBoolean(NIGHT, theme == THEME_NIGHT).apply();
     }
+
     /** -1 uses the system default; otherwise Android expects a value in 0..1. */
-    public float brightness() { return prefs.getFloat(BRIGHTNESS, -1f); }
-    public void setBrightness(float value) { prefs.edit().putFloat(BRIGHTNESS, value < 0 ? -1f : Math.max(.08f, Math.min(1f, value))).apply(); }
-    public float ttsRate() { return Math.max(.5f, Math.min(2f, prefs.getFloat(TTS_RATE, 1f))); }
-    public void setTtsRate(float rate) { prefs.edit().putFloat(TTS_RATE, Math.max(.5f, Math.min(2f, rate))).apply(); }
+    public float brightness() {
+        return prefs.getFloat(BRIGHTNESS, -1f);
+    }
+
+    public void setBrightness(float value) {
+        prefs.edit().putFloat(BRIGHTNESS, value < 0 ? -1f : Math.max(.08f, Math.min(1f, value))).apply();
+    }
+
+    public float ttsRate() {
+        return Math.max(.5f, Math.min(2f, prefs.getFloat(TTS_RATE, 1f)));
+    }
+
+    public void setTtsRate(float rate) {
+        prefs.edit().putFloat(TTS_RATE, Math.max(.5f, Math.min(2f, rate))).apply();
+    }
 }

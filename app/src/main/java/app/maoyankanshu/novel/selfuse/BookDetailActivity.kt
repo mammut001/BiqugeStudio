@@ -10,6 +10,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -242,50 +243,96 @@ private fun BookDetailScreen(
     if (showEdit) {
         var title by remember(book.id) { mutableStateOf(book.title) }
         var author by remember(book.id) { mutableStateOf(book.author) }
+        val editTitleText = stringResource(R.string.detail_edit_title)
+        val titleHintText = stringResource(R.string.detail_title_hint)
+        val authorHintText = stringResource(R.string.detail_author_hint)
+        val titleRequiredText = stringResource(R.string.detail_title_required)
+        val authorRequiredText = stringResource(R.string.detail_author_required)
+        val saveText = stringResource(R.string.detail_save)
+        val cancelText = stringResource(R.string.detail_cancel)
+
+        val cleanTitle = title.trim()
+        val cleanAuthor = author.trim()
+
         AlertDialog(
             onDismissRequest = { showEdit = false },
-            title = { Text(stringResource(R.string.detail_edit_title)) },
+            title = {
+                Text(
+                    text = editTitleText,
+                    modifier = Modifier.semantics { heading() },
+                )
+            },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = title,
                         onValueChange = { title = it },
                         singleLine = true,
-                        label = { Text(stringResource(R.string.detail_title_hint)) },
-                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(titleHintText) },
+                        isError = cleanTitle.isEmpty(),
+                        supportingText = if (cleanTitle.isEmpty()) {
+                            { Text(titleRequiredText, color = MaterialTheme.colorScheme.error) }
+                        } else null,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .semantics { contentDescription = titleHintText },
                     )
                     OutlinedTextField(
                         value = author,
                         onValueChange = { author = it },
                         singleLine = true,
-                        label = { Text(stringResource(R.string.detail_author_hint)) },
-                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(authorHintText) },
+                        isError = cleanAuthor.isEmpty(),
+                        supportingText = if (cleanAuthor.isEmpty()) {
+                            { Text(authorRequiredText, color = MaterialTheme.colorScheme.error) }
+                        } else null,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .semantics { contentDescription = authorHintText },
                     )
                 }
             },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        LibraryStore.get(context).updateMetadata(book.id, title, author)
+                        LibraryStore.get(context).updateMetadata(book.id, cleanTitle, cleanAuthor)
                         book = LibraryStore.get(context).byId(book.id) ?: book
                         showEdit = false
                     },
+                    enabled = cleanTitle.isNotEmpty() && cleanAuthor.isNotEmpty(),
+                    modifier = Modifier
+                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                        .semantics { contentDescription = saveText },
                 ) {
-                    Text(stringResource(R.string.detail_save))
+                    Text(saveText)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showEdit = false }) {
-                    Text(stringResource(R.string.detail_cancel))
+                TextButton(
+                    onClick = { showEdit = false },
+                    modifier = Modifier
+                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                        .semantics { contentDescription = cancelText },
+                ) {
+                    Text(cancelText)
                 }
             },
         )
     }
 
     if (showDelete) {
+        val deleteTitleText = stringResource(R.string.detail_delete_title)
+        val deleteText = stringResource(R.string.detail_delete)
+        val cancelText = stringResource(R.string.detail_cancel)
+
         AlertDialog(
             onDismissRequest = { showDelete = false },
-            title = { Text(stringResource(R.string.detail_delete_title)) },
+            title = {
+                Text(
+                    text = deleteTitleText,
+                    modifier = Modifier.semantics { heading() },
+                )
+            },
             text = {
                 Text(stringResource(R.string.detail_delete_body, book.title))
             },
@@ -296,13 +343,21 @@ private fun BookDetailScreen(
                         showDelete = false
                         onClose()
                     },
+                    modifier = Modifier
+                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                        .semantics { contentDescription = deleteText },
                 ) {
-                    Text(stringResource(R.string.detail_delete))
+                    Text(deleteText)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDelete = false }) {
-                    Text(stringResource(R.string.detail_cancel))
+                TextButton(
+                    onClick = { showDelete = false },
+                    modifier = Modifier
+                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                        .semantics { contentDescription = cancelText },
+                ) {
+                    Text(cancelText)
                 }
             },
         )

@@ -38,10 +38,15 @@ import app.maoyankanshu.novel.selfuse.R
 import app.maoyankanshu.novel.selfuse.ui.components.BookCard
 import app.maoyankanshu.novel.selfuse.ui.components.EmptyState
 
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.Alignment
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ShelfScreen(
     books: List<Book>,
+    isLoading: Boolean = false,
     onLibraryChanged: () -> Unit,
     contentPadding: PaddingValues,
 ) {
@@ -68,97 +73,122 @@ fun ShelfScreen(
         context.startActivity(AppIntents.reader(context, book.id))
     }
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(contentPadding)
-            .semantics { contentDescription = context.getString(R.string.shelf_screen_cd) },
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        if (books.isEmpty()) {
-            item {
-                EmptyState(
-                    title = stringResource(R.string.shelf_empty_title),
-                    body = stringResource(R.string.shelf_empty_body),
-                    contentDescription = stringResource(R.string.shelf_empty_cd),
-                    primaryLabel = stringResource(R.string.cta_import),
-                    primaryDescription = stringResource(R.string.import_local_txt_epub_cd),
-                    onPrimary = {
-                        context.startActivity(AppIntents.importLocal(context))
-                    },
-                    secondaryLabel = stringResource(R.string.cta_search),
-                    secondaryDescription = stringResource(R.string.search_shelf_cd),
-                    onSecondary = {
-                        context.startActivity(AppIntents.search(context))
-                    },
+    if (isLoading) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(contentPadding)
+                .semantics { contentDescription = context.getString(R.string.shelf_loading_cd) },
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(40.dp),
+                    strokeWidth = 3.dp,
+                )
+                Text(
+                    text = stringResource(R.string.shelf_loading),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-        } else {
-            if (continueReading.isNotEmpty()) {
+        }
+    } else {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(contentPadding)
+                .semantics { contentDescription = context.getString(R.string.shelf_screen_cd) },
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            if (books.isEmpty()) {
                 item {
-                    SectionLabel(stringResource(R.string.shelf_section_continue))
-                }
-                items(continueReading, key = { "continue-${it.id}" }) { book ->
-                    BookCard(
-                        book = book,
-                        onClick = { openDetail(book) },
-                        onLongClick = { menuBook = book },
-                        onContinueReading = { openReader(book) },
-                    )
-                }
-            }
-
-            item {
-                SectionLabel(stringResource(R.string.shelf_section_all))
-            }
-
-            item {
-                ShelfToolbar(
-                    progressFilter = progressFilter,
-                    onFilterChange = { progressFilter = it },
-                    sortOrder = sortOrder,
-                    sortMenuExpanded = sortMenuExpanded,
-                    onSortMenuExpandedChange = { sortMenuExpanded = it },
-                    onSortOrderChange = {
-                        sortOrder = it
-                        sortMenuExpanded = false
-                    },
-                )
-            }
-
-            if (allBooks.isEmpty()) {
-                item {
-                    Text(
-                        text = stringResource(R.string.shelf_filter_empty),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp)
-                            .semantics {
-                                contentDescription = context.getString(R.string.shelf_filter_empty)
-                            },
+                    EmptyState(
+                        title = stringResource(R.string.shelf_empty_title),
+                        body = stringResource(R.string.shelf_empty_body),
+                        contentDescription = stringResource(R.string.shelf_empty_cd),
+                        primaryLabel = stringResource(R.string.cta_import),
+                        primaryDescription = stringResource(R.string.import_local_txt_epub_cd),
+                        onPrimary = {
+                            context.startActivity(AppIntents.importLocal(context))
+                        },
+                        secondaryLabel = stringResource(R.string.cta_search),
+                        secondaryDescription = stringResource(R.string.search_shelf_cd),
+                        onSecondary = {
+                            context.startActivity(AppIntents.search(context))
+                        },
                     )
                 }
             } else {
-                items(allBooks, key = { "all-${it.id}" }) { book ->
-                    BookCard(
-                        book = book,
-                        onClick = { openDetail(book) },
-                        onLongClick = { menuBook = book },
-                        onContinueReading = { openReader(book) },
+                if (continueReading.isNotEmpty()) {
+                    item {
+                        SectionLabel(stringResource(R.string.shelf_section_continue))
+                    }
+                    items(continueReading, key = { "continue-${it.id}" }) { book ->
+                        BookCard(
+                            book = book,
+                            onClick = { openDetail(book) },
+                            onLongClick = { menuBook = book },
+                            onContinueReading = { openReader(book) },
+                        )
+                    }
+                }
+
+                item {
+                    SectionLabel(stringResource(R.string.shelf_section_all))
+                }
+
+                item {
+                    ShelfToolbar(
+                        progressFilter = progressFilter,
+                        onFilterChange = { progressFilter = it },
+                        sortOrder = sortOrder,
+                        sortMenuExpanded = sortMenuExpanded,
+                        onSortMenuExpandedChange = { sortMenuExpanded = it },
+                        onSortOrderChange = {
+                            sortOrder = it
+                            sortMenuExpanded = false
+                        },
                     )
                 }
-            }
 
-            item {
-                Text(
-                    text = stringResource(R.string.shelf_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 2.dp, bottom = 8.dp),
-                )
+                if (allBooks.isEmpty()) {
+                    item {
+                        Text(
+                            text = stringResource(R.string.shelf_filter_empty),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp)
+                                .semantics {
+                                    contentDescription = context.getString(R.string.shelf_filter_empty)
+                                },
+                        )
+                    }
+                } else {
+                    items(allBooks, key = { "all-${it.id}" }) { book ->
+                        BookCard(
+                            book = book,
+                            onClick = { openDetail(book) },
+                            onLongClick = { menuBook = book },
+                            onContinueReading = { openReader(book) },
+                        )
+                    }
+                }
+
+                item {
+                    Text(
+                        text = stringResource(R.string.shelf_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 2.dp, bottom = 8.dp),
+                    )
+                }
             }
         }
     }

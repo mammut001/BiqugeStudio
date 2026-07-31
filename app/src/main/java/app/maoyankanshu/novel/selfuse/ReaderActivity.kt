@@ -13,9 +13,6 @@ import app.maoyankanshu.novel.selfuse.ui.theme.BiqugeTheme
 /**
  * Primary Jetpack Compose reader. Public [EXTRA_ID] stays `"book_id"` so all
  * existing Intents continue to work.
- *
- * Continuous TTS, TTS rate, and auto-scroll remain in [LegacyReaderActivity]
- * and are opened via the explicit “经典朗读” action.
  */
 class ReaderActivity : ComponentActivity() {
 

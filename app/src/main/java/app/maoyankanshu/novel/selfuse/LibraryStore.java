@@ -2,17 +2,17 @@ package app.maoyankanshu.novel.selfuse;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.util.Base64;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,17 +23,35 @@ import java.util.zip.ZipOutputStream;
 
 /** Device-only library metadata plus private text files, safe for long TXT imports. */
 public final class LibraryStore {
+    public static final long MAX_SINGLE_ENTRY_BYTES = 32 * 1024 * 1024L; // 32 MiB
+    public static final long MAX_TOTAL_UNCOMPRESSED_BYTES = 128 * 1024 * 1024L; // 128 MiB
+
     private static final String PREFS = "local_library";
     private static final String KEY = "books_v2";
     private final Context context;
     private final SharedPreferences prefs;
+    private final File filesDir;
 
     /** Pre-rename product author on the built-in seed book only. */
     private static final String LEGACY_SEED_AUTHOR = "笔趣阁（自用）";
 
     private LibraryStore(Context context) {
         this.context = context.getApplicationContext();
-        prefs = this.context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        this.prefs = this.context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        this.filesDir = this.context.getFilesDir();
+        initSeedIfNeeded();
+    }
+
+    LibraryStore(SharedPreferences prefs, File filesDir, String defaultAppName, String defaultWelcomeTitle, String defaultWelcomeBody) {
+        this.context = null;
+        this.prefs = prefs;
+        this.filesDir = filesDir;
+        if (!prefs.contains(KEY)) {
+            add(defaultWelcomeTitle, defaultAppName, defaultWelcomeBody);
+        }
+    }
+
+    private void initSeedIfNeeded() {
         if (!prefs.contains(KEY)) {
             String appName = this.context.getString(R.string.app_name);
             add(
@@ -51,6 +69,7 @@ public final class LibraryStore {
      * author field to {@link R.string#app_name}. Never changes titles or user-imported books.
      */
     private void migrateLegacySeedAuthor() {
+        if (context == null) return;
         String appName = context.getString(R.string.app_name);
         String seedTitle = context.getString(R.string.welcome_book_title);
         if (LEGACY_SEED_AUTHOR.equals(appName)) return;
@@ -71,14 +90,20 @@ public final class LibraryStore {
     public List<Book> books() {
         List<Book> books = new ArrayList<>();
         String raw = prefs.getString(KEY, "");
-        if (raw.isEmpty()) return books;
+        if (raw == null || raw.isEmpty()) return books;
         for (String row : raw.split("\\n", -1)) {
+            if (row.trim().isEmpty()) continue;
             String[] values = row.split("\\|", 4);
             if (values.length != 4) continue;
             try {
                 String text = readText(values[0]);
-                if (text != null) books.add(new Book(values[0], decode(values[1]), decode(values[2]), text, Integer.parseInt(values[3])));
-            } catch (IllegalArgumentException ignored) { }
+                if (text != null) {
+                    String title = decode(values[1]);
+                    String author = decode(values[2]);
+                    int pos = Math.max(0, Math.min(Integer.parseInt(values[3]), 1000));
+                    books.add(new Book(values[0], title, author, text, pos));
+                }
+            } catch (Exception ignored) { }
         }
         return books;
     }
@@ -132,26 +157,43 @@ public final class LibraryStore {
     public int importFrom(InputStream input) throws IOException {
         Map<String, byte[]> texts = new HashMap<>();
         String manifest = null;
+        long totalUncompressedBytes = 0;
         try (ZipInputStream zip = new ZipInputStream(input)) {
             ZipEntry entry;
             while ((entry = zip.getNextEntry()) != null) {
                 ByteArrayOutputStream data = new ByteArrayOutputStream();
-                byte[] buffer = new byte[8192]; int count;
-                while ((count = zip.read(buffer)) != -1) data.write(buffer, 0, count);
+                byte[] buffer = new byte[8192];
+                int count;
+                long entryBytes = 0;
+                while ((count = zip.read(buffer)) != -1) {
+                    entryBytes += count;
+                    totalUncompressedBytes += count;
+                    if (entryBytes > MAX_SINGLE_ENTRY_BYTES) {
+                        throw new IllegalArgumentException("ZIP entry exceeds maximum allowed size of 32 MiB");
+                    }
+                    if (totalUncompressedBytes > MAX_TOTAL_UNCOMPRESSED_BYTES) {
+                        throw new IllegalArgumentException("ZIP total uncompressed size exceeds maximum allowed limit of 128 MiB");
+                    }
+                    data.write(buffer, 0, count);
+                }
                 if ("library.txt".equals(entry.getName())) manifest = data.toString("UTF-8");
                 else if (entry.getName().startsWith("books/") && entry.getName().endsWith(".txt")) texts.put(entry.getName().substring(6, entry.getName().length() - 4), data.toByteArray());
                 zip.closeEntry();
             }
         }
-        if (manifest == null) throw new IOException("Not a library backup");
+        if (manifest == null) throw new IOException("备份文件损坏或缺失 library.txt 清单");
         List<Book> all = books(); int imported = 0;
         for (String row : manifest.split("\\n", -1)) {
+            if (row.trim().isEmpty()) continue;
             String[] values = row.split("\\|", 4);
             if (values.length != 4 || !texts.containsKey(values[0])) continue;
             try {
-                all.add(new Book(UUID.randomUUID().toString(), decode(values[1]), decode(values[2]), new String(texts.get(values[0]), StandardCharsets.UTF_8), Integer.parseInt(values[3])));
+                String title = decode(values[1]);
+                String author = decode(values[2]);
+                int position = Math.max(0, Math.min(Integer.parseInt(values[3]), 1000));
+                all.add(new Book(UUID.randomUUID().toString(), title, author, new String(texts.get(values[0]), StandardCharsets.UTF_8), position));
                 imported++;
-            } catch (IllegalArgumentException ignored) { }
+            } catch (Exception ignored) { }
         }
         save(all);
         return imported;
@@ -163,10 +205,17 @@ public final class LibraryStore {
             writeText(book.id, book.text);
             output.append(book.id).append('|').append(encode(book.title)).append('|').append(encode(book.author)).append('|').append(book.position).append('\n');
         }
-        prefs.edit().putString(KEY, output.toString()).apply();
+        if (prefs.edit() != null) {
+            prefs.edit().putString(KEY, output.toString()).apply();
+        }
     }
 
-    private File bookDir() { File dir = new File(context.getFilesDir(), "books"); if (!dir.exists()) dir.mkdirs(); return dir; }
+    private File bookDir() {
+        File dir = new File(filesDir, "books");
+        if (!dir.exists()) dir.mkdirs();
+        return dir;
+    }
+
     private String readText(String id) {
         File file = new File(bookDir(), id + ".txt");
         if (!file.exists()) return null;
@@ -176,15 +225,23 @@ public final class LibraryStore {
             return read < 0 ? "" : new String(data, 0, read, StandardCharsets.UTF_8);
         } catch (IOException ignored) { return null; }
     }
+
     private void writeText(String id, String text) {
         try (FileOutputStream output = new FileOutputStream(new File(bookDir(), id + ".txt"))) {
             output.write(text.getBytes(StandardCharsets.UTF_8));
         } catch (IOException ignored) { }
     }
+
     private static String cleanTitle(String value, String fallback) {
         String clean = value == null ? "" : value.trim();
         return clean.isEmpty() ? fallback : clean.replace('|', '｜').replace('\n', ' ');
     }
-    private static String encode(String value) { return Base64.encodeToString(value.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP); }
-    private static String decode(String value) { return new String(Base64.decode(value, Base64.NO_WRAP), StandardCharsets.UTF_8); }
+
+    private static String encode(String value) {
+        return Base64.getEncoder().encodeToString(value.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static String decode(String value) {
+        return new String(Base64.getDecoder().decode(value), StandardCharsets.UTF_8);
+    }
 }

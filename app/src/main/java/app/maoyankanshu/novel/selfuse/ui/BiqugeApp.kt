@@ -16,8 +16,10 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -42,6 +44,12 @@ import app.maoyankanshu.novel.selfuse.ui.screens.ProfileScreen
 import app.maoyankanshu.novel.selfuse.ui.screens.ShelfScreen
 import app.maoyankanshu.novel.selfuse.ui.screens.StoreScreen
 
+import app.maoyankanshu.novel.selfuse.Book
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BiqugeApp(
@@ -55,7 +63,18 @@ fun BiqugeApp(
 
     var libraryVersion by remember { mutableIntStateOf(0) }
     var historyVersion by remember { mutableIntStateOf(0) }
-    val books = remember(libraryVersion) { LibraryStore.get(context).books() }
+
+    var booksState by remember { mutableStateOf<List<Book>?>(null) }
+
+    LaunchedEffect(libraryVersion) {
+        val updatedBooks = withContext(Dispatchers.IO) {
+            LibraryStore.get(context).books()
+        }
+        booksState = updatedBooks
+    }
+
+    val isLoading = booksState == null
+    val books = booksState ?: emptyList()
 
     // Refresh shelf/history when returning from Java Activities (import, reader, detail).
     DisposableEffect(lifecycleOwner) {
@@ -84,9 +103,10 @@ fun BiqugeApp(
         topBar = {
             TopAppBar(
                 title = {
-                    val pageCd = stringResource(R.string.reader_page_title_cd, currentTab.label)
+                    val tabLabel = stringResource(currentTab.labelRes)
+                    val pageCd = stringResource(R.string.reader_page_title_cd, tabLabel)
                     Text(
-                        text = currentTab.label,
+                        text = tabLabel,
                         modifier = Modifier.semantics {
                             contentDescription = pageCd
                         },
@@ -100,7 +120,9 @@ fun BiqugeApp(
                             onClick = {
                                 context.startActivity(AppIntents.search(context))
                             },
-                            modifier = Modifier.semantics { contentDescription = searchCd },
+                            modifier = Modifier
+                                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                .semantics { contentDescription = searchCd },
                         ) {
                             Icon(Icons.Filled.Search, contentDescription = null)
                         }
@@ -108,7 +130,9 @@ fun BiqugeApp(
                             onClick = {
                                 context.startActivity(AppIntents.importLocal(context))
                             },
-                            modifier = Modifier.semantics { contentDescription = importCd },
+                            modifier = Modifier
+                                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                .semantics { contentDescription = importCd },
                         ) {
                             Icon(Icons.Filled.Add, contentDescription = null)
                         }
@@ -129,12 +153,8 @@ fun BiqugeApp(
             ) {
                 MainTab.entries.forEach { tab ->
                     val selected = currentTab == tab
-                    val tabCd = when (tab) {
-                        MainTab.Shelf -> stringResource(R.string.tab_shelf_cd)
-                        MainTab.Store -> stringResource(R.string.tab_store_cd)
-                        MainTab.Discover -> stringResource(R.string.tab_discover_cd)
-                        MainTab.Profile -> stringResource(R.string.tab_profile_cd)
-                    }
+                    val tabLabel = stringResource(tab.labelRes)
+                    val tabCd = stringResource(tab.contentDescriptionRes)
                     NavigationBarItem(
                         selected = selected,
                         onClick = { navigateTo(tab) },
@@ -144,7 +164,7 @@ fun BiqugeApp(
                                 contentDescription = null,
                             )
                         },
-                        label = { Text(tab.label) },
+                        label = { Text(tabLabel) },
                         modifier = Modifier.semantics {
                             contentDescription = tabCd
                         },
@@ -161,6 +181,7 @@ fun BiqugeApp(
             composable(MainTab.Shelf.route) {
                 ShelfScreen(
                     books = books,
+                    isLoading = isLoading,
                     onLibraryChanged = { libraryVersion++ },
                     contentPadding = innerPadding,
                 )

@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -72,6 +73,7 @@ fun StoreScreen(
                     },
                     modifier = Modifier
                         .fillMaxWidth()
+                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                         .semantics { contentDescription = importLocalCd },
                 ) {
                     Text(importLocal)
@@ -83,6 +85,7 @@ fun StoreScreen(
                     },
                     modifier = Modifier
                         .fillMaxWidth()
+                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                         .semantics { contentDescription = importRemoteCd },
                 ) {
                     Text(importRemote)
@@ -94,6 +97,7 @@ fun StoreScreen(
                     },
                     modifier = Modifier
                         .fillMaxWidth()
+                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                         .semantics { contentDescription = importWebCd },
                 ) {
                     Text(importWeb)

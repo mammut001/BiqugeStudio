@@ -47,6 +47,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -387,14 +389,34 @@ fun ReaderScreen(
                     .fillMaxWidth()
                     .windowInsetsPadding(WindowInsets.navigationBars),
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 56.dp)
-                        .padding(horizontal = 4.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically,
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
+                    val sliderPercent = (progress / 10f).roundToInt()
+                    val sliderProgressCd = stringResource(R.string.reader_progress_cd, sliderPercent)
+                    Slider(
+                        value = progress.toFloat(),
+                        onValueChange = { progress = it.roundToInt().coerceIn(0, 1000) },
+                        onValueChangeFinished = { scrollToProgress(progress) },
+                        valueRange = 0f..1000f,
+                        colors = SliderDefaults.colors(
+                            thumbColor = palette.onBar,
+                            activeTrackColor = palette.onBar,
+                            inactiveTrackColor = palette.muted,
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 2.dp)
+                            .semantics { contentDescription = sliderProgressCd },
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 56.dp)
+                            .padding(horizontal = 4.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                     ControlLabel(
                         text = stringResource(R.string.reader_prev_chapter),
                         enabled = currentChapter > 0,
@@ -460,6 +482,7 @@ fun ReaderScreen(
                 }
             }
         }
+    }
     }
 
     if (showToc) {

@@ -13,14 +13,18 @@
     <string name="about_app">关于%1$s</string>
     <string name="backup_file_name">%1$s书库备份.zip</string>
     <string name="welcome_book_title">使用说明</string>
-    <string name="welcome_book_body">欢迎使用新的本地阅读器。\n\n这里可以导入你拥有的 TXT / EPUB 文本，并在设备上保存阅读进度。\n\n原版的在线书城、账户、广告和支付依赖已经失效，不会作为%1$s的功能基础。\n\n下一步会继续迁移阅读设置、目录、书架管理和离线下载。</string>
+    <string name="welcome_book_body">欢迎使用全新的本地离线阅读器。\n\n这里可以导入你拥有的 TXT / EPUB 文本，并在设备上保存阅读进度与书签。\n\n应用专注于本地阅读：支持中文维基文库公版文本检索、你提供的 HTTPS 直链下载及授权网页离线导入。无需账户、无广告与额外追踪，所有数据均保存在本机。\n\n原版的在线书城、账户、广告和支付依赖已全部移除，不会作为%1$s的功能基础。</string>
     <string name="profile_no_account_note">账户、支付、广告和远端推送不会迁入%1$s。</string>
-    <string name="about_body">这是一个独立维护的本地阅读器。\n\n书籍、进度、书签、历史和备份默认只保存在你的设备中，不会上传到%1$s运营方服务器。\n\n本地可导入 TXT / EPUB；可选在线能力：中文维基文库公版文本、你提供的直链或授权网页。详情见仓库 PRIVACY.md。</string>
+    <string name="about_body">这是一个独立维护的本地离线阅读器。\n\n书籍、进度、书签、历史和备份默认仅保存在你的设备中，不会上传到%1$s或第三方服务器。\n\n主要功能：本地 TXT / EPUB 导入与阅读；可选在线能力包含中文维基文库公版文本检索、你提供的 HTTPS 直链及授权网页离线导入。详情见项目 PRIVACY.md。</string>
     <string name="about_ok">知道了</string>
     <string name="privacy_summary_cd">隐私摘要：数据默认仅保存在本机</string>
 
+    <string name="tab_shelf">书架</string>
+    <string name="tab_store">书库</string>
+    <string name="tab_discover">发现</string>
+    <string name="tab_profile">我的</string>
     <string name="tab_shelf_cd">书架，查看本地书籍</string>
-    <string name="tab_store_cd">书城，导入与本地书库</string>
+    <string name="tab_store_cd">书库，导入与本地内容</string>
     <string name="tab_discover_cd">发现，阅读概览与历史</string>
     <string name="tab_profile_cd">我的，阅读设置与备份</string>
     <string name="http_user_agent">YueJian/1.0 (阅笺; personal offline reader)</string>
@@ -55,7 +59,7 @@
     <string name="remote_download">下载并加入书架</string>
     <string name="remote_downloading">正在下载…</string>
     <string name="remote_import_ok">已加入《%1$s》</string>
-    <string name="remote_import_fail">下载或导入失败：%1$s</string>
+    <string name="remote_import_fail">下载或导入失败</string>
     <string name="remote_author_epub">直链 EPUB</string>
     <string name="remote_author_txt">直链 TXT</string>
     <string name="remote_default_epub">EPUB 导入</string>
@@ -80,6 +84,8 @@
     <string name="detail_edit_title">编辑书籍信息</string>
     <string name="detail_title_hint">书名</string>
     <string name="detail_author_hint">作者</string>
+    <string name="detail_title_required">书名不能为空</string>
+    <string name="detail_author_required">作者不能为空</string>
     <string name="detail_save">保存</string>
     <string name="detail_cancel">取消</string>
     <string name="detail_delete_title">删除书籍？</string>
@@ -165,9 +171,9 @@
     <string name="store_library_heading">本地书库</string>
     <string name="store_library_summary">已收录 %1$d 本书 · 所有内容均可离线阅读</string>
     <string name="store_library_summary_cd">已收录 %1$d 本书，均可离线阅读</string>
-    <string name="store_empty_title">书城还没有书</string>
+    <string name="store_empty_title">书库还没有书</string>
     <string name="store_empty_body">导入你拥有的 TXT / EPUB，或搜索维基文库的公版文本，开始建立自己的离线书库。</string>
-    <string name="store_empty_cd">书城为空，可搜索公版文本或导入本地书籍</string>
+    <string name="store_empty_cd">书库为空，可搜索公版文本或导入本地书籍</string>
     <string name="store_my_books_heading">我的书籍</string>
 
     <!-- Compose reader -->
@@ -294,4 +300,10 @@
     <string name="discover_continue_heading">继续阅读</string>
     <string name="discover_history_heading">最近阅读</string>
     <string name="discover_clear_history">清除阅读历史</string>
+    <string name="discover_clear_history_title">清除阅读历史？</string>
+    <string name="discover_clear_history_body">确定清除本设备的阅读历史记录？此操作不会影响已保存的书籍与阅读进度。</string>
+    <string name="discover_clear_history_confirm">清除</string>
+    <string name="discover_clear_history_cancel">取消</string>
+    <string name="discover_clear_history_confirm_cd">确定清除阅读历史</string>
+    <string name="discover_clear_history_cancel_cd">取消清除阅读历史</string>
 </resources>
