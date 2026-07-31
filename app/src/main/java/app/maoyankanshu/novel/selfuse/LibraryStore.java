@@ -33,7 +33,7 @@ public final class LibraryStore {
     private final File filesDir;
 
     /** Pre-rename product author on the built-in seed book only. */
-    private static final String LEGACY_SEED_AUTHOR = "笔趣阁（自用）";
+    private static final String LEGACY_SEED_AUTHOR = "笔趣阁";
 
     private LibraryStore(Context context) {
         this.context = context.getApplicationContext();
@@ -77,7 +77,7 @@ public final class LibraryStore {
         boolean changed = false;
         for (int i = 0; i < all.size(); i++) {
             Book book = all.get(i);
-            if (seedTitle.equals(book.title) && LEGACY_SEED_AUTHOR.equals(book.author)) {
+            if (seedTitle.equals(book.title) && (LEGACY_SEED_AUTHOR.equals(book.author) || "笔趣阁（自用）".equals(book.author))) {
                 all.set(i, new Book(book.id, book.title, appName, book.text, book.position));
                 changed = true;
             }
