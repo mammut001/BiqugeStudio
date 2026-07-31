@@ -207,6 +207,8 @@
     <string name="reader_line_height_standard">标准</string>
     <string name="reader_line_height_relaxed">宽松</string>
     <string name="reader_add_bookmark">＋ 添加当前位置书签</string>
+    <string name="reader_add_bookmark_cd">添加当前位置书签</string>
+    <string name="reader_bookmarks_empty">暂无书签，可添加当前位置</string>
     <string name="reader_manage_bookmarks">管理书签</string>
     <string name="reader_delete_bookmark_title">删除书签？</string>
     <string name="reader_find_title">书内查找</string>

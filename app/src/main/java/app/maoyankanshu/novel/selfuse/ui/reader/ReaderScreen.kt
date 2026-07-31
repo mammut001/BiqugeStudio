@@ -48,6 +48,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -498,6 +500,7 @@ fun ReaderScreen(
     }
 
     if (showToc) {
+        val currentSuffix = stringResource(R.string.reader_chapter_current_suffix)
         ModalBottomSheet(
             onDismissRequest = { showToc = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -505,6 +508,7 @@ fun ReaderScreen(
             Text(
                 text = stringResource(R.string.reader_toc),
                 style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier
                     .padding(horizontal = 20.dp, vertical = 8.dp)
                     .semantics { heading() },
@@ -515,31 +519,37 @@ fun ReaderScreen(
             ) {
                 itemsIndexed(chapters) { index, chapter ->
                     val selected = index == currentChapter
-                    Text(
-                        text = chapter.title,
-                        color = if (selected) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
+                    val chapterCd = chapter.title + if (selected) currentSuffix else ""
+                    ListItem(
+                        headlineContent = {
+                            Text(
+                                text = chapter.title,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = if (selected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                },
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         },
+                        colors = ListItemDefaults.colors(
+                            containerColor = MaterialTheme.colorScheme.surface,
+                        ),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .defaultMinSize(minHeight = 48.dp)
-                            .clickable {
+                            .defaultMinSize(minWidth = 48.dp, minHeight = 56.dp)
+                            .clickable(role = Role.Button) {
                                 showToc = false
                                 scrollToOffset(chapter.start)
                             }
-                            .padding(horizontal = 20.dp, vertical = 14.dp)
                             .semantics {
-                                contentDescription = chapter.title +
-                                    if (selected) {
-                                        context.getString(R.string.reader_chapter_current_suffix)
-                                    } else {
-                                        ""
-                                    }
+                                contentDescription = chapterCd
+                                role = Role.Button
                             },
                     )
-                    HorizontalDivider()
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
             }
         }
@@ -549,6 +559,9 @@ fun ReaderScreen(
         val bookmarks = remember(bookmarkVersion, book.id) {
             BookmarkStore.get(context).list(book.id)
         }
+        val addBookmarkLabel = stringResource(R.string.reader_add_bookmark)
+        val addBookmarkCd = stringResource(R.string.reader_add_bookmark_cd)
+        val bookmarksEmpty = stringResource(R.string.reader_bookmarks_empty)
         ModalBottomSheet(
             onDismissRequest = { showBookmarks = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -556,6 +569,7 @@ fun ReaderScreen(
             Text(
                 text = stringResource(R.string.reader_bookmarks),
                 style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier
                     .padding(horizontal = 20.dp, vertical = 8.dp)
                     .semantics { heading() },
@@ -574,59 +588,89 @@ fun ReaderScreen(
                 },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .defaultMinSize(minHeight = 48.dp)
-                    .padding(horizontal = 8.dp),
+                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                    .padding(horizontal = 8.dp)
+                    .semantics {
+                        contentDescription = addBookmarkCd
+                        role = Role.Button
+                    },
             ) {
-                Text(stringResource(R.string.reader_add_bookmark))
+                Text(addBookmarkLabel)
             }
-            LazyColumn(
-                contentPadding = PaddingValues(bottom = 32.dp),
-                modifier = Modifier.heightIn(max = 360.dp),
-            ) {
-                itemsIndexed(bookmarks) { index, mark ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
+            if (bookmarks.isEmpty()) {
+                Text(
+                    text = bookmarksEmpty,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 16.dp)
+                        .semantics { contentDescription = bookmarksEmpty },
+                )
+            } else {
+                LazyColumn(
+                    contentPadding = PaddingValues(bottom = 32.dp),
+                    modifier = Modifier.heightIn(max = 360.dp),
+                ) {
+                    itemsIndexed(bookmarks) { index, mark ->
                         val pct = Math.round(mark.progress / 10f)
-                        Text(
-                            text = stringResource(R.string.reader_bookmark_list_item, mark.label, pct),
+                        val itemLabel = stringResource(
+                            R.string.reader_bookmark_list_item,
+                            mark.label,
+                            pct,
+                        )
+                        val itemCd = stringResource(
+                            R.string.reader_bookmark_item_cd,
+                            mark.label,
+                            pct,
+                        )
+                        val deleteCd = stringResource(
+                            R.string.reader_delete_bookmark_cd,
+                            mark.label,
+                        )
+                        ListItem(
+                            headlineContent = {
+                                Text(
+                                    text = itemLabel,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            },
+                            trailingContent = {
+                                TextButton(
+                                    onClick = {
+                                        BookmarkStore.get(context).remove(book.id, index)
+                                        bookmarkVersion++
+                                    },
+                                    modifier = Modifier
+                                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                        .semantics {
+                                            contentDescription = deleteCd
+                                            role = Role.Button
+                                        },
+                                ) {
+                                    Text(stringResource(R.string.reader_delete))
+                                }
+                            },
+                            colors = ListItemDefaults.colors(
+                                containerColor = MaterialTheme.colorScheme.surface,
+                            ),
                             modifier = Modifier
-                                .weight(1f)
-                                .defaultMinSize(minHeight = 48.dp)
-                                .clickable {
+                                .fillMaxWidth()
+                                .defaultMinSize(minWidth = 48.dp, minHeight = 56.dp)
+                                .clickable(role = Role.Button) {
                                     showBookmarks = false
                                     scrollToProgress(mark.progress)
                                 }
-                                .padding(vertical = 14.dp)
                                 .semantics {
-                                    contentDescription = context.getString(
-                                        R.string.reader_bookmark_item_cd,
-                                        mark.label,
-                                        pct,
-                                    )
+                                    contentDescription = itemCd
+                                    role = Role.Button
                                 },
                         )
-                        TextButton(
-                            onClick = {
-                                BookmarkStore.get(context).remove(book.id, index)
-                                bookmarkVersion++
-                            },
-                            modifier = Modifier
-                                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                                .semantics {
-                                    contentDescription = context.getString(
-                                        R.string.reader_delete_bookmark_cd,
-                                        mark.label,
-                                    )
-                                },
-                        ) {
-                            Text(stringResource(R.string.reader_delete))
-                        }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
-                    HorizontalDivider()
                 }
             }
         }
