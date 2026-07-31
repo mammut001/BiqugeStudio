@@ -56,7 +56,7 @@ Issue 模板：Bug / Feature（`.github/ISSUE_TEMPLATE/`）。PR 模板：`.gith
 
 | 组件 | 路径 | 职责 |
 |------|------|------|
-| **Compose 阅读器** | `ReaderActivity.kt` + `ui/reader/*` | 主阅读入口。支持 TXT/EPUB 本地文本渲染、纸张/夜间/护眼主题、字号与行高调节、目录、书签、书内查找、经典朗读入口按钮、0…1000 进度连续落库 |
+| **Compose 阅读器** | `ReaderActivity.kt` + `ui/reader/*` | 主阅读入口。支持 TXT/EPUB 本地文本渲染、纸张/夜间/护眼主题、字号与行高调节、目录、书签、书内查找、经典朗读入口按钮、0…1000 进度连续落库；离开时 `DisposableEffect(book.id)` + `rememberUpdatedState` 经 `ReaderLeaveSave`（进程级 IO `SupervisorJob`，非 per-`onDispose` 裸 `CoroutineScope`）写入 `ReadingStats` / `LibraryStore.savePosition` |
 | **经典朗读 (TTS)** | `LegacyReaderActivity.java` | 朗读与自动滚动界面。由 `ReaderScreen` 顶栏 `VolumeUp` 图标启动，支持系统 TTS 连续朗读、语速调节与定时/自动滚动 |
 | **Intent 契约** | `ReaderActivity.EXTRA_ID` / `LegacyReaderActivity.EXTRA_ID` | 恒为 **`"book_id"`**（历史常量，禁止改成 `bookid` 等，否则断链） |
 | **数据层** | `LibraryStore` / `BookmarkStore` / `ReaderPreferences` / `ReadingHistory` / `ReadingStats` | 共用数据组件；进度刻度仍为 **0…1000** |
@@ -175,7 +175,7 @@ chmod +x gradlew
 
 | 类型 | 路径 | 命令 | 内容 |
 |------|------|------|------|
-| **JVM 单元测试** | `app/src/test/` | `:app:testDebugUnitTest` | `ChapterIndex` 章节正则与偏移；`ProgressMath` 进度 0…1000 与 HTTPS 校验（无设备） |
+| **JVM 单元测试** | `app/src/test/` | `:app:testDebugUnitTest` | `ChapterIndex` 章节正则与偏移；`ProgressMath` 进度 0…1000 与 HTTPS 校验；`ReaderLeaveSave` 离开时长 / `clampProgress`（无设备、无 Android Runtime） |
 | **Instrumented / Compose** | `app/src/androidTest/` | `:app:connectedDebugAndroidTest` | Compose BOM 对齐的 UI smoke（如 `BiqugeTheme`）；需模拟器/真机 |
 
 `androidTest` 与主工程共用 **Compose BOM `2024.10.01`**。
@@ -238,7 +238,7 @@ app/src/main/java/app/maoyankanshu/novel/selfuse/
 - **EPUB 封面**：从 OPF 解析 cover-image（EPUB2 meta / EPUB3 `properties`），**2 MiB** 上限 + 图像魔数校验；可选存于 `covers/{id}.cover`（书库 4 字段行不变）；删除书籍时清理；**备份 ZIP 含封面**；`BookCard` 显示本地位图，缺省渐变占位。
 - **Compose 详情**：继续/开始阅读、编辑元数据、导出 TXT、删除（二次确认）。
 - **Compose 直链 / 网页导入**：仅 HTTPS；User-Agent；LibraryStore 落库；远程 EPUB 同样可带封面字节。
-- **Compose 阅读页**：0…1000 进度、章节/目录/书签/查找、纸张·夜间·护眼、可选中文本、经典朗读入口。
+- **Compose 阅读页**：0…1000 进度（`ProgressMath.clampProgress`）、章节/目录/书签/查找、纸张·夜间·护眼、可选中文本、经典朗读入口；滚动 debounce 落库 + 离开 `onDispose` 最终落库（`ReaderLeaveSave`，minSdk 23）。
 - **经典朗读回退**：`ReaderScreen` 顶栏提供入口启动 `LegacyReaderActivity`，支持连续 TTS 朗读与自动滚动。
 - 本地书库 ZIP 备份与恢复；今日阅读时长；最近阅读记录。
 

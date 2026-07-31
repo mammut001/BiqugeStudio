@@ -22,6 +22,8 @@ class ProgressMathTest {
         assertEquals(0, ProgressMath.progressForScrollY(10, 0))
         assertEquals(0, ProgressMath.scrollYForProgress(-5, 200))
         assertEquals(200, ProgressMath.scrollYForProgress(2000, 200))
+        assertEquals(0, ProgressMath.clampProgress(-42))
+        assertEquals(1000, ProgressMath.clampProgress(9999))
     }
 
     @Test

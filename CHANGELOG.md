@@ -17,12 +17,14 @@ They do **not** assert a Google Play ship date, store listing URL, or remote CI 
 - Dependabot weekly updates for Gradle and GitHub Actions (`.github/dependabot.yml`).
 - JVM tests: blank/whitespace/HTTP remote URL rejection; pure `canAcceptUi` finishing/destroyed matrix (`ImportUiGate`).
 - Remote/Web import: in-flight **取消下载 / 取消导入** (`Job.cancel`) with strings + TalkBack content descriptions; loading status polite `liveRegion`.
+- `ReaderLeaveSave` + `ProgressMath.clampProgress`: pure leave-duration / 0…1000 helpers with JVM tests (`ReaderLeaveSaveTest`).
 
 ### Changed
 
 - README and `RELEASECHECKLIST.md`: changelog, dependency-update, and release-tag guidance.
 - README: document API 23 vs `networkSecurityConfig` (API 24+), HTTPS import `Job` cancel (button + back), TalkBack `liveRegion` on remote/web loading and errors.
 - `canAcceptUi` extracted to `ImportUiGate.kt` for shared use and JVM tests.
+- README: Compose reader leave-save uses process-lifetime IO scope (not per-`onDispose` `CoroutineScope`) and `rememberUpdatedState` for latest 0…1000 progress.
 
 ### Fixed
 
@@ -30,6 +32,7 @@ They do **not** assert a Google Play ship date, store listing URL, or remote CI 
 - Loading no longer disables the back affordance (back cancels the Job and leaves).
 - TalkBack: polite `liveRegion` on remote/web URL validation, loading status, and import failure messages.
 - `LibraryStore.save`: single `SharedPreferences.edit().apply()` (CommitPrefEdits lint).
+- `ReaderScreen` `DisposableEffect(book.id)` `onDispose`: no unstructured `CoroutineScope(Dispatchers.IO).launch` per leave; clamp progress 0…1000; skip non-positive reading duration for `ReadingStats`.
 
 ## [1.0.1] — versionCode 2
 

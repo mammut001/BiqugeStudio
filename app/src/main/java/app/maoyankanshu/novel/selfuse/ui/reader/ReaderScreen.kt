@@ -70,6 +70,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -96,8 +97,6 @@ import app.maoyankanshu.novel.selfuse.LibraryStore
 import app.maoyankanshu.novel.selfuse.R
 import app.maoyankanshu.novel.selfuse.ReaderPreferences
 import app.maoyankanshu.novel.selfuse.ReadingHistory
-import app.maoyankanshu.novel.selfuse.ReadingStats
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
@@ -150,10 +149,12 @@ fun ReaderScreen(
     val scrollState = rememberScrollState()
     val controlsScrollState = rememberScrollState()
     var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
-    var progress by remember { mutableIntStateOf(book.position.coerceIn(0, 1000)) }
+    var progress by remember { mutableIntStateOf(ProgressMath.clampProgress(book.position)) }
     var currentChapter by remember { mutableIntStateOf(0) }
     var clock by remember { mutableStateOf(formatTime()) }
     var initialRestored by remember { mutableStateOf(false) }
+    // Latest progress for leave-save: DisposableEffect keys only on book.id.
+    val latestProgress by rememberUpdatedState(progress)
 
     DisposableEffect(Unit) {
         applyBrightness(activity, preferences.brightness())
@@ -166,12 +167,12 @@ fun ReaderScreen(
         ReadingHistory.get(appContext).record(bookId)
         val started = android.os.SystemClock.elapsedRealtime()
         onDispose {
-            val duration = android.os.SystemClock.elapsedRealtime() - started
-            val finalProgress = progress
-            CoroutineScope(Dispatchers.IO).launch {
-                ReadingStats.add(appContext, duration)
-                LibraryStore.get(appContext).savePosition(bookId, finalProgress)
-            }
+            // Do not use rememberCoroutineScope here — composition is leaving.
+            // Process-lifetime IO scope + clamp 0…1000; stats skip non-positive duration.
+            val ended = android.os.SystemClock.elapsedRealtime()
+            val duration = ReaderLeaveSave.elapsedReadingMs(started, ended)
+            val finalProgress = ProgressMath.clampProgress(latestProgress)
+            ReaderLeaveSave.persistAsync(appContext, bookId, finalProgress, duration)
         }
     }
 
@@ -186,7 +187,7 @@ fun ReaderScreen(
         if (initialRestored || textLayout == null || scrollState.maxValue <= 0) return@LaunchedEffect
         val target = ProgressMath.scrollYForProgress(book.position, scrollState.maxValue)
         scrollState.scrollTo(target)
-        progress = book.position.coerceIn(0, 1000)
+        progress = ProgressMath.clampProgress(book.position)
         currentChapter = ChapterIndex.chapterAtOffset(
             chapters,
             offsetForScrollY(textLayout!!, target),
@@ -215,8 +216,9 @@ fun ReaderScreen(
             .distinctUntilChanged()
             .debounce(500L)
             .collect { p ->
+                val clamped = ProgressMath.clampProgress(p)
                 withContext(Dispatchers.IO) {
-                    LibraryStore.get(context).savePosition(book.id, p)
+                    LibraryStore.get(context).savePosition(book.id, clamped)
                 }
             }
     }
@@ -405,7 +407,7 @@ fun ReaderScreen(
                     val sliderProgressCd = stringResource(R.string.reader_progress_cd, sliderPercent)
                     Slider(
                         value = progress.toFloat(),
-                        onValueChange = { progress = it.roundToInt().coerceIn(0, 1000) },
+                        onValueChange = { progress = ProgressMath.clampProgress(it.roundToInt()) },
                         onValueChangeFinished = { scrollToProgress(progress) },
                         valueRange = 0f..1000f,
                         colors = SliderDefaults.colors(
