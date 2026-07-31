@@ -15,7 +15,26 @@ public final class AppIntents {
     }
 
     public static Intent importLocal(Context context) {
-        return new Intent(context, SearchActivity.class).putExtra(SearchActivity.EXTRA_IMPORT, true);
+        return new Intent(context, SearchActivity.class)
+                .putExtra(SearchActivity.EXTRA_IMPORT, true);
+    }
+
+    /** ACTION_VIEW for a content:// or file:// TXT/EPUB URI (tests + deep links). */
+    public static Intent viewBook(Context context, android.net.Uri uri) {
+        return new Intent(context, SearchActivity.class)
+                .setAction(Intent.ACTION_VIEW)
+                .setData(uri)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+    }
+
+    /** ACTION_SEND with EXTRA_STREAM content URI (share-sheet style). */
+    public static Intent sendBookStream(Context context, android.net.Uri streamUri, String mimeType) {
+        Intent intent = new Intent(context, SearchActivity.class)
+                .setAction(Intent.ACTION_SEND)
+                .setType(mimeType != null ? mimeType : "*/*")
+                .putExtra(Intent.EXTRA_STREAM, streamUri)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        return intent;
     }
 
     public static Intent bookDetail(Context context, String bookId) {

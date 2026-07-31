@@ -1,9 +1,7 @@
 package app.maoyankanshu.novel.selfuse
 
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
@@ -72,7 +70,10 @@ import kotlinx.coroutines.withContext
 
 /**
  * Compose search / local import / Wikisource.
- * [EXTRA_IMPORT] = `"open_import"` — open SAF picker on launch (AppIntents.importLocal).
+ *
+ * Manifest: [Intent.ACTION_VIEW] (`content://` / `file://` TXT·EPUB) and
+ * [Intent.ACTION_SEND] ([Intent.EXTRA_STREAM] content URI).
+ * [EXTRA_IMPORT] = `"open_import"` — open SAF picker on launch ([AppIntents.importLocal]).
  */
 class SearchActivity : ComponentActivity() {
 
@@ -83,7 +84,7 @@ class SearchActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val openImport = intent?.getBooleanExtra(EXTRA_IMPORT, false) ?: false
         val uri = extractUriFromIntent(intent)
-        takePersistablePermissionIfGranted(this, intent, uri)
+        ImportIntentUris.takeReadPermissionIfPossible(this, intent, uri)
         intentUriState.value = uri
 
         setContent {
@@ -101,46 +102,15 @@ class SearchActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         val uri = extractUriFromIntent(intent)
-        takePersistablePermissionIfGranted(this, intent, uri)
+        ImportIntentUris.takeReadPermissionIfPossible(this, intent, uri)
         intentUriState.value = uri
     }
 
     companion object {
-        /** Historical extra used by [AppIntents.importLocal]. */
-        const val EXTRA_IMPORT: String = "open_import"
+        /** Historical extra used by [AppIntents.importLocal] / [ImportIntentUris.EXTRA_IMPORT]. */
+        const val EXTRA_IMPORT: String = ImportIntentUris.EXTRA_IMPORT
 
-        fun takePersistablePermissionIfGranted(context: Context, intent: Intent?, uri: Uri?) {
-            if (uri != null && uri.scheme == "content" && intent != null) {
-                try {
-                    val flags = intent.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION
-                    if (flags != 0) {
-                        context.contentResolver.takePersistableUriPermission(
-                            uri,
-                            Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                        )
-                    }
-                } catch (_: Exception) {
-                    // Ignored if provider does not grant persistable permissions
-                }
-            }
-        }
-
-        fun extractUriFromIntent(intent: Intent?): Uri? {
-            if (intent == null) return null
-            val action = intent.action
-            if (Intent.ACTION_VIEW == action) {
-                return intent.data
-            } else if (Intent.ACTION_SEND == action) {
-                val streamUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
-                } else {
-                    @Suppress("DEPRECATION")
-                    intent.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri
-                }
-                return streamUri ?: intent.data
-            }
-            return intent.data
-        }
+        fun extractUriFromIntent(intent: Intent?): Uri? = ImportIntentUris.extractUri(intent)
     }
 }
 

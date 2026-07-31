@@ -29,10 +29,19 @@
         <activity
             android:name=".LegacyReaderActivity"
             android:exported="false" />
+        <!--
+          TXT/EPUB open-with + share target.
+          Temporary URI grants from the sender (FLAG_GRANT_READ_URI_PERMISSION) are
+          honored for content://; see ImportIntentUris.takeReadPermissionIfPossible.
+          singleTop delivers repeat shares via onNewIntent.
+        -->
         <activity
             android:name=".SearchActivity"
-            android:exported="true">
-            <!-- 1. ACTION_VIEW for content:// URIs -->
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.BiqugeStudio"
+            android:windowSoftInputMode="adjustResize">
+            <!-- ACTION_VIEW content:// (SAF / DocumentsUI / other apps) -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -42,7 +51,17 @@
                 <data android:mimeType="application/epub+zip" />
                 <data android:mimeType="application/octet-stream" />
             </intent-filter>
-            <!-- 2. ACTION_VIEW for file:// URIs -->
+            <!-- ACTION_VIEW content:// by extension when MIME is generic (host required by lint) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" android:host="*" android:mimeType="*/*" android:pathPattern=".*\\.txt" />
+                <data android:scheme="content" android:host="*" android:mimeType="*/*" android:pathPattern=".*\\.epub" />
+                <data android:scheme="content" android:host="*" android:mimeType="*/*" android:pathPattern=".*\\.TXT" />
+                <data android:scheme="content" android:host="*" android:mimeType="*/*" android:pathPattern=".*\\.EPUB" />
+            </intent-filter>
+            <!-- ACTION_VIEW file:// (legacy paths; minSdk 23 still sees some providers) -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -51,16 +70,24 @@
                 <data android:mimeType="text/plain" />
                 <data android:mimeType="application/epub+zip" />
                 <data android:mimeType="application/octet-stream" />
-                <data android:mimeType="*/*" android:host="*" android:pathPattern=".*\\.txt" />
-                <data android:mimeType="*/*" android:host="*" android:pathPattern=".*\\.epub" />
             </intent-filter>
-            <!-- 3. ACTION_SEND for system share -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="file" android:host="*" android:pathPattern=".*\\.txt" />
+                <data android:scheme="file" android:host="*" android:pathPattern=".*\\.epub" />
+                <data android:scheme="file" android:host="*" android:pathPattern=".*\\.TXT" />
+                <data android:scheme="file" android:host="*" android:pathPattern=".*\\.EPUB" />
+            </intent-filter>
+            <!-- ACTION_SEND share sheet: EXTRA_STREAM content URI (+ MIME) -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
                 <data android:mimeType="application/epub+zip" />
                 <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
         <activity
