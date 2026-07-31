@@ -14,12 +14,16 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -27,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -35,7 +40,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.res.stringResource
 import app.maoyankanshu.novel.selfuse.Book
 import app.maoyankanshu.novel.selfuse.R
 import kotlin.math.abs
@@ -168,7 +172,8 @@ fun BookCard(
             }
 
             if (showContinueReading && onContinueReading != null) {
-                TextButton(
+                // Material 3 tonal CTA: ≥48dp target, TalkBack label, RTL-safe trailing arrow.
+                FilledTonalButton(
                     onClick = onContinueReading,
                     modifier = Modifier
                         .align(Alignment.End)
@@ -177,8 +182,13 @@ fun BookCard(
                 ) {
                     Text(
                         text = actionLabel,
-                        color = MaterialTheme.colorScheme.primary,
                         style = MaterialTheme.typography.labelLarge,
+                    )
+                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = null,
+                        modifier = Modifier.size(ButtonDefaults.IconSize),
                     )
                 }
             }
