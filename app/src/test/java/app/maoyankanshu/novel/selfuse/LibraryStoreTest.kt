@@ -2,8 +2,11 @@ package app.maoyankanshu.novel.selfuse
 
 import android.content.SharedPreferences
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -86,6 +89,59 @@ class LibraryStoreTest {
         val importedCount = store2.importFrom(ByteArrayInputStream(zipBytes))
         assertEquals(2, importedCount)
         assertEquals(3, store2.books().size) // Welcome book (seed) + 2 imported
+    }
+
+    @Test
+    fun fourFieldManifestRows_stillLoadWithoutCover() {
+        val store = createStore()
+        store.add("无封面", "作者", "正文")
+        val book = store.books().first { it.title == "无封面" }
+        assertNull(book.coverPath)
+    }
+
+    @Test
+    fun addWithCover_persistsAndRemoveDeletesCover() {
+        val store = createStore()
+        val png = java.util.Base64.getDecoder().decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+        )
+        store.add("有封面", "作者", "正文", png)
+        val book = store.books().first { it.title == "有封面" }
+        assertNotNull(book.coverPath)
+        assertTrue(java.io.File(book.coverPath!!).exists())
+        val id = book.id
+        val coversDir = java.io.File(book.coverPath!!).parentFile
+        store.remove(id)
+        assertTrue(store.books().none { it.id == id })
+        // Cover file removed with book
+        assertFalse(java.io.File(coversDir, "$id.cover").exists())
+    }
+
+    @Test
+    fun exportImport_roundTripsCover() {
+        val store1 = createStore()
+        val png = java.util.Base64.getDecoder().decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+        )
+        store1.add("封面书", "甲", "乙", png)
+        val baos = ByteArrayOutputStream()
+        store1.exportTo(baos)
+
+        val store2 = createStore()
+        store2.importFrom(ByteArrayInputStream(baos.toByteArray()))
+        val restored = store2.books().first { it.title == "封面书" }
+        assertNotNull(restored.coverPath)
+        assertTrue(java.io.File(restored.coverPath!!).exists())
+        assertTrue(java.io.File(restored.coverPath!!).length() > 0)
+    }
+
+    @Test
+    fun addOversizedCover_ignoredGracefully() {
+        val store = createStore()
+        val huge = ByteArray(LibraryStore.MAX_COVER_BYTES + 10) { 1 }
+        store.add("超大封面", "作者", "正文", huge)
+        val book = store.books().first { it.title == "超大封面" }
+        assertNull(book.coverPath)
     }
 
     @Test

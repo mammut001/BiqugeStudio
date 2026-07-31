@@ -235,9 +235,74 @@ class EpubReaderTest {
     }
 
     @Test
+    fun looksLikeImage_jpegPngGifWebp() {
+        assertTrue(EpubReader.looksLikeImage(byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0x00)))
+        assertTrue(EpubReader.looksLikeImage(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47)))
+        assertTrue(EpubReader.looksLikeImage("GIF89a".toByteArray(StandardCharsets.US_ASCII)))
+        val webp = ByteArray(12)
+        "RIFF".toByteArray().copyInto(webp, 0)
+        "WEBP".toByteArray().copyInto(webp, 8)
+        assertTrue(EpubReader.looksLikeImage(webp))
+        assertFalse(EpubReader.looksLikeImage("not-an-image".toByteArray()))
+        assertFalse(EpubReader.looksLikeImage(byteArrayOf(1, 2)))
+    }
+
+    @Test
+    fun resolveCoverHref_epub2MetaAndEpub3Properties() {
+        val opf2 = """
+            <package>
+              <metadata><meta name="cover" content="cov"/></metadata>
+              <manifest>
+                <item id="cov" href="images/c.jpg" media-type="image/jpeg"/>
+                <item id="c1" href="ch.html" media-type="application/xhtml+xml"/>
+              </manifest>
+            </package>
+        """.trimIndent()
+        assertEquals("OEBPS/images/c.jpg", EpubReader.resolveCoverHref(opf2, "OEBPS/content.opf"))
+
+        val opf3 = """
+            <package>
+              <manifest>
+                <item id="cov" href="cover.png" media-type="image/png" properties="cover-image"/>
+              </manifest>
+            </package>
+        """.trimIndent()
+        assertEquals("OEBPS/cover.png", EpubReader.resolveCoverHref(opf3, "OEBPS/content.opf"))
+        assertEquals(null, EpubReader.resolveCoverHref("<package/>", "OEBPS/content.opf"))
+    }
+
+    @Test
+    fun extractCoverBytes_rejectsOversizedAndMissing() {
+        val png = minimalPngBytes()
+        val files = mapOf("OEBPS/cover.png" to png)
+        val opf = """
+            <package>
+              <manifest>
+                <item id="cov" href="cover.png" media-type="image/png" properties="cover-image"/>
+              </manifest>
+            </package>
+        """.trimIndent()
+        val ok = EpubReader.extractCoverBytes(files, opf, "OEBPS/content.opf")
+        assertTrue(ok != null && ok.contentEquals(png))
+
+        val huge = ByteArray(EpubReader.MAX_COVER_BYTES + 1) { 0xFF.toByte() }
+        huge[0] = 0xFF.toByte()
+        huge[1] = 0xD8.toByte()
+        val filesHuge = mapOf("OEBPS/cover.png" to huge)
+        assertEquals(null, EpubReader.extractCoverBytes(filesHuge, opf, "OEBPS/content.opf"))
+
+        assertEquals(null, EpubReader.extractCoverBytes(emptyMap(), opf, "OEBPS/content.opf"))
+    }
+
+    @Test
     fun maxBytes_matchesLocalBookImport32MiB() {
         assertEquals(32 * 1024 * 1024, EpubReader.MAX_BYTES)
     }
+
+    private fun minimalPngBytes(): ByteArray =
+        java.util.Base64.getDecoder().decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+        )
 
     @Test
     fun readAllBounded_rejectsWhenEntryExceeds32MiB() {

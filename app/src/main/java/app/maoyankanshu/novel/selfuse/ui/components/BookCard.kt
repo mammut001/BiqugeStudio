@@ -1,6 +1,8 @@
 package app.maoyankanshu.novel.selfuse.ui.components
 
+import android.graphics.BitmapFactory
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -8,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -31,6 +34,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -84,6 +89,16 @@ fun BookCard(
     val initial = remember(book.title) {
         book.title.trim().firstOrNull()?.toString() ?: "书"
     }
+    // Offline file only — no network images. Malformed/missing path → gradient fallback.
+    val coverBitmap = remember(book.coverPath) {
+        book.coverPath?.let { path ->
+            try {
+                BitmapFactory.decodeFile(path)
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
 
     Card(
         modifier = modifier
@@ -111,18 +126,29 @@ fun BookCard(
                     modifier = Modifier
                         .size(width = CoverWidth, height = CoverHeight)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(coverBrush)
+                        .then(
+                            if (coverBitmap == null) Modifier.background(coverBrush) else Modifier,
+                        )
                         .semantics {
                             contentDescription = "封面，$initial"
                         },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(
-                        text = initial,
-                        color = Color.White.copy(alpha = 0.95f),
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    )
+                    if (coverBitmap != null) {
+                        Image(
+                            bitmap = coverBitmap.asImageBitmap(),
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else {
+                        Text(
+                            text = initial,
+                            color = Color.White.copy(alpha = 0.95f),
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
                 }
 
                 Column(

@@ -130,7 +130,12 @@ private fun RemoteImportScreen(
                         authorTxt = authorTxt,
                     )
                 }
-                LibraryStore.get(context).add(result.title, result.author, result.text)
+                LibraryStore.get(context).add(
+                    result.title,
+                    result.author,
+                    result.text,
+                    result.coverBytes,
+                )
                 Toast.makeText(
                     context,
                     context.getString(R.string.remote_import_ok, result.title),

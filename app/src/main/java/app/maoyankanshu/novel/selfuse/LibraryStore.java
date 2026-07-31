@@ -25,6 +25,8 @@ import java.util.zip.ZipOutputStream;
 public final class LibraryStore {
     public static final long MAX_SINGLE_ENTRY_BYTES = 32 * 1024 * 1024L; // 32 MiB
     public static final long MAX_TOTAL_UNCOMPRESSED_BYTES = 128 * 1024 * 1024L; // 128 MiB
+    /** Cover images live under covers/{id}.cover; same bound as EPUB extract. */
+    public static final int MAX_COVER_BYTES = EpubReader.MAX_COVER_BYTES;
 
     private static final String PREFS = "local_library";
     private static final String KEY = "books_v2";
@@ -78,7 +80,7 @@ public final class LibraryStore {
         for (int i = 0; i < all.size(); i++) {
             Book book = all.get(i);
             if (seedTitle.equals(book.title) && (LEGACY_SEED_AUTHOR.equals(book.author) || "笔趣阁".equals(book.author))) {
-                all.set(i, new Book(book.id, book.title, appName, book.text, book.position));
+                all.set(i, new Book(book.id, book.title, appName, book.text, book.position, book.coverPath));
                 changed = true;
             }
         }
@@ -93,6 +95,8 @@ public final class LibraryStore {
         if (raw == null || raw.isEmpty()) return books;
         for (String row : raw.split("\\n", -1)) {
             if (row.trim().isEmpty()) continue;
+            // Backward-compatible: still exactly 4 fields (id|title|author|position).
+            // Covers are optional side files, not a 5th column.
             String[] values = row.split("\\|", 4);
             if (values.length != 4) continue;
             try {
@@ -101,7 +105,7 @@ public final class LibraryStore {
                     String title = decode(values[1]);
                     String author = decode(values[2]);
                     int pos = Math.max(0, Math.min(Integer.parseInt(values[3]), 1000));
-                    books.add(new Book(values[0], title, author, text, pos));
+                    books.add(new Book(values[0], title, author, text, pos, coverPathIfPresent(values[0])));
                 }
             } catch (Exception ignored) { }
         }
@@ -109,13 +113,32 @@ public final class LibraryStore {
     }
 
     public Book byId(String id) { for (Book book : books()) if (book.id.equals(id)) return book; return null; }
-    public void add(String title, String author, String text) { List<Book> all = books(); all.add(new Book(UUID.randomUUID().toString(), title, author, text, 0)); save(all); }
-    /** Changes display metadata without changing the saved text or reading position. */
+    public void add(String title, String author, String text) {
+        add(title, author, text, null);
+    }
+
+    /** Optional [coverBytes] (JPEG/PNG/…) stored under covers/{id}.cover when within size limit. */
+    public void add(String title, String author, String text, byte[] coverBytes) {
+        List<Book> all = books();
+        String id = UUID.randomUUID().toString();
+        String coverPath = writeCover(id, coverBytes);
+        all.add(new Book(id, title, author, text, 0, coverPath));
+        save(all);
+    }
+    /** Changes display metadata without changing the saved text, cover, or reading position. */
     public void updateMetadata(String id, String title, String author) {
         List<Book> all = books();
         for (int i = 0; i < all.size(); i++) {
             Book old = all.get(i);
-            if (old.id.equals(id)) all.set(i, new Book(old.id, cleanTitle(title, old.title), cleanTitle(author, old.author), old.text, old.position));
+            if (old.id.equals(id)) {
+                all.set(i, new Book(
+                        old.id,
+                        cleanTitle(title, old.title),
+                        cleanTitle(author, old.author),
+                        old.text,
+                        old.position,
+                        old.coverPath));
+            }
         }
         save(all);
     }
@@ -134,19 +157,27 @@ public final class LibraryStore {
         }
         File file = new File(bookDir(), id + ".txt");
         if (file.exists()) file.delete();
+        deleteCover(id);
         save(all);
     }
 
-    /** Exports all local books and progress into a portable ZIP backup. */
+    /** Exports all local books, progress, and covers into a portable ZIP backup. */
     public void exportTo(OutputStream output) throws IOException {
         List<Book> books = books();
         try (ZipOutputStream zip = new ZipOutputStream(output)) {
             StringBuilder manifest = new StringBuilder();
             for (Book book : books) {
+                // Manifest stays 4-field for old-client restore compatibility.
                 manifest.append(book.id).append('|').append(encode(book.title)).append('|').append(encode(book.author)).append('|').append(book.position).append('\n');
                 zip.putNextEntry(new ZipEntry("books/" + book.id + ".txt"));
                 zip.write(book.text.getBytes(StandardCharsets.UTF_8));
                 zip.closeEntry();
+                byte[] cover = readCoverBytes(book.id);
+                if (cover != null && cover.length > 0) {
+                    zip.putNextEntry(new ZipEntry("covers/" + book.id + ".cover"));
+                    zip.write(cover);
+                    zip.closeEntry();
+                }
             }
             zip.putNextEntry(new ZipEntry("library.txt"));
             zip.write(manifest.toString().getBytes(StandardCharsets.UTF_8));
@@ -165,6 +196,7 @@ public final class LibraryStore {
     /** Adds books from a backup ZIP; existing local books remain untouched. */
     public int importFrom(InputStream input) throws IOException {
         Map<String, byte[]> texts = new HashMap<>();
+        Map<String, byte[]> covers = new HashMap<>();
         String manifest = null;
         long totalUncompressedBytes = 0;
         try (ZipInputStream zip = new ZipInputStream(input)) {
@@ -185,8 +217,17 @@ public final class LibraryStore {
                     }
                     data.write(buffer, 0, count);
                 }
-                if ("library.txt".equals(entry.getName())) manifest = data.toString("UTF-8");
-                else if (entry.getName().startsWith("books/") && entry.getName().endsWith(".txt")) texts.put(entry.getName().substring(6, entry.getName().length() - 4), data.toByteArray());
+                String name = entry.getName();
+                if ("library.txt".equals(name)) {
+                    manifest = data.toString("UTF-8");
+                } else if (name.startsWith("books/") && name.endsWith(".txt")) {
+                    texts.put(name.substring(6, name.length() - 4), data.toByteArray());
+                } else if (name.startsWith("covers/") && name.endsWith(".cover")) {
+                    byte[] cover = data.toByteArray();
+                    if (cover.length > 0 && cover.length <= MAX_COVER_BYTES) {
+                        covers.put(name.substring(7, name.length() - 6), cover);
+                    }
+                }
                 zip.closeEntry();
             }
         }
@@ -200,7 +241,15 @@ public final class LibraryStore {
                 String title = decode(values[1]);
                 String author = decode(values[2]);
                 int position = Math.max(0, Math.min(Integer.parseInt(values[3]), 1000));
-                all.add(new Book(UUID.randomUUID().toString(), title, author, new String(texts.get(values[0]), StandardCharsets.UTF_8), position));
+                String newId = UUID.randomUUID().toString();
+                String coverPath = writeCover(newId, covers.get(values[0]));
+                all.add(new Book(
+                        newId,
+                        title,
+                        author,
+                        new String(texts.get(values[0]), StandardCharsets.UTF_8),
+                        position,
+                        coverPath));
                 imported++;
             } catch (Exception ignored) { }
         }
@@ -212,6 +261,7 @@ public final class LibraryStore {
         StringBuilder output = new StringBuilder();
         for (Book book : books) {
             writeText(book.id, book.text);
+            // 4-field rows only — covers stay as side files (old clients ignore them).
             output.append(book.id).append('|').append(encode(book.title)).append('|').append(encode(book.author)).append('|').append(book.position).append('\n');
         }
         if (prefs.edit() != null) {
@@ -223,6 +273,56 @@ public final class LibraryStore {
         File dir = new File(filesDir, "books");
         if (!dir.exists()) dir.mkdirs();
         return dir;
+    }
+
+    private File coverDir() {
+        File dir = new File(filesDir, "covers");
+        if (!dir.exists()) dir.mkdirs();
+        return dir;
+    }
+
+    private File coverFile(String id) {
+        return new File(coverDir(), id + ".cover");
+    }
+
+    /** Absolute path if a valid cover file exists; otherwise null. */
+    private String coverPathIfPresent(String id) {
+        File file = coverFile(id);
+        if (!file.exists() || file.length() <= 0 || file.length() > MAX_COVER_BYTES) return null;
+        return file.getAbsolutePath();
+    }
+
+    /**
+     * Persist cover bytes; returns absolute path or null if skipped/failed.
+     * Oversized or empty payloads are ignored (graceful no-cover).
+     */
+    private String writeCover(String id, byte[] coverBytes) {
+        if (coverBytes == null || coverBytes.length == 0 || coverBytes.length > MAX_COVER_BYTES) {
+            return null;
+        }
+        try (FileOutputStream output = new FileOutputStream(coverFile(id))) {
+            output.write(coverBytes);
+            return coverFile(id).getAbsolutePath();
+        } catch (IOException ignored) {
+            return null;
+        }
+    }
+
+    private byte[] readCoverBytes(String id) {
+        File file = coverFile(id);
+        if (!file.exists() || file.length() <= 0 || file.length() > MAX_COVER_BYTES) return null;
+        try (FileInputStream input = new FileInputStream(file)) {
+            byte[] data = new byte[(int) file.length()];
+            int read = input.read(data);
+            return read <= 0 ? null : data;
+        } catch (IOException ignored) {
+            return null;
+        }
+    }
+
+    private void deleteCover(String id) {
+        File file = coverFile(id);
+        if (file.exists()) file.delete();
     }
 
     private String readText(String id) {

@@ -1,9 +1,23 @@
 package app.maoyankanshu.novel.selfuse
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class BookTest {
+
+    @Test
+    fun fiveArgConstructor_coverPathIsNull() {
+        val book = Book("id", "t", "a", "text", 0)
+        assertNull(book.coverPath)
+    }
+
+    @Test
+    fun sixArgConstructor_preservesCoverPath() {
+        val book = Book("id", "t", "a", "text", 10, "/tmp/x.cover")
+        assertEquals("/tmp/x.cover", book.coverPath)
+        assertEquals(10, book.position)
+    }
 
     @Test
     fun testProgressLabelUnstarted() {

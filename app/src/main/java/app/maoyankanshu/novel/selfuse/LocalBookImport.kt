@@ -18,6 +18,8 @@ object LocalBookImport {
         val title: String,
         val author: String,
         val text: String,
+        /** Optional EPUB cover bytes (JPEG/PNG/…); null for TXT or missing cover. */
+        val coverBytes: ByteArray? = null,
     )
 
     /**
@@ -50,6 +52,7 @@ object LocalBookImport {
         val content: String
         var title = name
         var author = if (epub) authorEpub else authorTxt
+        var coverBytes: ByteArray? = null
         try {
             if (epub) {
                 val book = EpubReader.readBook(boundedStream)
@@ -59,6 +62,7 @@ object LocalBookImport {
                 if (embeddedTitle.isNotEmpty()) title = embeddedTitle
                 val embeddedAuthor = book.author?.trim().orEmpty()
                 if (embeddedAuthor.isNotEmpty()) author = embeddedAuthor
+                coverBytes = book.coverImage
             } else {
                 content = readText(boundedStream)
             }
@@ -72,6 +76,7 @@ object LocalBookImport {
             title = title,
             author = author,
             text = content,
+            coverBytes = coverBytes,
         )
     }
 

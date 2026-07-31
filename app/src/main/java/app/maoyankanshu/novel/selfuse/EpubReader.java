@@ -50,19 +50,31 @@ public final class EpubReader {
 
     private static final Map<String, String> NAMED_ENTITIES = namedEntities();
 
+    /** Max embedded cover image size (reject oversized / zip-bomb style cover refs). */
+    public static final int MAX_COVER_BYTES = 2 * 1024 * 1024;
+
+    private static final Pattern META_TAG = Pattern.compile("(?is)<meta\\b([^>]*)>");
+
     /**
      * EPUB package + chapter text. [title]/[author] may be null when OPF omits them
      * (callers should fall back to filename / default labels).
+     * [coverImage] is raw JPEG/PNG/GIF/WebP bytes or null when missing/oversized/invalid.
      */
     public static final class Book {
         public final String title;
         public final String author;
         public final String text;
+        public final byte[] coverImage;
 
         public Book(String title, String author, String text) {
+            this(title, author, text, null);
+        }
+
+        public Book(String title, String author, String text, byte[] coverImage) {
             this.title = title;
             this.author = author;
             this.text = text == null ? "" : text;
+            this.coverImage = coverImage;
         }
     }
 
@@ -129,7 +141,8 @@ public final class EpubReader {
         }
         // Guarantee "ch1\nch2" not "ch1\n\nch2" if a chapter ends/starts with a block newline.
         String text = normalizeWhitespace(result.toString());
-        return new Book(meta[0], meta[1], text);
+        byte[] cover = extractCoverBytes(files, opfXml, opfPath);
+        return new Book(meta[0], meta[1], text, cover);
     }
 
     /**
@@ -141,6 +154,74 @@ public final class EpubReader {
         String title = firstDcField(DC_TITLE, opf);
         String author = firstDcField(DC_CREATOR, opf);
         return new String[] { title, author };
+    }
+
+    /**
+     * Resolve cover item href from OPF (EPUB3 {@code properties=cover-image} or EPUB2
+     * {@code meta name=cover}). Package-private for JVM tests.
+     */
+    static String resolveCoverHref(String opf, String opfPath) {
+        if (opf == null || opf.isEmpty() || opfPath == null) return null;
+        Map<String, String> hrefById = new HashMap<>();
+        String coverImageHref = null;
+        Matcher items = ITEM_TAG.matcher(opf);
+        while (items.find()) {
+            Map<String, String> attr = attributes(items.group(1));
+            String id = attr.get("id");
+            String href = attr.get("href");
+            if (id == null || href == null) continue;
+            String resolved = resolve(opfPath, href);
+            hrefById.put(id, resolved);
+            String props = attr.get("properties");
+            if (props != null && props.toLowerCase(Locale.ROOT).contains("cover-image")) {
+                coverImageHref = resolved;
+            }
+        }
+        if (coverImageHref != null) return coverImageHref;
+        Matcher metas = META_TAG.matcher(opf);
+        while (metas.find()) {
+            Map<String, String> attr = attributes(metas.group(1));
+            String name = attr.get("name");
+            if (name == null || !"cover".equalsIgnoreCase(name.trim())) continue;
+            String content = attr.get("content");
+            if (content == null) continue;
+            String href = hrefById.get(content.trim());
+            if (href != null) return href;
+        }
+        return null;
+    }
+
+    /**
+     * Load cover bytes from the package map, enforcing {@link #MAX_COVER_BYTES} and image magic.
+     * Returns null when missing, oversized, or not a recognized image.
+     */
+    static byte[] extractCoverBytes(Map<String, byte[]> files, String opf, String opfPath) {
+        if (files == null || files.isEmpty()) return null;
+        String href = resolveCoverHref(opf, opfPath);
+        if (href == null) return null;
+        byte[] data = files.get(normalize(href));
+        if (data == null || data.length == 0) return null;
+        if (data.length > MAX_COVER_BYTES) return null;
+        if (!looksLikeImage(data)) return null;
+        return data;
+    }
+
+    /** JPEG / PNG / GIF / WebP magic-byte check (package-private for tests). */
+    static boolean looksLikeImage(byte[] data) {
+        if (data == null || data.length < 4) return false;
+        // JPEG
+        if ((data[0] & 0xff) == 0xff && (data[1] & 0xff) == 0xd8) return true;
+        // PNG
+        if (data[0] == (byte) 0x89 && data[1] == 0x50 && data[2] == 0x4e && data[3] == 0x47) return true;
+        // GIF
+        if (data[0] == 'G' && data[1] == 'I' && data[2] == 'F') return true;
+        // WebP: RIFF....WEBP
+        if (data.length >= 12
+                && data[0] == 'R' && data[1] == 'I' && data[2] == 'F' && data[3] == 'F'
+                && data[8] == 'W' && data[9] == 'E' && data[10] == 'B' && data[11] == 'P') {
+            return true;
+        }
+        return false;
     }
 
     private static String firstDcField(Pattern pattern, String opf) {

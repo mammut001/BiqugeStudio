@@ -215,7 +215,12 @@ private fun SearchScreen(
                                 authorEpub = authorEpub,
                                 authorTxt = authorTxt,
                             )
-                            LibraryStore.get(context).add(res.title, res.author, res.text)
+                            LibraryStore.get(context).add(
+                                res.title,
+                                res.author,
+                                res.text,
+                                res.coverBytes,
+                            )
                             res
                         }
                         ok++

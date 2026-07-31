@@ -16,6 +16,7 @@ object RemoteImportDownloader {
         val author: String,
         val text: String,
         val isEpub: Boolean,
+        val coverBytes: ByteArray? = null,
     )
 
     fun download(
@@ -53,17 +54,35 @@ object RemoteImportDownloader {
             val data = connection.inputStream.use { HttpsBodyLimits.readAll(it, MAX_BYTES) }
             val epub = cleanUrl.lowercase().contains(".epub") ||
                 (contentType != null && contentType.contains("epub"))
-            val text = if (epub) EpubReader.read(ByteArrayInputStream(data)) else decodeText(data)
-            if (text.trim().isEmpty()) throw IllegalStateException("empty")
             var bookTitle = preferredTitle.trim()
-            if (bookTitle.isEmpty()) {
-                bookTitle = fileName(cleanUrl, if (epub) defaultEpubTitle else defaultTxtTitle)
+            var author = if (epub) authorEpub else authorTxt
+            var coverBytes: ByteArray? = null
+            val text: String
+            if (epub) {
+                val book = EpubReader.readBook(ByteArrayInputStream(data))
+                text = book.text
+                if (bookTitle.isEmpty()) {
+                    val embedded = book.title?.trim().orEmpty()
+                    bookTitle = embedded.ifEmpty {
+                        fileName(cleanUrl, defaultEpubTitle)
+                    }
+                }
+                val embeddedAuthor = book.author?.trim().orEmpty()
+                if (embeddedAuthor.isNotEmpty()) author = embeddedAuthor
+                coverBytes = book.coverImage
+            } else {
+                text = decodeText(data)
+                if (bookTitle.isEmpty()) {
+                    bookTitle = fileName(cleanUrl, defaultTxtTitle)
+                }
             }
+            if (text.trim().isEmpty()) throw IllegalStateException("empty")
             return Result(
                 title = bookTitle,
-                author = if (epub) authorEpub else authorTxt,
+                author = author,
                 text = text,
                 isEpub = epub,
+                coverBytes = coverBytes,
             )
         } finally {
             connection.disconnect()
