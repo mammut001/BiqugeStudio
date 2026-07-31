@@ -28,6 +28,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -54,6 +55,7 @@ import app.maoyankanshu.novel.selfuse.ui.reader.ProgressMath
 import app.maoyankanshu.novel.selfuse.ui.theme.BiqugeTheme
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -62,8 +64,9 @@ import kotlinx.coroutines.withContext
  * Compose HTTPS direct-link TXT/EPUB import.
  * Intent extras unchanged: [EXTRA_TITLE], [EXTRA_URL].
  *
- * Download work runs on [rememberCoroutineScope] (cancelled when this composition leaves).
- * [CancellationException] is rethrown so leave-during-download is not shown as import failure.
+ * Download work runs on [rememberCoroutineScope] as a tracked [Job].
+ * User cancel, back, or leaving composition cancel the Job;
+ * [CancellationException] is rethrown and **not** shown as import failure.
  */
 class RemoteImportActivity : ComponentActivity() {
 
@@ -90,13 +93,6 @@ class RemoteImportActivity : ComponentActivity() {
     }
 }
 
-/** True when the host Activity can still accept UI side-effects (Toast / finish / state). */
-internal fun Activity?.canAcceptUi(): Boolean {
-    if (this == null) return false
-    if (isFinishing) return false
-    return !isDestroyed
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RemoteImportScreen(
@@ -112,6 +108,7 @@ private fun RemoteImportScreen(
     var title by remember { mutableStateOf(initialTitle) }
     var url by remember { mutableStateOf(initialUrl) }
     var loading by remember { mutableStateOf(false) }
+    var importJob by remember { mutableStateOf<Job?>(null) }
     var urlError by remember { mutableStateOf<String?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
@@ -119,13 +116,23 @@ private fun RemoteImportScreen(
     val titleCd = stringResource(R.string.remote_title_cd)
     val urlCd = stringResource(R.string.remote_url_cd)
     val downloadCd = stringResource(R.string.remote_download_cd)
+    val cancelCd = stringResource(R.string.remote_cancel_download_cd)
+    val downloadingLabel = stringResource(R.string.remote_downloading)
     val userAgent = stringResource(R.string.http_user_agent)
     val authorEpub = stringResource(R.string.remote_author_epub)
     val authorTxt = stringResource(R.string.remote_author_txt)
     val defaultEpub = stringResource(R.string.remote_default_epub)
     val defaultTxt = stringResource(R.string.remote_default_txt)
 
+    fun cancelImport(leave: Boolean) {
+        importJob?.cancel()
+        importJob = null
+        loading = false
+        if (leave) onClose()
+    }
+
     fun startDownload() {
+        if (loading) return
         urlError = null
         errorMessage = null
         val rawUrl = url.trim()
@@ -134,7 +141,7 @@ private fun RemoteImportScreen(
             return
         }
         loading = true
-        scope.launch {
+        importJob = scope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
                     RemoteImportDownloader.download(
@@ -162,13 +169,18 @@ private fun RemoteImportScreen(
                 ).show()
                 onImported()
             } catch (cancel: CancellationException) {
-                // Leave screen mid-download: do not treat as remote_import_fail for TalkBack.
+                // User cancel, back, or leave composition: never treat as remote_import_fail.
+                if (activity.canAcceptUi()) {
+                    loading = false
+                    importJob = null
+                }
                 throw cancel
             } catch (error: Exception) {
                 if (!activity.canAcceptUi()) return@launch
                 Log.e("YueJianRemoteImport", "Unable to import direct file", error)
                 errorMessage = context.getString(R.string.remote_import_fail)
                 loading = false
+                importJob = null
             }
         }
     }
@@ -184,8 +196,9 @@ private fun RemoteImportScreen(
                 },
                 navigationIcon = {
                     IconButton(
-                        onClick = onClose,
-                        enabled = !loading,
+                        onClick = {
+                            if (loading) cancelImport(leave = true) else onClose()
+                        },
                         modifier = Modifier
                             .heightIn(min = 48.dp)
                             .semantics { contentDescription = backCd },
@@ -268,16 +281,28 @@ private fun RemoteImportScreen(
                         },
                 )
             }
+            if (loading) {
+                Text(
+                    text = downloadingLabel,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .semantics {
+                            contentDescription = downloadingLabel
+                            liveRegion = LiveRegionMode.Polite
+                        },
+                )
+            }
             Spacer(Modifier.height(8.dp))
-            Button(
-                onClick = { startDownload() },
-                enabled = !loading,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 48.dp)
-                    .semantics { contentDescription = downloadCd },
-            ) {
-                if (loading) {
+            if (loading) {
+                OutlinedButton(
+                    onClick = { cancelImport(leave = false) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .semantics { contentDescription = cancelCd },
+                ) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -285,11 +310,18 @@ private fun RemoteImportScreen(
                         CircularProgressIndicator(
                             modifier = Modifier.size(18.dp),
                             strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.onPrimary,
                         )
-                        Text(stringResource(R.string.remote_downloading))
+                        Text(stringResource(R.string.remote_cancel_download))
                     }
-                } else {
+                }
+            } else {
+                Button(
+                    onClick = { startDownload() },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .semantics { contentDescription = downloadCd },
+                ) {
                     Text(stringResource(R.string.remote_download))
                 }
             }

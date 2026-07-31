@@ -15,17 +15,20 @@ They do **not** assert a Google Play ship date, store listing URL, or remote CI 
 
 - `CHANGELOG.md` (this file) with Keep a Changelog layout.
 - Dependabot weekly updates for Gradle and GitHub Actions (`.github/dependabot.yml`).
-- JVM tests: blank/whitespace/HTTP remote URL rejection; Activity `canAcceptUi` finishing/destroyed matrix.
+- JVM tests: blank/whitespace/HTTP remote URL rejection; pure `canAcceptUi` finishing/destroyed matrix (`ImportUiGate`).
+- Remote/Web import: in-flight **取消下载 / 取消导入** (`Job.cancel`) with strings + TalkBack content descriptions; loading status polite `liveRegion`.
 
 ### Changed
 
 - README and `RELEASECHECKLIST.md`: changelog, dependency-update, and release-tag guidance.
-- README: document API 23 vs `networkSecurityConfig` (API 24+), HTTPS import coroutine cancel policy, TalkBack `liveRegion` on remote/web errors.
+- README: document API 23 vs `networkSecurityConfig` (API 24+), HTTPS import `Job` cancel (button + back), TalkBack `liveRegion` on remote/web loading and errors.
+- `canAcceptUi` extracted to `ImportUiGate.kt` for shared use and JVM tests.
 
 ### Fixed
 
-- `RemoteImportActivity` / `WebImportActivity`: rethrow `CancellationException` from `rememberCoroutineScope` work; skip Toast / state / finish when the host Activity cannot accept UI.
-- TalkBack: polite `liveRegion` on remote/web URL validation and import failure messages.
+- `RemoteImportActivity` / `WebImportActivity`: track import `Job` on `rememberCoroutineScope`; rethrow `CancellationException` (user cancel / back / leave) so it is never shown as import failure; skip Toast / state / finish when the host Activity cannot accept UI.
+- Loading no longer disables the back affordance (back cancels the Job and leaves).
+- TalkBack: polite `liveRegion` on remote/web URL validation, loading status, and import failure messages.
 - `LibraryStore.save`: single `SharedPreferences.edit().apply()` (CommitPrefEdits lint).
 
 ## [1.0.1] — versionCode 2

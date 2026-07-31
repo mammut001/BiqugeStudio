@@ -46,6 +46,8 @@
     <string name="web_title_hint">书名（可留空，使用网页标题）</string>
     <string name="web_import_action">导入为离线书籍</string>
     <string name="web_importing">正在读取网页…</string>
+    <string name="web_cancel_import">取消导入</string>
+    <string name="web_cancel_import_cd">取消正在进行的网页导入</string>
     <string name="web_import_ok">已加入《%1$s》</string>
     <string name="web_import_fail">网页无法导入；请检查地址、网络或访问权限</string>
     <string name="web_default_title">网页导入</string>
@@ -58,6 +60,8 @@
     <string name="remote_title_hint">书名（可留空，自动使用文件名）</string>
     <string name="remote_download">下载并加入书架</string>
     <string name="remote_downloading">正在下载…</string>
+    <string name="remote_cancel_download">取消下载</string>
+    <string name="remote_cancel_download_cd">取消正在进行的下载</string>
     <string name="remote_import_ok">已加入《%1$s》</string>
     <string name="remote_import_fail">下载或导入失败</string>
     <string name="remote_author_epub">直链 EPUB</string>

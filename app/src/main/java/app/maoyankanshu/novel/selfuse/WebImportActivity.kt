@@ -28,6 +28,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -54,6 +55,7 @@ import app.maoyankanshu.novel.selfuse.ui.reader.ProgressMath
 import app.maoyankanshu.novel.selfuse.ui.theme.BiqugeTheme
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -62,8 +64,9 @@ import kotlinx.coroutines.withContext
  * Compose HTTPS single-page HTML import (replaces LinearLayout Java UI).
  * Manifest component remains `.WebImportActivity`.
  *
- * Fetch work uses [rememberCoroutineScope] (cancelled when composition leaves).
- * [CancellationException] is rethrown so leave-during-import is not a false failure for TalkBack.
+ * Fetch work uses [rememberCoroutineScope] as a tracked [Job].
+ * User cancel, back, or leaving composition cancel the Job;
+ * [CancellationException] is rethrown and **not** shown as import failure.
  */
 class WebImportActivity : ComponentActivity() {
 
@@ -93,6 +96,7 @@ private fun WebImportScreen(
     var title by remember { mutableStateOf("") }
     var url by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
+    var importJob by remember { mutableStateOf<Job?>(null) }
     var urlError by remember { mutableStateOf<String?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
@@ -100,11 +104,21 @@ private fun WebImportScreen(
     val titleCd = stringResource(R.string.web_title_cd)
     val urlCd = stringResource(R.string.web_url_cd)
     val importCd = stringResource(R.string.web_import_cd)
+    val cancelCd = stringResource(R.string.web_cancel_import_cd)
+    val importingLabel = stringResource(R.string.web_importing)
     val userAgent = stringResource(R.string.http_user_agent)
     val defaultTitle = stringResource(R.string.web_default_title)
     val authorPrefix = stringResource(R.string.web_author_prefix)
 
+    fun cancelImport(leave: Boolean) {
+        importJob?.cancel()
+        importJob = null
+        loading = false
+        if (leave) onClose()
+    }
+
     fun startImport() {
+        if (loading) return
         urlError = null
         errorMessage = null
         val rawUrl = url.trim()
@@ -113,7 +127,7 @@ private fun WebImportScreen(
             return
         }
         loading = true
-        scope.launch {
+        importJob = scope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
                     WebImportFetcher.fetch(
@@ -135,12 +149,18 @@ private fun WebImportScreen(
                 ).show()
                 onImported()
             } catch (cancel: CancellationException) {
+                // User cancel, back, or leave composition: never treat as web_import_fail.
+                if (activity.canAcceptUi()) {
+                    loading = false
+                    importJob = null
+                }
                 throw cancel
             } catch (error: Exception) {
                 if (!activity.canAcceptUi()) return@launch
                 Log.e("YueJianWebImport", "Unable to import web page", error)
                 errorMessage = context.getString(R.string.web_import_fail)
                 loading = false
+                importJob = null
             }
         }
     }
@@ -156,8 +176,9 @@ private fun WebImportScreen(
                 },
                 navigationIcon = {
                     IconButton(
-                        onClick = onClose,
-                        enabled = !loading,
+                        onClick = {
+                            if (loading) cancelImport(leave = true) else onClose()
+                        },
                         modifier = Modifier
                             .heightIn(min = 48.dp)
                             .semantics { contentDescription = backCd },
@@ -240,16 +261,28 @@ private fun WebImportScreen(
                         },
                 )
             }
+            if (loading) {
+                Text(
+                    text = importingLabel,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .semantics {
+                            contentDescription = importingLabel
+                            liveRegion = LiveRegionMode.Polite
+                        },
+                )
+            }
             Spacer(Modifier.height(8.dp))
-            Button(
-                onClick = { startImport() },
-                enabled = !loading,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 48.dp)
-                    .semantics { contentDescription = importCd },
-            ) {
-                if (loading) {
+            if (loading) {
+                OutlinedButton(
+                    onClick = { cancelImport(leave = false) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .semantics { contentDescription = cancelCd },
+                ) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -257,11 +290,18 @@ private fun WebImportScreen(
                         CircularProgressIndicator(
                             modifier = Modifier.size(18.dp),
                             strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.onPrimary,
                         )
-                        Text(stringResource(R.string.web_importing))
+                        Text(stringResource(R.string.web_cancel_import))
                     }
-                } else {
+                }
+            } else {
+                Button(
+                    onClick = { startImport() },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .semantics { contentDescription = importCd },
+                ) {
                     Text(stringResource(R.string.web_import_action))
                 }
             }
