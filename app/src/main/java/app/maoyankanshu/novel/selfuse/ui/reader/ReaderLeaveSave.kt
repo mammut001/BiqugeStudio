@@ -51,7 +51,7 @@ object ReaderLeaveSave {
             if (duration > 0L) {
                 ReadingStats.add(app, duration)
             }
-            LibraryStore.get(app).savePosition(bookId, clamped)
+            LibraryStore.getForReading(app).savePosition(bookId, clamped)
         }
     }
 }

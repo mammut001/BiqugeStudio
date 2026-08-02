@@ -38,10 +38,15 @@ public final class LibraryStore {
     private static final String LEGACY_SEED_AUTHOR = "笔趣阁（自用）";
 
     private LibraryStore(Context context) {
+        this(context, true);
+    }
+
+    /** Reader-only store: avoid running one-time seed migrations on every page/progress update. */
+    private LibraryStore(Context context, boolean runMigrations) {
         this.context = context.getApplicationContext();
         this.prefs = this.context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         this.filesDir = this.context.getFilesDir();
-        initSeedIfNeeded();
+        if (runMigrations) initSeedIfNeeded();
     }
 
     LibraryStore(SharedPreferences prefs, File filesDir, String defaultAppName, String defaultWelcomeTitle, String defaultWelcomeBody) {
@@ -120,6 +125,14 @@ public final class LibraryStore {
     }
 
     public static LibraryStore get(Context context) { return new LibraryStore(context); }
+
+    /**
+     * Opens the store without seed migrations. Use on the reader path, where migrations would
+     * otherwise reread every imported TXT before the first page can be shown.
+     */
+    public static LibraryStore getForReading(Context context) {
+        return new LibraryStore(context, false);
+    }
 
     public List<Book> books() {
         List<Book> books = new ArrayList<>();

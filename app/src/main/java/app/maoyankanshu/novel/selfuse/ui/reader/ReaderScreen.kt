@@ -323,7 +323,7 @@ fun ReaderScreen(
             .collect { p ->
                 val clamped = ProgressMath.clampProgress(p)
                 withContext(Dispatchers.IO) {
-                    LibraryStore.get(context).savePosition(book.id, clamped)
+                    LibraryStore.getForReading(context).savePosition(book.id, clamped)
                 }
             }
     }
@@ -557,7 +557,7 @@ fun ReaderScreen(
                     }
                     IconButton(
                         onClick = {
-                            LibraryStore.get(context).savePosition(
+                            LibraryStore.getForReading(context).savePosition(
                                 book.id,
                                 ProgressMath.clampProgress(progress),
                             )

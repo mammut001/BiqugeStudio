@@ -49,7 +49,7 @@ class ReaderActivity : ComponentActivity() {
 
         lifecycleScope.launch {
             val book = withContext(Dispatchers.IO) {
-                bookId?.let { LibraryStore.get(this@ReaderActivity).byId(it) }
+                bookId?.let { LibraryStore.getForReading(this@ReaderActivity).byId(it) }
             }
             if (book == null || isFinishing || isDestroyed) {
                 finish()
