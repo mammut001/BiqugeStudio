@@ -262,7 +262,11 @@ fun ReaderScreen(
                 fontSizePx = fontPx,
                 lineHeightMultiplier = lineHeightMultiplier,
             )
-            PageIndex.approximatePageStartOffsets(text.length, charsPerPage)
+            // Building ~18k offsets for a 15 MB novel is linear but still too much work for
+            // the UI thread on slower devices; keep the first frame/input responsive.
+            withContext(Dispatchers.Default) {
+                PageIndex.approximatePageStartOffsets(text.length, charsPerPage)
+            }
         } else {
             val layout = textMeasurer.measure(
                 text = text,

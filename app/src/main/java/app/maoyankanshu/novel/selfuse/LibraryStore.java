@@ -157,7 +157,26 @@ public final class LibraryStore {
         return books;
     }
 
-    public Book byId(String id) { for (Book book : books()) if (book.id.equals(id)) return book; return null; }
+    /** Reads only the requested book; the shelf may contain very large TXT files. */
+    public Book byId(String id) {
+        if (id == null || id.isEmpty()) return null;
+        String raw = prefs.getString(KEY, "");
+        if (raw == null || raw.isEmpty()) return null;
+        for (String row : raw.split("\\n", -1)) {
+            if (row.trim().isEmpty()) continue;
+            String[] values = row.split("\\|", 4);
+            if (values.length != 4 || !id.equals(values[0])) continue;
+            try {
+                String text = readText(id);
+                if (text == null) return null;
+                int pos = Math.max(0, Math.min(Integer.parseInt(values[3]), 1000));
+                return new Book(id, decode(values[1]), decode(values[2]), text, pos, coverPathIfPresent(id));
+            } catch (Exception ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
     public void add(String title, String author, String text) {
         add(title, author, text, null);
     }
@@ -193,7 +212,25 @@ public final class LibraryStore {
         for (int i = 0; i < all.size(); i++) if (all.get(i).id.equals(id)) { Book book = all.remove(i); all.add(0, book); break; }
         save(all);
     }
-    public void savePosition(String id, int progress) { List<Book> all = books(); for (Book book : all) if (book.id.equals(id)) book.position = Math.max(0, Math.min(progress, 1000)); save(all); }
+    /** Updates only the metadata row; never rereads or rewrites imported book text. */
+    public void savePosition(String id, int progress) {
+        if (id == null || id.isEmpty()) return;
+        String raw = prefs.getString(KEY, "");
+        if (raw == null || raw.isEmpty()) return;
+        int clamped = Math.max(0, Math.min(progress, 1000));
+        StringBuilder output = new StringBuilder(raw.length());
+        for (String row : raw.split("\\n", -1)) {
+            if (row.trim().isEmpty()) continue;
+            String[] values = row.split("\\|", 4);
+            if (values.length == 4 && id.equals(values[0])) {
+                output.append(values[0]).append('|').append(values[1]).append('|')
+                        .append(values[2]).append('|').append(clamped).append('\n');
+            } else {
+                output.append(row).append('\n');
+            }
+        }
+        prefs.edit().putString(KEY, output.toString()).apply();
+    }
     public void remove(String id) {
         List<Book> all = books();
         Iterator<Book> iterator = all.iterator();
