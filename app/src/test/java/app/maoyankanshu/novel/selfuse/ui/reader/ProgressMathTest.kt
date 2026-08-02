@@ -35,6 +35,16 @@ class ProgressMathTest {
     }
 
     @Test
+    fun percentOfProgress_0to100() {
+        assertEquals(0, ProgressMath.percentOfProgress(0))
+        assertEquals(0, ProgressMath.percentOfProgress(-5))
+        assertEquals(3, ProgressMath.percentOfProgress(25))
+        assertEquals(50, ProgressMath.percentOfProgress(500))
+        assertEquals(100, ProgressMath.percentOfProgress(1000))
+        assertEquals(100, ProgressMath.percentOfProgress(1200))
+    }
+
+    @Test
     fun httpsOnly_acceptsHttpsRejectsHttpAndJunk() {
         assertTrue(ProgressMath.isHttpsUrl("https://example.com/a.epub"))
         assertTrue(ProgressMath.isHttpsUrl("  HTTPS://Example.COM/x  "))

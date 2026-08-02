@@ -53,6 +53,9 @@ public final class LibraryStore {
         }
     }
 
+    /** Prefix of the long multi-page welcome body; used to detect outdated seed text. */
+    private static final String WELCOME_BODY_MARKER = "【阅笺使用说明】";
+
     private void initSeedIfNeeded() {
         if (!prefs.contains(KEY)) {
             String appName = this.context.getString(R.string.app_name);
@@ -63,6 +66,7 @@ public final class LibraryStore {
             );
         } else {
             migrateLegacySeedAuthor();
+            migrateWelcomeSeedBody();
         }
     }
 
@@ -83,6 +87,34 @@ public final class LibraryStore {
                 all.set(i, new Book(book.id, book.title, appName, book.text, book.position, book.coverPath));
                 changed = true;
             }
+        }
+        if (changed) save(all);
+    }
+
+    /**
+     * Refresh the built-in《使用说明》when it still has the short one-page body so users can
+     * try multi-page Kindle pagination without reinstalling. Only touches books whose title
+     * is the seed title and author is the app name / legacy product name; never user imports.
+     */
+    private void migrateWelcomeSeedBody() {
+        if (context == null) return;
+        String appName = context.getString(R.string.app_name);
+        String seedTitle = context.getString(R.string.welcome_book_title);
+        String newBody = context.getString(R.string.welcome_book_body, appName);
+        List<Book> all = books();
+        boolean changed = false;
+        for (int i = 0; i < all.size(); i++) {
+            Book book = all.get(i);
+            if (!seedTitle.equals(book.title)) continue;
+            if (!(appName.equals(book.author)
+                    || LEGACY_SEED_AUTHOR.equals(book.author)
+                    || "笔趣阁".equals(book.author))) {
+                continue;
+            }
+            String text = book.text == null ? "" : book.text;
+            if (text.contains(WELCOME_BODY_MARKER)) continue;
+            all.set(i, new Book(book.id, book.title, appName, newBody, book.position, book.coverPath));
+            changed = true;
         }
         if (changed) save(all);
     }

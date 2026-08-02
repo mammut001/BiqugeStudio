@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
@@ -47,11 +48,13 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.maoyankanshu.novel.selfuse.Book
 import app.maoyankanshu.novel.selfuse.R
+import app.maoyankanshu.novel.selfuse.ui.reader.ProgressMath
 import kotlin.math.abs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -73,6 +76,8 @@ fun BookCard(
 ) {
     val progressFraction = (book.position.coerceIn(0, 1000) / 1000f)
     val progressLabel = book.progressLabel()
+    val percent = ProgressMath.percentOfProgress(book.position)
+    val percentLabel = "$percent%"
     val actionLabel = if (book.position <= 0) {
         stringResource(R.string.detail_start_reading)
     } else {
@@ -84,6 +89,8 @@ fun BookCard(
         append(book.author)
         append("，")
         append(subtitle ?: progressLabel)
+        append("，进度 ")
+        append(percentLabel)
         if (onLongClick != null) append("。长按打开更多操作")
         if (showContinueReading && onContinueReading != null) {
             append("。可")
@@ -136,7 +143,12 @@ fun BookCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
         shape = RoundedCornerShape(12.dp),
     ) {
-        Column(Modifier.padding(12.dp)) {
+        // Cover/meta → progress (bar + %) → CTA. Clear vertical stack so the
+        // “开始阅读” button never sits on top of the progress track.
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -175,48 +187,64 @@ fun BookCard(
                         .weight(1f)
                         .heightIn(min = CoverHeight)
                         .fillMaxWidth(),
-                    verticalArrangement = Arrangement.SpaceBetween,
+                    verticalArrangement = Arrangement.Center,
                 ) {
-                    Column {
-                        Text(
-                            text = book.title,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            text = book.author,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            text = subtitle ?: progressLabel,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    LinearProgressIndicator(
-                        progress = { progressFraction },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 8.dp)
-                            .height(4.dp)
-                            .clip(RoundedCornerShape(2.dp))
-                            .semantics {
-                                contentDescription = "阅读进度 $progressLabel"
-                            },
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                    Text(
+                        text = book.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = book.author,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = subtitle ?: progressLabel,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
 
+            // Own row under the cover block — never squeezed into the cover column.
+            Spacer(Modifier.height(10.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics {
+                        contentDescription = "阅读进度 $progressLabel，$percentLabel"
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                LinearProgressIndicator(
+                    progress = { progressFraction },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp)),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                )
+                Text(
+                    text = percentLabel,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.End,
+                    maxLines = 1,
+                    modifier = Modifier.widthIn(min = 36.dp),
+                )
+            }
+
             if (showContinueReading && onContinueReading != null) {
+                Spacer(Modifier.height(12.dp))
                 // Material 3 tonal CTA: ≥48dp target, TalkBack label, RTL-safe trailing arrow.
                 FilledTonalButton(
                     onClick = onContinueReading,

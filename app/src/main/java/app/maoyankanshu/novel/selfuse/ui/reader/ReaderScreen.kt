@@ -3,6 +3,7 @@ package app.maoyankanshu.novel.selfuse.ui.reader
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -32,9 +33,10 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
@@ -76,18 +78,22 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.maoyankanshu.novel.selfuse.AppIntents
@@ -117,8 +123,10 @@ fun ReaderScreen(
     onClose: () -> Unit,
 ) {
     val context = LocalContext.current
+    val density = LocalDensity.current
     val preferences = remember { ReaderPreferences.get(context) }
     val scope = rememberCoroutineScope()
+    val textMeasurer = rememberTextMeasurer()
     val tapHint = stringResource(R.string.reader_tap_hint)
     val backCd = stringResource(R.string.reader_back_cd)
     val appearanceCd = stringResource(R.string.reader_appearance_cd)
@@ -134,6 +142,7 @@ fun ReaderScreen(
     var theme by remember { mutableIntStateOf(preferences.theme()) }
     var fontSizeSp by remember { mutableIntStateOf(preferences.fontSize()) }
     var lineHeightMultiplier by remember { mutableFloatStateOf(preferences.lineHeightMultiplier()) }
+    var marginStep by remember { mutableIntStateOf(preferences.margin()) }
     var menuVisible by remember { mutableStateOf(false) }
     var showToc by remember { mutableStateOf(false) }
     var showBookmarks by remember { mutableStateOf(false) }
@@ -146,15 +155,42 @@ fun ReaderScreen(
         ChapterIndex.findChapters(book.text, context.getString(R.string.reader_chapter_full))
     }
 
-    val scrollState = rememberScrollState()
     val controlsScrollState = rememberScrollState()
-    var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
     var progress by remember { mutableIntStateOf(ProgressMath.clampProgress(book.position)) }
     var currentChapter by remember { mutableIntStateOf(0) }
     var clock by remember { mutableStateOf(formatTime()) }
     var initialRestored by remember { mutableStateOf(false) }
+    // Character anchor for reflow: keep nearest page after font/line/theme change.
+    var anchorOffset by remember {
+        mutableIntStateOf(
+            // Approximate restore seed until pages are measured (mid-book via length).
+            ((ProgressMath.clampProgress(book.position) / 1000f) * book.text.length)
+                .roundToInt()
+                .coerceIn(0, book.text.length.coerceAtLeast(0)),
+        )
+    }
+    var pageStarts by remember { mutableStateOf(listOf(0)) }
+    var contentWidthPx by remember { mutableIntStateOf(0) }
+    var contentHeightPx by remember { mutableIntStateOf(0) }
+
+    val pageCount = pageStarts.size.coerceAtLeast(1)
+    val pagerState = rememberPagerState(
+        initialPage = 0,
+        pageCount = { pageStarts.size.coerceAtLeast(1) },
+    )
+
     // Latest progress for leave-save: DisposableEffect keys only on book.id.
     val latestProgress by rememberUpdatedState(progress)
+
+    val bodyTextStyle = remember(fontSizeSp, lineHeightMultiplier, palette.onBackground) {
+        TextStyle(
+            color = palette.onBackground,
+            fontSize = fontSizeSp.sp,
+            lineHeight = (fontSizeSp * lineHeightMultiplier).sp,
+            fontFamily = FontFamily.Serif,
+            letterSpacing = 0.2.sp,
+        )
+    }
 
     DisposableEffect(Unit) {
         applyBrightness(activity, preferences.brightness())
@@ -183,31 +219,74 @@ fun ReaderScreen(
         }
     }
 
-    LaunchedEffect(textLayout, scrollState.maxValue) {
-        if (initialRestored || textLayout == null || scrollState.maxValue <= 0) return@LaunchedEffect
-        val target = ProgressMath.scrollYForProgress(book.position, scrollState.maxValue)
-        scrollState.scrollTo(target)
-        progress = ProgressMath.clampProgress(book.position)
-        currentChapter = ChapterIndex.chapterAtOffset(
-            chapters,
-            offsetForScrollY(textLayout!!, target),
-        )
-        initialRestored = true
+    // Viewport page breaking: remeasure when size, body, style, or margins change.
+    LaunchedEffect(
+        book.text,
+        fontSizeSp,
+        lineHeightMultiplier,
+        theme,
+        marginStep,
+        contentWidthPx,
+        contentHeightPx,
+    ) {
+        if (contentWidthPx <= 0 || contentHeightPx <= 0) return@LaunchedEffect
+        val style = bodyTextStyle
+        val width = contentWidthPx
+        val height = contentHeightPx
+        val text = book.text
+        // TextMeasurer must run on the composition/main thread; pure packing is cheap.
+        val starts = if (text.isEmpty()) {
+            listOf(0)
+        } else {
+            val layout = textMeasurer.measure(
+                text = text,
+                style = style,
+                constraints = Constraints(maxWidth = width),
+            )
+            val lineCount = layout.lineCount
+            if (lineCount <= 0) {
+                listOf(0)
+            } else {
+                val tops = FloatArray(lineCount)
+                val bottoms = FloatArray(lineCount)
+                val chars = IntArray(lineCount)
+                for (i in 0 until lineCount) {
+                    tops[i] = layout.getLineTop(i)
+                    bottoms[i] = layout.getLineBottom(i)
+                    chars[i] = layout.getLineStart(i)
+                }
+                PageIndex.pageStartOffsets(tops, bottoms, chars, height.toFloat())
+            }
+        }
+        pageStarts = starts
+        val targetPage = if (!initialRestored) {
+            // Prefer progress restore (0…1000 contract); fall back to anchor offset.
+            val byProgress = PageIndex.pageForProgress(book.position, starts.size)
+            initialRestored = true
+            byProgress
+        } else {
+            PageIndex.pageForOffset(starts, anchorOffset)
+        }
+        val clamped = PageIndex.clampPageIndex(targetPage, starts.size)
+        if (pagerState.currentPage != clamped) {
+            pagerState.scrollToPage(clamped)
+        }
+        progress = PageIndex.progressForPage(clamped, starts.size)
+        anchorOffset = PageIndex.offsetForPage(starts, clamped)
+        currentChapter = ChapterIndex.chapterAtOffset(chapters, anchorOffset)
     }
 
-    LaunchedEffect(scrollState, textLayout, chapters) {
-        snapshotFlow { scrollState.value to scrollState.maxValue }
+    // Page turns → progress (0…1000) + chapter + anchor.
+    LaunchedEffect(pagerState, pageStarts, chapters) {
+        snapshotFlow { pagerState.currentPage to pageStarts }
             .distinctUntilChanged()
-            .collect { (value, max) ->
-                if (max <= 0) return@collect
-                val p = ProgressMath.progressForScrollY(value, max)
-                progress = p
-                textLayout?.let { layout ->
-                    currentChapter = ChapterIndex.chapterAtOffset(
-                        chapters,
-                        offsetForScrollY(layout, value),
-                    )
-                }
+            .collect { (page, starts) ->
+                val count = starts.size.coerceAtLeast(1)
+                val p = PageIndex.clampPageIndex(page, count)
+                progress = PageIndex.progressForPage(p, count)
+                val offset = PageIndex.offsetForPage(starts, p)
+                anchorOffset = offset
+                currentChapter = ChapterIndex.chapterAtOffset(chapters, offset)
             }
     }
 
@@ -223,18 +302,42 @@ fun ReaderScreen(
             }
     }
 
-    fun scrollToOffset(offset: Int) {
-        val layout = textLayout ?: return
-        val clamped = offset.coerceIn(0, book.text.length)
-        val line = layout.getLineForOffset(clamped)
-        val y = layout.getLineTop(line).toInt().coerceIn(0, scrollState.maxValue.coerceAtLeast(0))
-        scope.launch { scrollState.animateScrollTo(y) }
+    fun animateToPage(target: Int) {
+        val page = PageIndex.clampPageIndex(target, pageStarts.size)
+        if (page == pagerState.currentPage) return
+        scope.launch {
+            // ~280ms left/right turn so tap and swipe both feel like page flips.
+            pagerState.animateScrollToPage(
+                page = page,
+                animationSpec = tween(durationMillis = 280),
+            )
+        }
     }
 
-    fun scrollToProgress(p: Int) {
-        val max = scrollState.maxValue
-        if (max <= 0) return
-        scope.launch { scrollState.animateScrollTo(ProgressMath.scrollYForProgress(p, max)) }
+    fun jumpToOffset(offset: Int) {
+        val clampedOffset = offset.coerceIn(0, book.text.length)
+        anchorOffset = clampedOffset
+        val page = PageIndex.pageForOffset(pageStarts, clampedOffset)
+        animateToPage(page)
+        currentChapter = ChapterIndex.chapterAtOffset(chapters, clampedOffset)
+    }
+
+    fun jumpToProgress(p: Int) {
+        animateToPage(PageIndex.pageForProgress(p, pageStarts.size))
+    }
+
+    fun onReadingSurfaceTap(xFraction: Float) {
+        when (PageIndex.tapZoneAction(xFraction)) {
+            TapZoneAction.PREV_PAGE -> {
+                animateToPage(PageIndex.stepPage(pagerState.currentPage, pageCount, -1))
+            }
+            TapZoneAction.NEXT_PAGE -> {
+                animateToPage(PageIndex.stepPage(pagerState.currentPage, pageCount, 1))
+            }
+            TapZoneAction.TOGGLE_CHROME -> {
+                menuVisible = !menuVisible
+            }
+        }
     }
 
     Box(
@@ -247,64 +350,124 @@ fun ReaderScreen(
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.safeDrawing),
         ) {
-            Box(
+            BoxWithConstraints(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth()
-                    .pointerInput(Unit) {
-                        detectTapGestures(onTap = { menuVisible = !menuVisible })
-                    },
+                    .fillMaxWidth(),
             ) {
-                SelectionContainer {
-                    Text(
-                        text = book.text,
+                // Kindle-style adjustable body margins (narrow / standard / wide).
+                val padH = PageLayout.horizontalPadDp(marginStep).dp
+                val padV = PageLayout.verticalPadDp(marginStep).dp
+                val widthPx = with(density) { (maxWidth - padH * 2).toPx().toInt().coerceAtLeast(1) }
+                val heightPx = with(density) { (maxHeight - padV * 2).toPx().toInt().coerceAtLeast(1) }
+                // Publish measured viewport for page breaking (side-effect free after first frame).
+                LaunchedEffect(widthPx, heightPx, marginStep) {
+                    contentWidthPx = widthPx
+                    contentHeightPx = heightPx
+                }
+
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .semantics { contentDescription = tapHint },
+                    userScrollEnabled = true,
+                    beyondViewportPageCount = 1,
+                ) { page ->
+                    val pageBody = remember(book.text, pageStarts, page) {
+                        PageIndex.pageText(book.text, pageStarts, page)
+                    }
+                    // Left/right book-style turn: 3D tilt about the vertical edge while the
+                    // pager scrolls (finger swipe or tap animateScrollToPage).
+                    val pageOffset =
+                        (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
+                    val turn = PageTurnEffect.transform(pageOffset)
+                    Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .verticalScroll(scrollState)
-                            .padding(horizontal = 18.dp, vertical = 16.dp)
-                            .semantics { contentDescription = tapHint },
-                        style = TextStyle(
-                            color = palette.onBackground,
-                            fontSize = fontSizeSp.sp,
-                            lineHeight = (fontSizeSp * lineHeightMultiplier).sp,
-                            fontFamily = FontFamily.Serif,
-                            letterSpacing = 0.2.sp,
-                        ),
-                        onTextLayout = { textLayout = it },
-                    )
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                // Density-aware camera so the Y-axis tilt reads as a page flip.
+                                cameraDistance = 18f * density.density
+                                transformOrigin = TransformOrigin(
+                                    pivotFractionX = turn.pivotFractionX,
+                                    pivotFractionY = 0.5f,
+                                )
+                                rotationY = turn.rotationY
+                                alpha = turn.alpha
+                                scaleX = turn.scale
+                                scaleY = turn.scale
+                            }
+                            .pointerInput(pageCount) {
+                                detectTapGestures { offset ->
+                                    val fraction = if (size.width > 0) {
+                                        offset.x / size.width.toFloat()
+                                    } else {
+                                        0.5f
+                                    }
+                                    onReadingSurfaceTap(fraction)
+                                }
+                            },
+                    ) {
+                        SelectionContainer {
+                            Text(
+                                text = pageBody,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = padH, vertical = padV),
+                                style = bodyTextStyle,
+                            )
+                        }
+                    }
                 }
             }
 
-            val percent = (progress / 10f).roundToInt()
-            val progressCd = stringResource(R.string.reader_progress_cd, percent)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp)
-                    .semantics { contentDescription = progressCd },
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = clock,
-                    color = palette.muted,
-                    style = MaterialTheme.typography.labelMedium,
-                )
-                val chapterTitle = chapters.getOrNull(currentChapter)?.title.orEmpty()
-                Text(
-                    text = buildString {
-                        if (chapterTitle.isNotEmpty()) {
-                            append(chapterTitle.take(12))
-                            if (chapterTitle.length > 12) append('…')
-                            append(" · ")
-                        }
-                        append("$percent%")
-                    },
-                    color = palette.muted,
-                    style = MaterialTheme.typography.labelMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            // Hide the thin footer while chrome is open so it does not sit under the
+            // progress slider / control bar (they shared the same bottom edge before).
+            if (!menuVisible) {
+                val percent = ProgressMath.percentOfProgress(progress)
+                val pageNum = PageLayout.displayPageNumber(pagerState.currentPage, pageCount)
+                val pageTotal = PageLayout.displayPageCount(pageCount)
+                val pageLocation = PageLayout.pageLocationLabel(pagerState.currentPage, pageCount)
+                val pageLocationCd = stringResource(R.string.reader_page_location_cd, pageNum, pageTotal)
+                val progressCd = stringResource(R.string.reader_progress_cd, percent)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                        .semantics {
+                            contentDescription = "$pageLocationCd，$progressCd"
+                        },
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = clock,
+                        color = palette.muted,
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                    // Kindle-style page location + explicit percent.
+                    Text(
+                        text = "$pageLocation · $percent%",
+                        color = palette.muted,
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                    )
+                    val chapterTitle = chapters.getOrNull(currentChapter)?.title.orEmpty()
+                    Text(
+                        text = if (chapterTitle.isNotEmpty()) {
+                            buildString {
+                                append(chapterTitle.take(12))
+                                if (chapterTitle.length > 12) append('…')
+                            }
+                        } else {
+                            ""
+                        },
+                        color = palette.muted,
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
 
@@ -368,7 +531,10 @@ fun ReaderScreen(
                     }
                     IconButton(
                         onClick = {
-                            LibraryStore.get(context).savePosition(book.id, progress)
+                            LibraryStore.get(context).savePosition(
+                                book.id,
+                                ProgressMath.clampProgress(progress),
+                            )
                             context.startActivity(AppIntents.legacyReader(context, book.id))
                         },
                         modifier = Modifier
@@ -403,23 +569,38 @@ fun ReaderScreen(
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    val sliderPercent = (progress / 10f).roundToInt()
+                    val sliderPercent = ProgressMath.percentOfProgress(progress)
                     val sliderProgressCd = stringResource(R.string.reader_progress_cd, sliderPercent)
-                    Slider(
-                        value = progress.toFloat(),
-                        onValueChange = { progress = ProgressMath.clampProgress(it.roundToInt()) },
-                        onValueChangeFinished = { scrollToProgress(progress) },
-                        valueRange = 0f..1000f,
-                        colors = SliderDefaults.colors(
-                            thumbColor = palette.onBar,
-                            activeTrackColor = palette.onBar,
-                            inactiveTrackColor = palette.muted,
-                        ),
+                    // Percent label + slider on one row so progress is never “bar only”.
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 2.dp)
+                            .padding(horizontal = 16.dp, vertical = 4.dp)
                             .semantics { contentDescription = sliderProgressCd },
-                    )
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Text(
+                            text = "$sliderPercent%",
+                            color = palette.onBar,
+                            style = MaterialTheme.typography.labelLarge,
+                            maxLines = 1,
+                        )
+                        Slider(
+                            value = progress.toFloat(),
+                            onValueChange = {
+                                progress = ProgressMath.clampProgress(it.roundToInt())
+                            },
+                            onValueChangeFinished = { jumpToProgress(progress) },
+                            valueRange = 0f..1000f,
+                            colors = SliderDefaults.colors(
+                                thumbColor = palette.onBar,
+                                activeTrackColor = palette.onBar,
+                                inactiveTrackColor = palette.muted,
+                            ),
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                     // Six controls need ≥48dp targets; SpaceEvenly when they fit,
                     // horizontalScroll when the bar is narrower than the labels.
                     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
@@ -438,7 +619,7 @@ fun ReaderScreen(
                                 color = palette.onBar,
                                 onClick = {
                                     if (currentChapter > 0) {
-                                        scrollToOffset(chapters[currentChapter - 1].start)
+                                        jumpToOffset(chapters[currentChapter - 1].start)
                                     }
                                 },
                             )
@@ -490,7 +671,7 @@ fun ReaderScreen(
                                 color = palette.onBar,
                                 onClick = {
                                     if (currentChapter < chapters.lastIndex) {
-                                        scrollToOffset(chapters[currentChapter + 1].start)
+                                        jumpToOffset(chapters[currentChapter + 1].start)
                                     }
                                 },
                             )
@@ -544,7 +725,7 @@ fun ReaderScreen(
                             .defaultMinSize(minWidth = 48.dp, minHeight = 56.dp)
                             .clickable(role = Role.Button) {
                                 showToc = false
-                                scrollToOffset(chapter.start)
+                                jumpToOffset(chapter.start)
                             }
                             .semantics {
                                 contentDescription = chapterCd
@@ -580,7 +761,11 @@ fun ReaderScreen(
                 onClick = {
                     val label = chapters.getOrNull(currentChapter)?.title
                         ?: context.getString(R.string.reader_current_position)
-                    BookmarkStore.get(context).add(book.id, progress, label)
+                    BookmarkStore.get(context).add(
+                        book.id,
+                        ProgressMath.clampProgress(progress),
+                        label,
+                    )
                     bookmarkVersion++
                     Toast.makeText(
                         context,
@@ -664,7 +849,7 @@ fun ReaderScreen(
                                 .defaultMinSize(minWidth = 48.dp, minHeight = 56.dp)
                                 .clickable(role = Role.Button) {
                                     showBookmarks = false
-                                    scrollToProgress(mark.progress)
+                                    jumpToProgress(mark.progress)
                                 }
                                 .semantics {
                                     contentDescription = itemCd
@@ -684,7 +869,7 @@ fun ReaderScreen(
             onDismiss = { showFind = false },
             onJump = { offset ->
                 showFind = false
-                scrollToOffset(offset)
+                jumpToOffset(offset)
             },
         )
     }
@@ -694,6 +879,7 @@ fun ReaderScreen(
             selectedTheme = theme,
             fontSize = fontSizeSp,
             lineHeightMultiplier = lineHeightMultiplier,
+            marginStep = marginStep,
             onDismiss = { showAppearance = false },
             onTheme = { value ->
                 preferences.setTheme(value)
@@ -706,6 +892,10 @@ fun ReaderScreen(
             onLineHeightMultiplier = { mult ->
                 lineHeightMultiplier = mult
                 preferences.setLineHeightMultiplier(mult)
+            },
+            onMarginStep = { step ->
+                marginStep = PageLayout.clampMarginStep(step)
+                preferences.setMargin(marginStep)
             },
         )
     }
@@ -875,10 +1065,12 @@ private fun AppearanceDialog(
     selectedTheme: Int,
     fontSize: Int,
     lineHeightMultiplier: Float,
+    marginStep: Int,
     onDismiss: () -> Unit,
     onTheme: (Int) -> Unit,
     onFontSize: (Int) -> Unit,
     onLineHeightMultiplier: (Float) -> Unit,
+    onMarginStep: (Int) -> Unit,
 ) {
     val selectedSuffix = stringResource(R.string.reader_selected_suffix)
     val themes = listOf(
@@ -890,6 +1082,20 @@ private fun AppearanceDialog(
         1.4f to stringResource(R.string.reader_line_height_compact),
         1.85f to stringResource(R.string.reader_line_height_standard),
         2.2f to stringResource(R.string.reader_line_height_relaxed),
+    )
+    val margins = listOf(
+        ReaderPreferences.MARGIN_NARROW to (
+            stringResource(R.string.reader_margin_narrow) to
+                stringResource(R.string.reader_margin_narrow_cd)
+            ),
+        ReaderPreferences.MARGIN_STANDARD to (
+            stringResource(R.string.reader_margin_standard) to
+                stringResource(R.string.reader_margin_standard_cd)
+            ),
+        ReaderPreferences.MARGIN_WIDE to (
+            stringResource(R.string.reader_margin_wide) to
+                stringResource(R.string.reader_margin_wide_cd)
+            ),
     )
 
     AlertDialog(
@@ -983,6 +1189,38 @@ private fun AppearanceDialog(
                         }
                     }
                 }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.reader_margin_label),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.padding(top = 4.dp),
+                ) {
+                    margins.forEach { (step, labels) ->
+                        val (label, cd) = labels
+                        val selected = step == marginStep
+                        TextButton(
+                            onClick = { onMarginStep(step) },
+                            modifier = Modifier
+                                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                .semantics {
+                                    contentDescription =
+                                        cd + if (selected) selectedSuffix else ""
+                                },
+                        ) {
+                            Text(
+                                text = label,
+                                color = if (selected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
@@ -998,11 +1236,6 @@ private fun AppearanceDialog(
 
 private fun formatTime(): String =
     SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-
-private fun offsetForScrollY(layout: TextLayoutResult, scrollY: Int): Int {
-    val line = layout.getLineForVerticalPosition(scrollY.toFloat().coerceAtLeast(0f))
-    return layout.getLineStart(line)
-}
 
 private fun applyBrightness(activity: ComponentActivity, brightness: Float) {
     val attrs = activity.window.attributes

@@ -12,9 +12,15 @@ public final class ReaderPreferences {
     private static final String THEME = "reader_theme";
     private static final String BRIGHTNESS = "reader_brightness";
     private static final String TTS_RATE = "tts_rate";
+    /** Body margin step: 0 narrow / 1 standard / 2 wide. Absent key → standard. */
+    private static final String MARGIN = "reader_margin";
     public static final int THEME_PAPER = 0;
     public static final int THEME_NIGHT = 1;
     public static final int THEME_EYE_CARE = 2;
+
+    public static final int MARGIN_NARROW = 0;
+    public static final int MARGIN_STANDARD = 1;
+    public static final int MARGIN_WIDE = 2;
 
     public static final float DEFAULT_LINE_HEIGHT = 1.85f;
     public static final float MIN_LINE_HEIGHT = 1.2f;
@@ -96,5 +102,19 @@ public final class ReaderPreferences {
 
     public void setTtsRate(float rate) {
         prefs.edit().putFloat(TTS_RATE, Math.max(.5f, Math.min(2f, rate))).apply();
+    }
+
+    /**
+     * Body margin step for the paginated reader.
+     * Missing key → {@link #MARGIN_STANDARD} so prior installs keep the historical pad.
+     */
+    public int margin() {
+        if (!prefs.contains(MARGIN)) return MARGIN_STANDARD;
+        return Math.max(MARGIN_NARROW, Math.min(MARGIN_WIDE, prefs.getInt(MARGIN, MARGIN_STANDARD)));
+    }
+
+    public void setMargin(int value) {
+        int step = Math.max(MARGIN_NARROW, Math.min(MARGIN_WIDE, value));
+        prefs.edit().putInt(MARGIN, step).apply();
     }
 }

@@ -136,4 +136,26 @@ class ReaderPreferencesTest {
         assertEquals(ReaderPreferences.THEME_EYE_CARE, readerPrefs.theme())
         assertFalse(readerPrefs.nightMode())
     }
+
+    @Test
+    fun margin_defaultWhenAbsentAndClamping() {
+        val prefs = TestSharedPreferences()
+        val readerPrefs = ReaderPreferences.get(prefs)
+
+        // Absent key → standard (historical pad look for prior installs).
+        assertFalse(prefs.contains("reader_margin"))
+        assertEquals(ReaderPreferences.MARGIN_STANDARD, readerPrefs.margin())
+
+        readerPrefs.setMargin(ReaderPreferences.MARGIN_NARROW)
+        assertEquals(ReaderPreferences.MARGIN_NARROW, readerPrefs.margin())
+
+        readerPrefs.setMargin(ReaderPreferences.MARGIN_WIDE)
+        assertEquals(ReaderPreferences.MARGIN_WIDE, readerPrefs.margin())
+
+        readerPrefs.setMargin(-3)
+        assertEquals(ReaderPreferences.MARGIN_NARROW, readerPrefs.margin())
+
+        readerPrefs.setMargin(99)
+        assertEquals(ReaderPreferences.MARGIN_WIDE, readerPrefs.margin())
+    }
 }
