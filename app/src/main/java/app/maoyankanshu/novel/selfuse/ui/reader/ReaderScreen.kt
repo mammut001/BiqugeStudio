@@ -67,6 +67,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -178,13 +179,17 @@ fun ReaderScreen(
     }
 
     val controlsScrollState = rememberScrollState()
-    // Restored progress is authoritative until the user turns pages on a fully loaded book.
+    // Survives progressive→full swap (keyed only on book.id) so saved progress is not reset.
     var progress by remember(book.id) {
         mutableIntStateOf(ProgressMath.clampProgress(book.position))
     }
     var currentChapter by remember { mutableIntStateOf(0) }
     var clock by remember { mutableStateOf(formatTime()) }
-    var initialRestored by remember(book.id, textFullyLoaded) { mutableStateOf(false) }
+    // False until full-book pager sits on pageForProgress(saved). Blocks leave-save clobber.
+    var restoreApplied by remember(book.id, textFullyLoaded) { mutableStateOf(false) }
+    // Local layout ready (window or full); distinct from restoreApplied so window page-turns
+    // are not reset to 0 on every reflow while progress commits stay gated.
+    var layoutReady by remember(book.id, textFullyLoaded) { mutableStateOf(false) }
 
     // Large full-body books use virtual approximate pages (O(1) first body — no full index list).
     val useApproxPaging = textFullyLoaded && book.text.length > PageIndex.MAX_EXACT_MEASURE_CHARS
@@ -221,22 +226,28 @@ fun ReaderScreen(
         !textFullyLoaded -> pageStarts.size.coerceAtLeast(1)
         else -> pageStarts.size.coerceAtLeast(1)
     }
-    val initialPagerPage = if (useApproxPaging) {
-        PageIndex.pageForProgress(book.position, approxPageCount)
-    } else {
-        0
-    }
-    val pagerState = rememberPagerState(
-        initialPage = initialPagerPage,
-        pageCount = {
-            when {
-                useApproxPaging -> {
-                    PageIndex.approximatePageCount(book.text.length, approxCharsPerPage)
+    // Remount pager on progressive→full so initialPage is pageForProgress, not stale window index.
+    val pagerState = key(book.id, textFullyLoaded) {
+        val initialPagerPage = if (useApproxPaging) {
+            OpenProgressGate.restoreTargetPage(
+                ProgressMath.clampProgress(book.position),
+                PageIndex.approximatePageCount(book.text.length, approxCharsPerPage),
+            )
+        } else {
+            0
+        }
+        rememberPagerState(
+            initialPage = initialPagerPage,
+            pageCount = {
+                when {
+                    useApproxPaging -> {
+                        PageIndex.approximatePageCount(book.text.length, approxCharsPerPage)
+                    }
+                    else -> pageStarts.size.coerceAtLeast(1)
                 }
-                else -> pageStarts.size.coerceAtLeast(1)
-            }
-        },
-    )
+            },
+        )
+    }
 
     // Latest progress for leave-save: DisposableEffect keys only on book.id.
     val latestProgress by rememberUpdatedState(progress)
@@ -306,9 +317,10 @@ fun ReaderScreen(
             )
             approxCharsPerPage = charsPerPage
             val count = PageIndex.approximatePageCount(text.length, charsPerPage)
-            val targetPage = if (!initialRestored) {
-                initialRestored = true
-                PageIndex.pageForProgress(book.position, count)
+            val saved = ProgressMath.clampProgress(book.position)
+            val targetPage = if (!layoutReady) {
+                // Full-book open / progressive→full swap: always from saved progress.
+                OpenProgressGate.restoreTargetPage(saved, count)
             } else {
                 // Preserve reading position across reflow (font / margin / theme).
                 val page = (anchorOffset / charsPerPage.coerceAtLeast(256))
@@ -319,7 +331,12 @@ fun ReaderScreen(
             if (pagerState.currentPage != clamped) {
                 pagerState.scrollToPage(clamped)
             }
-            progress = PageIndex.progressForPage(clamped, count)
+            if (!restoreApplied) {
+                // Hold library progress at book.position; do not derive from pager page.
+                progress = OpenProgressGate.afterRestoreApplied(saved)
+                restoreApplied = true
+            }
+            layoutReady = true
             anchorOffset = PageIndex.approximateOffsetForPage(clamped, charsPerPage, text.length)
             currentChapter = ChapterIndex.chapterAtOffset(chapters, anchorOffset)
             return@LaunchedEffect
@@ -350,14 +367,14 @@ fun ReaderScreen(
             }
         }
         pageStarts = starts
-        val targetPage = if (!initialRestored) {
-            // Window preview: show from the start of the window (content already around progress).
+        val saved = ProgressMath.clampProgress(book.position)
+        val targetPage = if (!layoutReady) {
+            // Window preview: start of window (content already around progress).
             // Full small book: restore via progress.
-            initialRestored = true
             if (!textFullyLoaded) {
                 0
             } else {
-                PageIndex.pageForProgress(book.position, starts.size)
+                OpenProgressGate.restoreTargetPage(saved, starts.size)
             }
         } else {
             PageIndex.pageForOffset(starts, anchorOffset)
@@ -366,16 +383,31 @@ fun ReaderScreen(
         if (pagerState.currentPage != clamped) {
             pagerState.scrollToPage(clamped)
         }
-        if (textFullyLoaded) {
-            progress = PageIndex.progressForPage(clamped, starts.size)
+        // Always keep held progress while the gate is closed (progressive window).
+        if (!OpenProgressGate.mayCommitProgressFromPageTurn(textFullyLoaded, restoreApplied)) {
+            progress = OpenProgressGate.afterRestoreApplied(saved)
         }
-        // else: keep restored book.position in [progress] until full text swaps in
+        // Open the commit gate only once the full body is loaded and pager is restored.
+        if (textFullyLoaded && !restoreApplied) {
+            restoreApplied = true
+        }
+        layoutReady = true
         anchorOffset = PageIndex.offsetForPage(starts, clamped)
         currentChapter = ChapterIndex.chapterAtOffset(chapters, anchorOffset)
     }
 
+    // Approx pager remounts with restoreTargetPage before viewport measure — open the gate
+    // so body/footer/progress agree without waiting on contentWidthPx.
+    LaunchedEffect(textFullyLoaded, useApproxPaging, book.position) {
+        if (!useApproxPaging || restoreApplied) return@LaunchedEffect
+        val saved = ProgressMath.clampProgress(book.position)
+        progress = OpenProgressGate.afterRestoreApplied(saved)
+        restoreApplied = true
+    }
+
     // Page turns → progress (0…1000) + chapter + anchor.
-    LaunchedEffect(pagerState, pageStarts, chapters, useApproxPaging, approxCharsPerPage, textFullyLoaded) {
+    // Must not commit progress until OpenProgressGate allows (avoids clobber on swap).
+    LaunchedEffect(pagerState, pageStarts, chapters, useApproxPaging, approxCharsPerPage, textFullyLoaded, restoreApplied) {
         snapshotFlow {
             Triple(pagerState.currentPage, pageStarts, approxCharsPerPage)
         }
@@ -384,16 +416,26 @@ fun ReaderScreen(
                 if (useApproxPaging) {
                     val count = PageIndex.approximatePageCount(book.text.length, cpp)
                     val p = PageIndex.clampPageIndex(page, count)
-                    progress = PageIndex.progressForPage(p, count)
+                    progress = OpenProgressGate.progressAfterPageTurn(
+                        textFullyLoaded = textFullyLoaded,
+                        restoreApplied = restoreApplied,
+                        heldProgress = progress,
+                        page = p,
+                        pageCount = count,
+                    )
                     val offset = PageIndex.approximateOffsetForPage(p, cpp, book.text.length)
                     anchorOffset = offset
                     currentChapter = ChapterIndex.chapterAtOffset(chapters, offset)
                 } else {
                     val count = starts.size.coerceAtLeast(1)
                     val p = PageIndex.clampPageIndex(page, count)
-                    if (textFullyLoaded) {
-                        progress = PageIndex.progressForPage(p, count)
-                    }
+                    progress = OpenProgressGate.progressAfterPageTurn(
+                        textFullyLoaded = textFullyLoaded,
+                        restoreApplied = restoreApplied,
+                        heldProgress = progress,
+                        page = p,
+                        pageCount = count,
+                    )
                     val offset = PageIndex.offsetForPage(starts, p)
                     anchorOffset = offset
                     currentChapter = ChapterIndex.chapterAtOffset(chapters, offset)
@@ -509,14 +551,31 @@ fun ReaderScreen(
                         page,
                         useApproxPaging,
                         approxCharsPerPage,
+                        restoreApplied,
+                        book.position,
+                        pageCount,
                     ) {
                         when {
                             useApproxPaging -> {
-                                // O(page size) slice — never the whole multi‑MB string.
+                                // Before restore, map the *current* pager slot through the gate
+                                // so a stale index 0 never paints page-0 body at mid-book progress.
+                                val bodyPage = if (page == pagerState.currentPage) {
+                                    OpenProgressGate.displayPageForApprox(
+                                        restoreApplied = restoreApplied,
+                                        pagerPage = page,
+                                        savedProgress = book.position,
+                                        pageCount = PageIndex.approximatePageCount(
+                                            book.text.length,
+                                            approxCharsPerPage,
+                                        ),
+                                    )
+                                } else {
+                                    page
+                                }
                                 PageIndex.approximatePageText(
                                     book.text,
                                     approxCharsPerPage,
-                                    page,
+                                    bodyPage,
                                 )
                             }
                             pageStarts.isEmpty() && book.text.isNotEmpty() -> {
