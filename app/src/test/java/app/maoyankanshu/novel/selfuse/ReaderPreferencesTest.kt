@@ -12,23 +12,30 @@ class ReaderPreferencesTest {
         private val intMap = HashMap<String, Int>()
         private val floatMap = HashMap<String, Float>()
         private val boolMap = HashMap<String, Boolean>()
+        private val stringMap = HashMap<String, String>()
 
         override fun getAll(): MutableMap<String, *> = HashMap<String, Any>()
-        override fun getString(key: String?, defValue: String?): String? = null
+        override fun getString(key: String?, defValue: String?): String? = stringMap[key] ?: defValue
         override fun getStringSet(key: String?, defValues: MutableSet<String>?): MutableSet<String>? = null
         override fun getInt(key: String?, defValue: Int): Int = intMap[key] ?: defValue
         override fun getLong(key: String?, defValue: Long): Long = defValue
         override fun getFloat(key: String?, defValue: Float): Float = floatMap[key] ?: defValue
         override fun getBoolean(key: String?, defValue: Boolean): Boolean = boolMap[key] ?: defValue
         override fun contains(key: String?): Boolean =
-            intMap.containsKey(key) || floatMap.containsKey(key) || boolMap.containsKey(key)
+            intMap.containsKey(key) || floatMap.containsKey(key) ||
+                boolMap.containsKey(key) || stringMap.containsKey(key)
 
         override fun edit(): SharedPreferences.Editor = TestEditor(this)
         override fun registerOnSharedPreferenceChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener?) {}
         override fun unregisterOnSharedPreferenceChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener?) {}
 
         class TestEditor(private val prefs: TestSharedPreferences) : SharedPreferences.Editor {
-            override fun putString(key: String?, value: String?): SharedPreferences.Editor = this
+            override fun putString(key: String?, value: String?): SharedPreferences.Editor {
+                if (key != null) {
+                    if (value == null) prefs.stringMap.remove(key) else prefs.stringMap[key] = value
+                }
+                return this
+            }
             override fun putStringSet(key: String?, values: MutableSet<String>?): SharedPreferences.Editor = this
             override fun putInt(key: String?, value: Int): SharedPreferences.Editor {
                 if (key != null) prefs.intMap[key] = value
@@ -48,6 +55,7 @@ class ReaderPreferencesTest {
                     prefs.intMap.remove(it)
                     prefs.floatMap.remove(it)
                     prefs.boolMap.remove(it)
+                    prefs.stringMap.remove(it)
                 }
                 return this
             }
@@ -55,6 +63,7 @@ class ReaderPreferencesTest {
                 prefs.intMap.clear()
                 prefs.floatMap.clear()
                 prefs.boolMap.clear()
+                prefs.stringMap.clear()
                 return this
             }
             override fun commit(): Boolean = true
@@ -160,7 +169,7 @@ class ReaderPreferencesTest {
         readerPrefs.setFontFamily(-1)
         assertEquals(ReaderPreferences.FONT_SERIF, readerPrefs.fontFamily())
         readerPrefs.setFontFamily(99)
-        assertEquals(ReaderPreferences.FONT_DEFAULT, readerPrefs.fontFamily())
+        assertEquals(ReaderPreferences.FONT_CUSTOM, readerPrefs.fontFamily())
 
         assertTrue(readerPrefs.keepScreenOn())
         readerPrefs.setKeepScreenOn(false)
@@ -169,6 +178,27 @@ class ReaderPreferencesTest {
         assertTrue(readerPrefs.volumePageTurn())
         readerPrefs.setVolumePageTurn(false)
         assertFalse(readerPrefs.volumePageTurn())
+
+        assertTrue(readerPrefs.pageTurnAnimation())
+        readerPrefs.setPageTurnAnimation(false)
+        assertFalse(readerPrefs.pageTurnAnimation())
+
+        assertTrue(readerPrefs.paragraphIndent())
+        readerPrefs.setParagraphIndent(false)
+        assertFalse(readerPrefs.paragraphIndent())
+
+        assertFalse(readerPrefs.autoNight())
+        readerPrefs.setAutoNight(true)
+        assertTrue(readerPrefs.autoNight())
+        assertEquals(19, readerPrefs.autoNightStartHour())
+        assertEquals(7, readerPrefs.autoNightEndHour())
+
+        readerPrefs.setCustomFontName("MyFont.ttf")
+        assertEquals("MyFont.ttf", readerPrefs.customFontName())
+        readerPrefs.setFontFamily(ReaderPreferences.FONT_CUSTOM)
+        readerPrefs.clearCustomFont()
+        assertEquals("", readerPrefs.customFontName())
+        assertEquals(ReaderPreferences.FONT_SERIF, readerPrefs.fontFamily())
     }
 
     @Test

@@ -28,7 +28,21 @@ object PageTurnEffect {
     private const val MAX_SCALE_SHRINK: Float = 0.05f
     private const val MAX_ALPHA_FADE: Float = 0.18f
 
-    fun transform(pageOffset: Float): PageTurnTransform {
+    fun transform(pageOffset: Float): PageTurnTransform =
+        transform(pageOffset, animationEnabled = true)
+
+    /**
+     * @param animationEnabled when false, returns identity transform (flat cross-fade free).
+     */
+    fun transform(pageOffset: Float, animationEnabled: Boolean): PageTurnTransform {
+        if (!animationEnabled) {
+            return PageTurnTransform(
+                rotationY = 0f,
+                pivotFractionX = 0.5f,
+                alpha = 1f,
+                scale = 1f,
+            )
+        }
         val clamped = pageOffset.coerceIn(-1f, 1f)
         val abs = clamped.absoluteValue
         val scale = (1f - abs * MAX_SCALE_SHRINK).coerceIn(0.9f, 1f)

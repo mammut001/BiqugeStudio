@@ -139,7 +139,7 @@ fun readerPalette(theme: Int): ReaderPalette = when (theme) {
     )
 }
 
-/** Resolve body typeface from persisted font-family id. */
+/** Resolve body typeface from built-in font-family id (not custom file). */
 fun readerFontFamily(fontFamilyId: Int): FontFamily = when (fontFamilyId) {
     ReaderPreferences.FONT_SANS -> FontFamily.SansSerif
     ReaderPreferences.FONT_DEFAULT -> FontFamily.Default
@@ -154,6 +154,6 @@ fun clampReaderTheme(theme: Int): Int =
         ReaderPreferences.THEME_PAPER
     }
 
-/** Clamp font-family id. */
+/** Clamp font-family id including custom. */
 fun clampFontFamily(id: Int): Int =
-    id.coerceIn(ReaderPreferences.FONT_SERIF, ReaderPreferences.FONT_DEFAULT)
+    id.coerceIn(ReaderPreferences.FONT_SERIF, ReaderPreferences.FONT_CUSTOM)

@@ -2,6 +2,8 @@ package app.maoyankanshu.novel.selfuse.ui.reader
 
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -127,6 +129,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -168,6 +171,10 @@ fun ReaderScreen(
     var brightness by remember { mutableFloatStateOf(preferences.brightness()) }
     var keepScreenOn by remember { mutableStateOf(preferences.keepScreenOn()) }
     var volumePageTurn by remember { mutableStateOf(preferences.volumePageTurn()) }
+    var pageTurnAnimation by remember { mutableStateOf(preferences.pageTurnAnimation()) }
+    var paragraphIndent by remember { mutableStateOf(preferences.paragraphIndent()) }
+    var autoNight by remember { mutableStateOf(preferences.autoNight()) }
+    var customFontName by remember { mutableStateOf(preferences.customFontName()) }
     var menuVisible by remember { mutableStateOf(false) }
     var showToc by remember { mutableStateOf(false) }
     var showBookmarks by remember { mutableStateOf(false) }
@@ -271,7 +278,13 @@ fun ReaderScreen(
     // Latest progress for leave-save: DisposableEffect keys only on book.id.
     val latestProgress by rememberUpdatedState(progress)
 
-    val bodyFontFamily = remember(fontFamilyId) { readerFontFamily(fontFamilyId) }
+    val bodyFontFamily = remember(fontFamilyId, customFontName, context) {
+        if (fontFamilyId == ReaderPreferences.FONT_CUSTOM && customFontName.isNotEmpty()) {
+            ReaderCustomFont.loadFontFamily(context, customFontName) ?: readerFontFamily(ReaderPreferences.FONT_SERIF)
+        } else {
+            readerFontFamily(fontFamilyId)
+        }
+    }
     val bodyTextStyle = remember(
         fontSizeSp,
         lineHeightMultiplier,
@@ -301,6 +314,28 @@ fun ReaderScreen(
         }
         onDispose {
             window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
+    // Auto-night: re-resolve paper by local hour while the reader is open.
+    LaunchedEffect(autoNight, preferences) {
+        if (!autoNight) return@LaunchedEffect
+        while (true) {
+            val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+            val resolved = ReaderReadingPolish.resolveEffectiveTheme(
+                autoNightEnabled = true,
+                hourOfDay = hour,
+                manualTheme = theme,
+                dayTheme = preferences.dayTheme(),
+                nightTheme = preferences.nightThemeVariant(),
+                startHour = preferences.autoNightStartHour(),
+                endHour = preferences.autoNightEndHour(),
+            )
+            if (resolved != theme) {
+                theme = resolved
+                preferences.setTheme(resolved)
+            }
+            delay(60_000)
         }
     }
 
@@ -502,11 +537,15 @@ fun ReaderScreen(
         val page = PageIndex.clampPageIndex(target, count)
         if (page == pagerState.currentPage) return
         scope.launch {
-            // ~280ms left/right turn so tap and swipe both feel like page flips.
-            pagerState.animateScrollToPage(
-                page = page,
-                animationSpec = tween(durationMillis = 280),
-            )
+            val ms = ReaderReadingPolish.pageTurnDurationMs(pageTurnAnimation)
+            if (ms <= 0) {
+                pagerState.scrollToPage(page)
+            } else {
+                pagerState.animateScrollToPage(
+                    page = page,
+                    animationSpec = tween(durationMillis = ms),
+                )
+            }
         }
     }
 
@@ -665,7 +704,7 @@ fun ReaderScreen(
                     // pager scrolls (finger swipe or tap animateScrollToPage).
                     val pageOffset =
                         (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
-                    val turn = PageTurnEffect.transform(pageOffset)
+                    val turn = PageTurnEffect.transform(pageOffset, pageTurnAnimation)
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -695,8 +734,14 @@ fun ReaderScreen(
                         SelectionContainer {
                             // Top-aligned, clipped: page packing leaves bottom safety so the
                             // last line paints fully instead of being cut at the footer edge.
+                            val displayBody = remember(pageBody, paragraphIndent) {
+                                ReaderReadingPolish.withParagraphFirstLineIndent(
+                                    pageBody,
+                                    paragraphIndent,
+                                )
+                            }
                             Text(
-                                text = pageBody,
+                                text = displayBody,
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .padding(horizontal = padH, vertical = padV),
@@ -1244,6 +1289,36 @@ fun ReaderScreen(
         )
     }
 
+    // Custom font picker (TTF/OTF).
+    val importFontLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val name = ReaderCustomFont.importFromUri(context, uri, uri.lastPathSegment)
+        if (name != null) {
+            // Drop previous custom file if renamed differently.
+            val previous = preferences.customFontName()
+            if (previous.isNotEmpty() && previous != name) {
+                ReaderCustomFont.deleteCustomFont(context, previous)
+            }
+            preferences.setCustomFontName(name)
+            preferences.setFontFamily(ReaderPreferences.FONT_CUSTOM)
+            customFontName = name
+            fontFamilyId = ReaderPreferences.FONT_CUSTOM
+            Toast.makeText(
+                context,
+                context.getString(R.string.reader_font_import_ok, name),
+                Toast.LENGTH_SHORT,
+            ).show()
+        } else {
+            Toast.makeText(
+                context,
+                context.getString(R.string.reader_font_import_fail),
+                Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
+
     if (showAppearance) {
         AppearanceDialog(
             selectedTheme = theme,
@@ -1254,10 +1329,22 @@ fun ReaderScreen(
             brightness = brightness,
             keepScreenOn = keepScreenOn,
             volumePageTurn = volumePageTurn,
+            pageTurnAnimation = pageTurnAnimation,
+            paragraphIndent = paragraphIndent,
+            autoNight = autoNight,
+            customFontName = customFontName,
+            autoNightStartHour = preferences.autoNightStartHour(),
+            autoNightEndHour = preferences.autoNightEndHour(),
             onDismiss = { showAppearance = false },
             onTheme = { value ->
-                preferences.setTheme(value)
-                theme = value
+                val t = clampReaderTheme(value)
+                preferences.setTheme(t)
+                theme = t
+                if (ReaderPreferences.isNightTheme(t)) {
+                    preferences.setNightThemeVariant(t)
+                } else {
+                    preferences.setDayTheme(t)
+                }
             },
             onFontSize = { size ->
                 fontSizeSp = size
@@ -1272,8 +1359,43 @@ fun ReaderScreen(
                 preferences.setMargin(marginStep)
             },
             onFontFamily = { id ->
-                fontFamilyId = clampFontFamily(id)
-                preferences.setFontFamily(fontFamilyId)
+                val clamped = clampFontFamily(id)
+                if (clamped == ReaderPreferences.FONT_CUSTOM && customFontName.isEmpty()) {
+                    importFontLauncher.launch(
+                        arrayOf(
+                            "font/ttf",
+                            "font/otf",
+                            "application/x-font-ttf",
+                            "application/x-font-otf",
+                            "application/octet-stream",
+                            "*/*",
+                        ),
+                    )
+                } else {
+                    fontFamilyId = clamped
+                    preferences.setFontFamily(fontFamilyId)
+                }
+            },
+            onImportFont = {
+                importFontLauncher.launch(
+                    arrayOf(
+                        "font/ttf",
+                        "font/otf",
+                        "application/x-font-ttf",
+                        "application/x-font-otf",
+                        "application/octet-stream",
+                        "*/*",
+                    ),
+                )
+            },
+            onClearCustomFont = {
+                val previous = preferences.customFontName()
+                if (previous.isNotEmpty()) {
+                    ReaderCustomFont.deleteCustomFont(context, previous)
+                }
+                preferences.clearCustomFont()
+                customFontName = ""
+                fontFamilyId = ReaderPreferences.FONT_SERIF
             },
             onBrightness = { value ->
                 brightness = value
@@ -1288,9 +1410,36 @@ fun ReaderScreen(
                 volumePageTurn = enabled
                 preferences.setVolumePageTurn(enabled)
             },
+            onPageTurnAnimation = { enabled ->
+                pageTurnAnimation = enabled
+                preferences.setPageTurnAnimation(enabled)
+            },
+            onParagraphIndent = { enabled ->
+                paragraphIndent = enabled
+                preferences.setParagraphIndent(enabled)
+            },
+            onAutoNight = { enabled ->
+                autoNight = enabled
+                preferences.setAutoNight(enabled)
+                if (enabled) {
+                    val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+                    val resolved = ReaderReadingPolish.resolveEffectiveTheme(
+                        autoNightEnabled = true,
+                        hourOfDay = hour,
+                        manualTheme = theme,
+                        dayTheme = preferences.dayTheme(),
+                        nightTheme = preferences.nightThemeVariant(),
+                        startHour = preferences.autoNightStartHour(),
+                        endHour = preferences.autoNightEndHour(),
+                    )
+                    theme = resolved
+                    preferences.setTheme(resolved)
+                }
+            },
         )
     }
 }
+
 
 /**
  * Right-edge TOC scrub rail: drag to jump chapter index instantly (1 → 20 → 30),
@@ -1580,6 +1729,7 @@ private fun FindDialog(
 }
 
 
+
 @Composable
 private fun AppearanceDialog(
     selectedTheme: Int,
@@ -1590,15 +1740,26 @@ private fun AppearanceDialog(
     brightness: Float,
     keepScreenOn: Boolean,
     volumePageTurn: Boolean,
+    pageTurnAnimation: Boolean,
+    paragraphIndent: Boolean,
+    autoNight: Boolean,
+    customFontName: String,
+    autoNightStartHour: Int,
+    autoNightEndHour: Int,
     onDismiss: () -> Unit,
     onTheme: (Int) -> Unit,
     onFontSize: (Int) -> Unit,
     onLineHeightMultiplier: (Float) -> Unit,
     onMarginStep: (Int) -> Unit,
     onFontFamily: (Int) -> Unit,
+    onImportFont: () -> Unit,
+    onClearCustomFont: () -> Unit,
     onBrightness: (Float) -> Unit,
     onKeepScreenOn: (Boolean) -> Unit,
     onVolumePageTurn: (Boolean) -> Unit,
+    onPageTurnAnimation: (Boolean) -> Unit,
+    onParagraphIndent: (Boolean) -> Unit,
+    onAutoNight: (Boolean) -> Unit,
 ) {
     val selectedSuffix = stringResource(R.string.reader_selected_suffix)
     val themeLabels = mapOf(
@@ -1645,6 +1806,10 @@ private fun AppearanceDialog(
             stringResource(R.string.reader_font_system) to
                 stringResource(R.string.reader_font_system_cd)
             ),
+        ReaderPreferences.FONT_CUSTOM to (
+            stringResource(R.string.reader_font_custom) to
+                stringResource(R.string.reader_font_custom_cd)
+            ),
     )
     val followSystem = brightness < 0f
     val brightnessPercent = if (followSystem) {
@@ -1660,7 +1825,7 @@ private fun AppearanceDialog(
         text = {
             Column(
                 modifier = Modifier
-                    .heightIn(max = 460.dp)
+                    .heightIn(max = 480.dp)
                     .verticalScroll(appearanceScroll),
             ) {
                 Text(
@@ -1731,7 +1896,27 @@ private fun AppearanceDialog(
                     }
                 }
 
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(10.dp))
+                AppearanceToggleRow(
+                    label = stringResource(R.string.reader_auto_night),
+                    contentDescription = stringResource(R.string.reader_auto_night_cd),
+                    checked = autoNight,
+                    onCheckedChange = onAutoNight,
+                )
+                if (autoNight) {
+                    Text(
+                        text = stringResource(
+                            R.string.reader_auto_night_hours,
+                            autoNightStartHour,
+                            autoNightEndHour,
+                        ),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 6.dp),
+                    )
+                }
+
+                Spacer(Modifier.height(8.dp))
                 Text(
                     text = stringResource(R.string.reader_font_family_section),
                     style = MaterialTheme.typography.titleSmall,
@@ -1760,6 +1945,39 @@ private fun AppearanceDialog(
                                     MaterialTheme.colorScheme.onSurfaceVariant
                                 },
                             )
+                        }
+                    }
+                }
+                if (customFontName.isNotEmpty()) {
+                    Text(
+                        text = stringResource(R.string.reader_font_custom_using, customFontName),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                val importFontLabel = stringResource(R.string.reader_font_import)
+                val importFontCd = stringResource(R.string.reader_font_import_cd)
+                val clearFontLabel = stringResource(R.string.reader_font_clear)
+                val clearFontCd = stringResource(R.string.reader_font_clear_cd)
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(
+                        onClick = onImportFont,
+                        modifier = Modifier
+                            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                            .semantics { contentDescription = importFontCd },
+                    ) {
+                        Text(importFontLabel)
+                    }
+                    if (customFontName.isNotEmpty()) {
+                        TextButton(
+                            onClick = onClearCustomFont,
+                            modifier = Modifier
+                                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                .semantics { contentDescription = clearFontCd },
+                        ) {
+                            Text(clearFontLabel)
                         }
                     }
                 }
@@ -1912,6 +2130,18 @@ private fun AppearanceDialog(
                     checked = volumePageTurn,
                     onCheckedChange = onVolumePageTurn,
                 )
+                AppearanceToggleRow(
+                    label = stringResource(R.string.reader_page_turn_animation),
+                    contentDescription = stringResource(R.string.reader_page_turn_animation_cd),
+                    checked = pageTurnAnimation,
+                    onCheckedChange = onPageTurnAnimation,
+                )
+                AppearanceToggleRow(
+                    label = stringResource(R.string.reader_paragraph_indent),
+                    contentDescription = stringResource(R.string.reader_paragraph_indent_cd),
+                    checked = paragraphIndent,
+                    onCheckedChange = onParagraphIndent,
+                )
             }
         },
         confirmButton = {
@@ -1924,6 +2154,7 @@ private fun AppearanceDialog(
         },
     )
 }
+
 
 @Composable
 private fun AppearanceToggleRow(

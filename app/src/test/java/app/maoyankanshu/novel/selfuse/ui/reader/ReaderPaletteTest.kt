@@ -46,7 +46,7 @@ class ReaderPaletteTest {
         assertEquals(ReaderPreferences.THEME_SOFT_NIGHT, clampReaderTheme(ReaderPreferences.THEME_SOFT_NIGHT))
         assertEquals(ReaderPreferences.THEME_PAPER, clampReaderTheme(999))
         assertEquals(ReaderPreferences.FONT_SERIF, clampFontFamily(-1))
-        assertEquals(ReaderPreferences.FONT_DEFAULT, clampFontFamily(99))
+        assertEquals(ReaderPreferences.FONT_CUSTOM, clampFontFamily(99))
         assertEquals(ReaderPreferences.FONT_SANS, clampFontFamily(ReaderPreferences.FONT_SANS))
     }
 
