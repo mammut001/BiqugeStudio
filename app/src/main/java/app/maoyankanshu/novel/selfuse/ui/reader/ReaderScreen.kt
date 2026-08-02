@@ -151,8 +151,19 @@ fun ReaderScreen(
     var bookmarkVersion by remember { mutableIntStateOf(0) }
 
     val palette = remember(theme) { readerPalette(theme) }
-    val chapters = remember(book.id, book.text) {
-        ChapterIndex.findChapters(book.text, context.getString(R.string.reader_chapter_full))
+    val fullTextChapterLabel = stringResource(R.string.reader_chapter_full)
+    var chapters by remember(book.id) {
+        mutableStateOf(listOf(Chapter(fullTextChapterLabel, 0)))
+    }
+
+    // Chapter regex scanning is linear over the entire book. Keep it off the UI thread so a
+    // multi-megabyte TXT can still draw its first page immediately.
+    LaunchedEffect(book.id) {
+        val text = book.text
+        val label = fullTextChapterLabel
+        chapters = withContext(Dispatchers.Default) {
+            ChapterIndex.findChapters(text, label)
+        }
     }
 
     val controlsScrollState = rememberScrollState()
