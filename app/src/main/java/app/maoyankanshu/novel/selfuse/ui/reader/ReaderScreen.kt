@@ -155,15 +155,19 @@ fun ReaderScreen(
     var chapters by remember(book.id) {
         mutableStateOf(listOf(Chapter(fullTextChapterLabel, 0)))
     }
+    var chaptersLoaded by remember(book.id) { mutableStateOf(false) }
 
-    // Chapter regex scanning is linear over the entire book. Keep it off the UI thread so a
-    // multi-megabyte TXT can still draw its first page immediately.
-    LaunchedEffect(book.id) {
+    // Chapter regex scanning is linear over the entire book. For a large import, defer it until
+    // the TOC is requested so the first page is not competing with a multi-megabyte scan.
+    LaunchedEffect(book.id, showToc) {
+        if (chaptersLoaded) return@LaunchedEffect
+        if (!showToc && book.text.length > PageIndex.MAX_EXACT_MEASURE_CHARS) return@LaunchedEffect
         val text = book.text
         val label = fullTextChapterLabel
         chapters = withContext(Dispatchers.Default) {
             ChapterIndex.findChapters(text, label)
         }
+        chaptersLoaded = true
     }
 
     val controlsScrollState = rememberScrollState()
