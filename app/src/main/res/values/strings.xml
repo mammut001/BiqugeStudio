@@ -207,6 +207,8 @@
     <string name="reader_back_cd">返回书架</string>
     <string name="reader_toc">目录</string>
     <string name="reader_toc_cd">打开章节目录</string>
+    <string name="reader_toc_jump_current">定位当前章节</string>
+    <string name="reader_toc_jump_current_cd">快速滚动到正在阅读的章节</string>
     <string name="reader_bookmarks">书签</string>
     <string name="reader_bookmarks_cd">打开书签</string>
     <string name="reader_find">查找</string>

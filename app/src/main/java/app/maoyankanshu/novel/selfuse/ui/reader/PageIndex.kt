@@ -245,6 +245,44 @@ object PageIndex {
         return List(pageCount) { it * size }
     }
 
+    /**
+     * Fraction of theoretical columns×lines kept for approximate paging.
+     * Below 1.0 so Chinese full-width + letterSpacing rarely overfill the screen
+     * (overfill clips the last line in a non-scrolling page Text).
+     */
+    const val APPROX_FILL_FACTOR: Float = 0.70f
+
+    /**
+     * Reserve this fraction of one line height at the bottom of the exact-measure
+     * viewport so the last line's descenders / subpixel paint are not clipped.
+     */
+    const val PAGE_BOTTOM_SAFETY_LINE_FRACTION: Float = 0.35f
+
+    /** Minimum absolute bottom safety in px when line height is unknown. */
+    const val PAGE_BOTTOM_SAFETY_MIN_PX: Float = 4f
+
+    /**
+     * Effective height used when packing lines onto a page.
+     * Slightly smaller than the painted viewport so the last line fully displays.
+     *
+     * @param viewportHeightPx measured body height (already after margins)
+     * @param typicalLineHeightPx optional average line height; when >0 reserves a
+     *   fraction of one line, otherwise a small % of the viewport.
+     */
+    fun effectivePageViewportHeight(
+        viewportHeightPx: Float,
+        typicalLineHeightPx: Float = 0f,
+    ): Float {
+        val vh = viewportHeightPx.coerceAtLeast(1f)
+        val reserve = if (typicalLineHeightPx > 0f) {
+            (typicalLineHeightPx * PAGE_BOTTOM_SAFETY_LINE_FRACTION)
+                .coerceAtLeast(PAGE_BOTTOM_SAFETY_MIN_PX)
+        } else {
+            (vh * 0.02f).coerceAtLeast(PAGE_BOTTOM_SAFETY_MIN_PX)
+        }
+        return (vh - reserve).coerceAtLeast(1f)
+    }
+
     /** Estimate a conservative page size for the current viewport and text style. */
     fun approximateCharsPerPage(
         widthPx: Int,
@@ -254,18 +292,21 @@ object PageIndex {
     ): Int {
         val font = fontSizePx.coerceAtLeast(1f)
         val lineHeight = (font * lineHeightMultiplier.coerceAtLeast(1f)).coerceAtLeast(1f)
-        val columns = (widthPx.coerceAtLeast(1) / font).toInt().coerceAtLeast(1)
-        val lines = (heightPx.coerceAtLeast(1) / lineHeight).toInt().coerceAtLeast(1)
-        return (columns * lines * 0.82f).roundToInt().coerceIn(256, 4096)
+        // Full-width CJK ≈ 1em; letterSpacing makes real columns slightly fewer.
+        val columns = ((widthPx.coerceAtLeast(1) / font) * 0.96f).toInt().coerceAtLeast(1)
+        // Leave one line empty so the last painted line is not clipped at the footer edge.
+        val rawLines = (heightPx.coerceAtLeast(1) / lineHeight).toInt().coerceAtLeast(1)
+        val lines = (rawLines - 1).coerceAtLeast(1)
+        return (columns * lines * APPROX_FILL_FACTOR).roundToInt().coerceIn(256, 4096)
     }
 
     /**
      * Build page-start **character offsets** from measured line metrics.
      *
      * Packs consecutive lines into pages whose total height does not exceed
-     * [viewportHeightPx]. A line taller than the viewport still occupies its own page
-     * (no mid-line split). Always returns at least `[0]` when there are no lines
-     * (empty body) so the reader can show a blank page.
+     * [viewportHeightPx] (after [effectivePageViewportHeight] safety). A line taller
+     * than the viewport still occupies its own page (no mid-line split). Always returns
+     * at least `[0]` when there are no lines (empty body) so the reader can show a blank page.
      *
      * @param lineTops top Y of each line in layout coordinates
      * @param lineBottoms bottom Y of each line
@@ -284,7 +325,13 @@ object PageIndex {
         }
         if (n == 0) return listOf(0)
 
-        val vh = viewportHeightPx.coerceAtLeast(1f)
+        val typicalLine = if (n > 0) {
+            (lineBottoms[0] - lineTops[0]).coerceAtLeast(0f)
+        } else {
+            0f
+        }
+        // Safety margin so the last line is fully visible (not clipped by page edge).
+        val vh = effectivePageViewportHeight(viewportHeightPx, typicalLine)
         val starts = ArrayList<Int>(n.coerceAtMost(64))
         starts.add(lineCharStarts[0].coerceAtLeast(0))
         var pageTop = lineTops[0]
@@ -292,7 +339,8 @@ object PageIndex {
         for (i in 1 until n) {
             val bottom = lineBottoms[i]
             // Line i does not fit below the current page top → open a new page.
-            if (bottom - pageTop > vh + 0.5f) {
+            // Use strict ≤ vh (no +0.5 slack that used to pack one line too many).
+            if (bottom - pageTop > vh) {
                 starts.add(lineCharStarts[i].coerceAtLeast(0))
                 pageTop = lineTops[i]
             }

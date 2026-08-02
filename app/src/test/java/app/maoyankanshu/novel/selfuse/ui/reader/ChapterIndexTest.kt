@@ -233,6 +233,18 @@ class ChapterIndexTest {
         assertEquals(0, ChapterIndex.chapterAtOffset(chapters, -5))
     }
 
+    @Test
+    fun tocScrollIndex_clampsToCurrentChapter() {
+        assertEquals(0, ChapterIndex.tocScrollIndex(0, 0))
+        assertEquals(0, ChapterIndex.tocScrollIndex(5, 0))
+        assertEquals(0, ChapterIndex.tocScrollIndex(-1, 10))
+        assertEquals(0, ChapterIndex.tocScrollIndex(0, 10))
+        assertEquals(7, ChapterIndex.tocScrollIndex(7, 10))
+        assertEquals(9, ChapterIndex.tocScrollIndex(99, 10))
+        // Mid-book open: TOC should scroll to reading chapter, not always 0.
+        assertEquals(42, ChapterIndex.tocScrollIndex(42, 200))
+    }
+
     private fun assertStrictlyIncreasingStarts(chapters: List<Chapter>) {
         for (i in 1 until chapters.size) {
             assertTrue(

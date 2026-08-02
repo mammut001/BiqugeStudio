@@ -81,4 +81,13 @@ object ChapterIndex {
         }
         return selected
     }
+
+    /**
+     * Lazy list index to scroll to when opening the TOC (current chapter).
+     * Empty list → 0; out-of-range [currentChapter] is clamped.
+     */
+    fun tocScrollIndex(currentChapter: Int, chapterCount: Int): Int {
+        if (chapterCount <= 0) return 0
+        return currentChapter.coerceIn(0, chapterCount - 1)
+    }
 }

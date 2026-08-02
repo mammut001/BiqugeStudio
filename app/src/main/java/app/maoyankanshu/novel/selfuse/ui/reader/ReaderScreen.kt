@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -43,6 +44,7 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.FormatSize
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
@@ -625,12 +627,16 @@ fun ReaderScreen(
                             },
                     ) {
                         SelectionContainer {
+                            // Top-aligned, clipped: page packing leaves bottom safety so the
+                            // last line paints fully instead of being cut at the footer edge.
                             Text(
                                 text = pageBody,
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .padding(horizontal = padH, vertical = padV),
                                 style = bodyTextStyle,
+                                overflow = TextOverflow.Clip,
+                                softWrap = true,
                             )
                         }
                     }
@@ -900,19 +906,59 @@ fun ReaderScreen(
 
     if (showToc) {
         val currentSuffix = stringResource(R.string.reader_chapter_current_suffix)
+        val tocJumpLabel = stringResource(R.string.reader_toc_jump_current)
+        val tocJumpCd = stringResource(R.string.reader_toc_jump_current_cd)
+        val tocListState = rememberLazyListState()
+        // Open at the chapter being read — not always at the top of a long TOC.
+        LaunchedEffect(showToc, currentChapter, chapters.size) {
+            if (!showToc || chapters.isEmpty()) return@LaunchedEffect
+            val index = ChapterIndex.tocScrollIndex(currentChapter, chapters.size)
+            tocListState.scrollToItem(index)
+        }
         ModalBottomSheet(
             onDismissRequest = { showToc = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         ) {
-            Text(
-                text = stringResource(R.string.reader_toc),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
+            Row(
                 modifier = Modifier
-                    .padding(horizontal = 20.dp, vertical = 8.dp)
-                    .semantics { heading() },
-            )
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = stringResource(R.string.reader_toc),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .semantics { heading() },
+                )
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            val index = ChapterIndex.tocScrollIndex(currentChapter, chapters.size)
+                            tocListState.animateScrollToItem(index)
+                        }
+                    },
+                    enabled = chapters.isNotEmpty(),
+                    modifier = Modifier
+                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                        .semantics {
+                            contentDescription = tocJumpCd
+                            role = Role.Button
+                        },
+                ) {
+                    Icon(
+                        Icons.Filled.MyLocation,
+                        contentDescription = null,
+                        modifier = Modifier.padding(end = 4.dp),
+                    )
+                    Text(tocJumpLabel)
+                }
+            }
             LazyColumn(
+                state = tocListState,
                 contentPadding = PaddingValues(bottom = 32.dp),
                 modifier = Modifier.heightIn(max = 420.dp),
             ) {
