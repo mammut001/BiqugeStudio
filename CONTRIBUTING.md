@@ -5,7 +5,7 @@ Thanks for helping improve this local Android reader. This guide covers workflow
 ## Scope of this repository
 
 - **In scope:** the `BiqugeStudio` Android app module (`:app`), its docs, and GitHub project hygiene under this tree.
-- **Out of scope:** sibling projects or other apps (for example FocusApp). Do not open PRs that change unrelated trees.
+- **Out of scope:** unrelated projects, applications, or directories outside this repository. Do not include unrelated trees in a PR.
 - **License:** no open-source license has been chosen yet. That is an **explicit maintainer decision**. Do not add a `LICENSE` file or relicense third-party code without maintainer approval.
 
 ## Development environment
