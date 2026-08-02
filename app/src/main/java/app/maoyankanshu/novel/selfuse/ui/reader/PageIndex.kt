@@ -17,6 +17,9 @@ enum class TapZoneAction {
  * so they are fully JVM unit-testable without a device.
  */
 object PageIndex {
+    /** TextMeasurer is deliberately avoided for very large books to prevent OOM/ANR. */
+    const val MAX_EXACT_MEASURE_CHARS: Int = 200_000
+
     /** Left third → previous page; center third → chrome; right third → next page. */
     const val ZONE_LEFT_END: Float = 1f / 3f
     const val ZONE_RIGHT_START: Float = 2f / 3f
@@ -121,6 +124,35 @@ object PageIndex {
         val (start, endExclusive) = pageCharRange(pageStarts, pageIndex, fullText.length)
         if (start >= endExclusive) return ""
         return fullText.substring(start, endExclusive)
+    }
+
+    /**
+     * Build bounded-size page starts without laying out the entire book.
+     *
+     * This is used for large imports where a full TextMeasurer layout can allocate more memory
+     * than a phone can provide. Pages are intentionally approximate; each rendered page remains
+     * small and the user can still read, navigate, and save progress safely.
+     */
+    fun approximatePageStartOffsets(textLength: Int, charsPerPage: Int): List<Int> {
+        val length = textLength.coerceAtLeast(0)
+        if (length == 0) return listOf(0)
+        val size = charsPerPage.coerceAtLeast(256)
+        val pageCount = ((length - 1) / size) + 1
+        return List(pageCount) { it * size }
+    }
+
+    /** Estimate a conservative page size for the current viewport and text style. */
+    fun approximateCharsPerPage(
+        widthPx: Int,
+        heightPx: Int,
+        fontSizePx: Float,
+        lineHeightMultiplier: Float,
+    ): Int {
+        val font = fontSizePx.coerceAtLeast(1f)
+        val lineHeight = (font * lineHeightMultiplier.coerceAtLeast(1f)).coerceAtLeast(1f)
+        val columns = (widthPx.coerceAtLeast(1) / font).toInt().coerceAtLeast(1)
+        val lines = (heightPx.coerceAtLeast(1) / lineHeight).toInt().coerceAtLeast(1)
+        return (columns * lines * 0.82f).roundToInt().coerceIn(256, 4096)
     }
 
     /**

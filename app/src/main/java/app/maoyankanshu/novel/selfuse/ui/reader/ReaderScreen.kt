@@ -237,6 +237,17 @@ fun ReaderScreen(
         // TextMeasurer must run on the composition/main thread; pure packing is cheap.
         val starts = if (text.isEmpty()) {
             listOf(0)
+        } else if (text.length > PageIndex.MAX_EXACT_MEASURE_CHARS) {
+            // Full-book TextMeasurer layouts are expensive for imported novels (often 10+ MB).
+            // Keep each page bounded and avoid allocating a layout object for the whole string.
+            val fontPx = with(density) { fontSizeSp.sp.toPx() }
+            val charsPerPage = PageIndex.approximateCharsPerPage(
+                widthPx = width,
+                heightPx = height,
+                fontSizePx = fontPx,
+                lineHeightMultiplier = lineHeightMultiplier,
+            )
+            PageIndex.approximatePageStartOffsets(text.length, charsPerPage)
         } else {
             val layout = textMeasurer.measure(
                 text = text,

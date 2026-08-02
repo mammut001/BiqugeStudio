@@ -149,6 +149,20 @@ class PageIndexTest {
         assertEquals(10 to 30, PageIndex.pageCharRange(listOf(0, 10, 30), 1, 100))
     }
 
+    @Test
+    fun approximatePageStartOffsets_boundsLargeTextWithoutLayout() {
+        assertEquals(listOf(0), PageIndex.approximatePageStartOffsets(0, 1200))
+        assertEquals(listOf(0, 1000, 2000), PageIndex.approximatePageStartOffsets(2500, 1000))
+        assertEquals(listOf(0, 256), PageIndex.approximatePageStartOffsets(257, 1))
+    }
+
+    @Test
+    fun approximateCharsPerPage_isPositiveAndConservative() {
+        val count = PageIndex.approximateCharsPerPage(1080, 2000, 54f, 1.5f)
+        assertTrue(count in 256..4096)
+        assertEquals(256, PageIndex.approximateCharsPerPage(1, 1, 1000f, 10f))
+    }
+
     // ── Line-metric page breaking ──────────────────────────────────────────
 
     @Test
