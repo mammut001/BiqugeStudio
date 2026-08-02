@@ -96,7 +96,7 @@ dependencies {
 
     // JVM unit tests (no device)
     testImplementation 'junit:junit:4.13.2'
-    testImplementation 'org.jetbrains.kotlin:kotlin-test-junit:2.0.21'
+    testImplementation 'org.jetbrains.kotlin:kotlin-test-junit:2.4.10'
 
     // Instrumented / Compose UI tests — Espresso 3.7+ required for API 35/36 input injection
     androidTestImplementation 'androidx.test.ext:junit:1.3.0'
