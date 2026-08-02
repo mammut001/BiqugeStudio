@@ -1,6 +1,7 @@
 package app.maoyankanshu.novel.selfuse.ui.reader
 
 import java.util.regex.Pattern
+import kotlin.math.roundToInt
 
 /** Chapter heading at a character offset in plain TXT/EPUB body text. */
 data class Chapter(
@@ -89,5 +90,46 @@ object ChapterIndex {
     fun tocScrollIndex(currentChapter: Int, chapterCount: Int): Int {
         if (chapterCount <= 0) return 0
         return currentChapter.coerceIn(0, chapterCount - 1)
+    }
+
+    /**
+     * Map a vertical scrub fraction (0 = first chapter, 1 = last) to a chapter index.
+     * Used by the TOC side rail so a quick drag can jump 1 → 20 → 30 instantly.
+     */
+    fun tocIndexForScrubFraction(fraction: Float, chapterCount: Int): Int {
+        if (chapterCount <= 0) return 0
+        if (chapterCount == 1) return 0
+        val f = fraction.coerceIn(0f, 1f)
+        return (f * (chapterCount - 1)).roundToInt().coerceIn(0, chapterCount - 1)
+    }
+
+    /**
+     * Inverse of [tocIndexForScrubFraction]: chapter index → rail fraction 0…1.
+     */
+    fun tocScrubFractionForIndex(index: Int, chapterCount: Int): Float {
+        if (chapterCount <= 1) return 0f
+        val i = index.coerceIn(0, chapterCount - 1)
+        return i.toFloat() / (chapterCount - 1).toFloat()
+    }
+
+    /**
+     * Sparse tick labels along a long TOC scrub rail (e.g. 1, 20, 40 … last).
+     * 1-based chapter numbers for display. At most [maxTicks] labels.
+     */
+    fun tocScrubTickLabels(chapterCount: Int, maxTicks: Int = 6): List<Int> {
+        if (chapterCount <= 0) return emptyList()
+        if (chapterCount == 1) return listOf(1)
+        val cap = maxTicks.coerceAtLeast(2)
+        if (chapterCount <= cap) {
+            return (1..chapterCount).toList()
+        }
+        val labels = LinkedHashSet<Int>()
+        labels.add(1)
+        for (i in 1 until cap - 1) {
+            val frac = i.toFloat() / (cap - 1).toFloat()
+            labels.add((frac * (chapterCount - 1)).roundToInt() + 1)
+        }
+        labels.add(chapterCount)
+        return labels.sorted()
     }
 }

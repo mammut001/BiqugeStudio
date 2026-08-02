@@ -10,6 +10,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -21,14 +22,17 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -37,6 +41,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -80,10 +85,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -94,11 +101,15 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
 import app.maoyankanshu.novel.selfuse.AppIntents
 import app.maoyankanshu.novel.selfuse.Book
 import app.maoyankanshu.novel.selfuse.BookmarkStore
@@ -908,11 +919,15 @@ fun ReaderScreen(
         val currentSuffix = stringResource(R.string.reader_chapter_current_suffix)
         val tocJumpLabel = stringResource(R.string.reader_toc_jump_current)
         val tocJumpCd = stringResource(R.string.reader_toc_jump_current_cd)
+        val tocScrubCd = stringResource(R.string.reader_toc_scrub_cd)
         val tocListState = rememberLazyListState()
+        var scrubbing by remember { mutableStateOf(false) }
+        var scrubIndex by remember { mutableIntStateOf(currentChapter) }
         // Open at the chapter being read — not always at the top of a long TOC.
         LaunchedEffect(showToc, currentChapter, chapters.size) {
             if (!showToc || chapters.isEmpty()) return@LaunchedEffect
             val index = ChapterIndex.tocScrollIndex(currentChapter, chapters.size)
+            scrubIndex = index
             tocListState.scrollToItem(index)
         }
         ModalBottomSheet(
@@ -938,6 +953,7 @@ fun ReaderScreen(
                     onClick = {
                         scope.launch {
                             val index = ChapterIndex.tocScrollIndex(currentChapter, chapters.size)
+                            scrubIndex = index
                             tocListState.animateScrollToItem(index)
                         }
                     },
@@ -957,44 +973,81 @@ fun ReaderScreen(
                     Text(tocJumpLabel)
                 }
             }
-            LazyColumn(
-                state = tocListState,
-                contentPadding = PaddingValues(bottom = 32.dp),
-                modifier = Modifier.heightIn(max = 420.dp),
+            // List + right-edge fast scrub: drag 1 → 20 → 30 instantly (not slow fling).
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp),
             ) {
-                itemsIndexed(chapters) { index, chapter ->
-                    val selected = index == currentChapter
-                    val chapterCd = chapter.title + if (selected) currentSuffix else ""
-                    ListItem(
-                        headlineContent = {
-                            Text(
-                                text = chapter.title,
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = if (selected) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurface
-                                },
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        },
-                        colors = ListItemDefaults.colors(
-                            containerColor = MaterialTheme.colorScheme.surface,
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .defaultMinSize(minWidth = 48.dp, minHeight = 56.dp)
-                            .clickable(role = Role.Button) {
-                                showToc = false
-                                jumpToOffset(chapter.start)
-                            }
-                            .semantics {
-                                contentDescription = chapterCd
-                                role = Role.Button
+                LazyColumn(
+                    state = tocListState,
+                    contentPadding = PaddingValues(bottom = 32.dp, end = 36.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    itemsIndexed(chapters) { index, chapter ->
+                        val selected = index == currentChapter
+                        val highlight = scrubbing && index == scrubIndex
+                        val chapterCd = chapter.title + if (selected) currentSuffix else ""
+                        ListItem(
+                            headlineContent = {
+                                Text(
+                                    text = chapter.title,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = when {
+                                        selected -> MaterialTheme.colorScheme.primary
+                                        highlight -> MaterialTheme.colorScheme.tertiary
+                                        else -> MaterialTheme.colorScheme.onSurface
+                                    },
+                                    fontWeight = if (selected || highlight) {
+                                        FontWeight.SemiBold
+                                    } else {
+                                        FontWeight.Normal
+                                    },
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
                             },
+                            colors = ListItemDefaults.colors(
+                                containerColor = MaterialTheme.colorScheme.surface,
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .defaultMinSize(minWidth = 48.dp, minHeight = 56.dp)
+                                .clickable(role = Role.Button) {
+                                    showToc = false
+                                    jumpToOffset(chapter.start)
+                                }
+                                .semantics {
+                                    contentDescription = chapterCd
+                                    role = Role.Button
+                                },
+                        )
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    }
+                }
+                if (chapters.size > 1) {
+                    TocScrubRail(
+                        chapterCount = chapters.size,
+                        scrubIndex = scrubIndex,
+                        scrubbing = scrubbing,
+                        bubbleTitle = chapters.getOrNull(scrubIndex)?.title.orEmpty(),
+                        contentDescription = tocScrubCd,
+                        onScrub = { index ->
+                            scrubbing = true
+                            if (index != scrubIndex) {
+                                scrubIndex = index
+                                // Instant jump (not animate) so 1→20→30 feels snappy.
+                                scope.launch {
+                                    tocListState.scrollToItem(index)
+                                }
+                            }
+                        },
+                        onScrubEnd = { scrubbing = false },
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .fillMaxHeight()
+                            .padding(vertical = 8.dp, horizontal = 2.dp),
                     )
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
             }
         }
@@ -1160,6 +1213,134 @@ fun ReaderScreen(
                 preferences.setMargin(marginStep)
             },
         )
+    }
+}
+
+/**
+ * Right-edge TOC scrub rail: drag to jump chapter index instantly (1 → 20 → 30),
+ * with a floating bubble showing the chapter number and title.
+ */
+@Composable
+private fun TocScrubRail(
+    chapterCount: Int,
+    scrubIndex: Int,
+    scrubbing: Boolean,
+    bubbleTitle: String,
+    contentDescription: String,
+    onScrub: (Int) -> Unit,
+    onScrubEnd: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    var railHeightPx by remember { mutableIntStateOf(0) }
+    val ticks = remember(chapterCount) { ChapterIndex.tocScrubTickLabels(chapterCount) }
+    val bubbleLabel = if (bubbleTitle.isNotEmpty()) {
+        stringResource(
+            R.string.reader_toc_scrub_bubble_named,
+            scrubIndex + 1,
+            bubbleTitle.take(18),
+        )
+    } else {
+        stringResource(R.string.reader_toc_scrub_bubble, scrubIndex + 1)
+    }
+
+    fun indexFromY(y: Float): Int {
+        val h = railHeightPx.coerceAtLeast(1).toFloat()
+        val fraction = (y / h).coerceIn(0f, 1f)
+        return ChapterIndex.tocIndexForScrubFraction(fraction, chapterCount)
+    }
+
+    Box(
+        modifier = modifier
+            .width(40.dp)
+            .fillMaxHeight()
+            .semantics { this.contentDescription = contentDescription }
+            .onSizeChanged { railHeightPx = it.height }
+            .pointerInput(chapterCount) {
+                detectTapGestures { offset ->
+                    onScrub(indexFromY(offset.y))
+                    onScrubEnd()
+                }
+            }
+            .pointerInput(chapterCount) {
+                detectDragGestures(
+                    onDragStart = { offset -> onScrub(indexFromY(offset.y)) },
+                    onDragEnd = { onScrubEnd() },
+                    onDragCancel = { onScrubEnd() },
+                    onDrag = { change, _ ->
+                        change.consume()
+                        onScrub(indexFromY(change.position.y))
+                    },
+                )
+            },
+    ) {
+        // Soft track
+        Box(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .width(3.dp)
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(2.dp))
+                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)),
+        )
+        // Sparse chapter numbers along the rail (1 … 20 … 30 … last)
+        Column(
+            modifier = Modifier
+                .fillMaxHeight()
+                .fillMaxWidth()
+                .padding(vertical = 2.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            ticks.forEach { oneBased ->
+                Text(
+                    text = oneBased.toString(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 9.sp,
+                    maxLines = 1,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+        // Thumb
+        val thumbFrac = ChapterIndex.tocScrubFractionForIndex(scrubIndex, chapterCount)
+        val thumbY = ((railHeightPx - with(density) { 14.dp.toPx() }) * thumbFrac)
+            .coerceAtLeast(0f)
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .offset { IntOffset(0, thumbY.roundToInt()) }
+                .width(14.dp)
+                .height(14.dp)
+                .clip(RoundedCornerShape(7.dp))
+                .background(MaterialTheme.colorScheme.primary),
+        )
+        // Floating bubble while dragging
+        if (scrubbing && railHeightPx > 0) {
+            Surface(
+                color = MaterialTheme.colorScheme.inverseSurface,
+                shape = RoundedCornerShape(8.dp),
+                shadowElevation = 4.dp,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset {
+                        val by = (thumbY - with(density) { 18.dp.toPx() })
+                            .coerceIn(0f, (railHeightPx - with(density) { 36.dp.toPx() }).coerceAtLeast(0f))
+                        IntOffset(with(density) { (-120).dp.roundToPx() }, by.roundToInt())
+                    }
+                    .widthIn(max = 160.dp),
+            ) {
+                Text(
+                    text = bubbleLabel,
+                    color = MaterialTheme.colorScheme.inverseOnSurface,
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                )
+            }
+        }
     }
 }
 

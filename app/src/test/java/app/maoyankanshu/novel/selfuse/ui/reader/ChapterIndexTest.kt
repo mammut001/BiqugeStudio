@@ -245,6 +245,43 @@ class ChapterIndexTest {
         assertEquals(42, ChapterIndex.tocScrollIndex(42, 200))
     }
 
+    @Test
+    fun tocIndexForScrubFraction_mapsRailToChapterInstantly() {
+        assertEquals(0, ChapterIndex.tocIndexForScrubFraction(0f, 0))
+        assertEquals(0, ChapterIndex.tocIndexForScrubFraction(0.5f, 1))
+        // 100 chapters (indices 0..99): top / mid / bottom feel like 1 / 50 / 100.
+        assertEquals(0, ChapterIndex.tocIndexForScrubFraction(0f, 100))
+        assertEquals(99, ChapterIndex.tocIndexForScrubFraction(1f, 100))
+        // 0.5 * 99 = 49.5 → rounds to 50 (1-based chapter ~51).
+        assertEquals(50, ChapterIndex.tocIndexForScrubFraction(0.5f, 100))
+        // Quick scrub 1 → 20 → 30 (1-based display → 0-based index).
+        assertEquals(19, ChapterIndex.tocIndexForScrubFraction(19f / 99f, 100))
+        assertEquals(29, ChapterIndex.tocIndexForScrubFraction(29f / 99f, 100))
+        assertEquals(0, ChapterIndex.tocIndexForScrubFraction(-1f, 50))
+        assertEquals(49, ChapterIndex.tocIndexForScrubFraction(2f, 50))
+    }
+
+    @Test
+    fun tocScrubFractionForIndex_roundTripsEndpoints() {
+        assertEquals(0f, ChapterIndex.tocScrubFractionForIndex(0, 1), 0.001f)
+        assertEquals(0f, ChapterIndex.tocScrubFractionForIndex(0, 100), 0.001f)
+        assertEquals(1f, ChapterIndex.tocScrubFractionForIndex(99, 100), 0.001f)
+        val mid = ChapterIndex.tocScrubFractionForIndex(50, 101)
+        assertEquals(50, ChapterIndex.tocIndexForScrubFraction(mid, 101))
+    }
+
+    @Test
+    fun tocScrubTickLabels_sparseForLongBooks() {
+        assertEquals(emptyList<Int>(), ChapterIndex.tocScrubTickLabels(0))
+        assertEquals(listOf(1), ChapterIndex.tocScrubTickLabels(1))
+        assertEquals(listOf(1, 2, 3), ChapterIndex.tocScrubTickLabels(3, maxTicks = 6))
+        val ticks = ChapterIndex.tocScrubTickLabels(200, maxTicks = 6)
+        assertEquals(1, ticks.first())
+        assertEquals(200, ticks.last())
+        assertTrue(ticks.size <= 6)
+        assertTrue(ticks == ticks.sorted())
+    }
+
     private fun assertStrictlyIncreasingStarts(chapters: List<Chapter>) {
         for (i in 1 until chapters.size) {
             assertTrue(
