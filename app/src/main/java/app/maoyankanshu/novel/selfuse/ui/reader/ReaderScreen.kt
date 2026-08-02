@@ -184,7 +184,10 @@ fun ReaderScreen(
                 .coerceIn(0, book.text.length.coerceAtLeast(0)),
         )
     }
-    var pageStarts by remember { mutableStateOf(listOf(0)) }
+    // Keep the first composition empty while pagination is calculated. Using [0] here would
+    // make pageText() treat the entire imported novel as one page and ask Compose to lay out
+    // all 15+ MB at once, causing the black-screen/ANR seen on large TXT imports.
+    var pageStarts by remember { mutableStateOf(emptyList<Int>()) }
     var contentWidthPx by remember { mutableIntStateOf(0) }
     var contentHeightPx by remember { mutableIntStateOf(0) }
 
