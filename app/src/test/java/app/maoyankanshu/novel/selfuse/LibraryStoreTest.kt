@@ -251,6 +251,56 @@ class LibraryStoreTest {
         org.junit.Assert.assertTrue(finalBooks.none { it.id == bookTwo.id })
     }
 
+    @Test
+    fun recordById_readsMetadataWithoutLoadingOtherBooksText() {
+        val store = createStore()
+        store.add("目标书", "作者甲", "只有这一本需要被打开")
+        store.add("其他大书", "作者乙", "x".repeat(50_000))
+        val target = store.books().first { it.title == "目标书" }
+
+        val record = store.recordById(target.id)
+        assertNotNull(record)
+        assertEquals(target.id, record!!.id)
+        assertEquals("目标书", record.title)
+        assertEquals("作者甲", record.author)
+        assertEquals(0, record.position)
+
+        // Missing id
+        assertNull(store.recordById("no-such-id"))
+        assertNull(store.recordById(null))
+    }
+
+    @Test
+    fun readBookBytes_andById_onlyTouchTargetFile() {
+        val store = createStore()
+        val body = "大主宰正文抽样"
+        store.add("单本", "天蚕土豆", body)
+        val id = store.books().first { it.title == "单本" }.id
+
+        val bytes = store.readBookBytes(id)
+        assertNotNull(bytes)
+        assertEquals(body, String(bytes!!, StandardCharsets.UTF_8))
+
+        val book = store.byId(id)
+        assertNotNull(book)
+        assertEquals(body, book!!.text)
+        assertEquals("单本", book.title)
+    }
+
+    @Test
+    fun savePosition_doesNotRequireRereadingBookText() {
+        val store = createStore()
+        store.add("进度书", "作者", "正文内容足够用来存盘")
+        val id = store.books().first { it.title == "进度书" }.id
+        store.savePosition(id, 750)
+        val record = store.recordById(id)
+        assertNotNull(record)
+        assertEquals(750, record!!.position)
+        val book = store.byId(id)
+        assertEquals(750, book!!.position)
+        assertEquals("正文内容足够用来存盘", book.text)
+    }
+
     private fun createOversizedSingleEntryZipStream(entrySize: Int): InputStream {
         val chunk = ByteArray(64 * 1024) { 'a'.code.toByte() }
         val baos = ByteArrayOutputStream()

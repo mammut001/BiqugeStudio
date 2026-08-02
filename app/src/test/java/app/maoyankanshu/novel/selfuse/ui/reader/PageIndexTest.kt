@@ -163,6 +163,25 @@ class PageIndexTest {
         assertEquals(256, PageIndex.approximateCharsPerPage(1, 1, 1000f, 10f))
     }
 
+    @Test
+    fun approximatePageCount_andOffset_matchStartList() {
+        val length = 2500
+        val cpp = 1000
+        val starts = PageIndex.approximatePageStartOffsets(length, cpp)
+        assertEquals(starts.size, PageIndex.approximatePageCount(length, cpp))
+        for (i in starts.indices) {
+            assertEquals(starts[i], PageIndex.approximateOffsetForPage(i, cpp, length))
+        }
+    }
+
+    @Test
+    fun safePageText_emptyStartsIsEmpty_notWholeBook() {
+        val text = "整本书正文".repeat(100)
+        assertEquals("", PageIndex.safePageText(text, emptyList(), 0))
+        val starts = listOf(0, 3, 6)
+        assertEquals(text.substring(0, 3), PageIndex.safePageText(text, starts, 0))
+    }
+
     // ── Line-metric page breaking ──────────────────────────────────────────
 
     @Test

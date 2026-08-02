@@ -157,8 +157,11 @@ public final class LibraryStore {
         return books;
     }
 
-    /** Reads only the requested book; the shelf may contain very large TXT files. */
-    public Book byId(String id) {
+    /**
+     * Metadata only (no TXT body). Used on the progressive open path so the reader can
+     * paint chrome / progress before a multi‑MB decode finishes.
+     */
+    public BookRecord recordById(String id) {
         if (id == null || id.isEmpty()) return null;
         String raw = prefs.getString(KEY, "");
         if (raw == null || raw.isEmpty()) return null;
@@ -167,15 +170,59 @@ public final class LibraryStore {
             String[] values = row.split("\\|", 4);
             if (values.length != 4 || !id.equals(values[0])) continue;
             try {
-                String text = readText(id);
-                if (text == null) return null;
                 int pos = Math.max(0, Math.min(Integer.parseInt(values[3]), 1000));
-                return new Book(id, decode(values[1]), decode(values[2]), text, pos, coverPathIfPresent(id));
+                return new BookRecord(
+                        id,
+                        decode(values[1]),
+                        decode(values[2]),
+                        pos,
+                        coverPathIfPresent(id));
             } catch (Exception ignored) {
                 return null;
             }
         }
         return null;
+    }
+
+    /**
+     * Raw UTF-8 bytes for one book file, or null if missing. Progressive open decodes a
+     * window first, then the full string, without re-reading the shelf.
+     */
+    public byte[] readBookBytes(String id) {
+        if (id == null || id.isEmpty()) return null;
+        return readTextBytes(id);
+    }
+
+    /** Reads only the requested book; the shelf may contain very large TXT files. */
+    public Book byId(String id) {
+        BookRecord record = recordById(id);
+        if (record == null) return null;
+        String text = readText(id);
+        if (text == null) return null;
+        return new Book(
+                record.id,
+                record.title,
+                record.author,
+                text,
+                record.position,
+                record.coverPath);
+    }
+
+    /** Shelf row without body text — safe to load on the open hot path. */
+    public static final class BookRecord {
+        public final String id;
+        public final String title;
+        public final String author;
+        public final int position;
+        public final String coverPath;
+
+        public BookRecord(String id, String title, String author, int position, String coverPath) {
+            this.id = id;
+            this.title = title;
+            this.author = author;
+            this.position = position;
+            this.coverPath = coverPath;
+        }
     }
     public void add(String title, String author, String text) {
         add(title, author, text, null);
@@ -406,14 +453,33 @@ public final class LibraryStore {
         if (file.exists()) file.delete();
     }
 
-    private String readText(String id) {
+    private byte[] readTextBytes(String id) {
         File file = new File(bookDir(), id + ".txt");
         if (!file.exists()) return null;
         try (FileInputStream input = new FileInputStream(file)) {
-            byte[] data = new byte[(int) file.length()];
-            int read = input.read(data);
-            return read < 0 ? "" : new String(data, 0, read, StandardCharsets.UTF_8);
-        } catch (IOException ignored) { return null; }
+            long length = file.length();
+            if (length < 0 || length > MAX_SINGLE_ENTRY_BYTES) return null;
+            byte[] data = new byte[(int) length];
+            int offset = 0;
+            while (offset < data.length) {
+                int read = input.read(data, offset, data.length - offset);
+                if (read < 0) break;
+                offset += read;
+            }
+            if (offset == data.length) return data;
+            if (offset <= 0) return new byte[0];
+            byte[] trimmed = new byte[offset];
+            System.arraycopy(data, 0, trimmed, 0, offset);
+            return trimmed;
+        } catch (IOException ignored) {
+            return null;
+        }
+    }
+
+    private String readText(String id) {
+        byte[] data = readTextBytes(id);
+        if (data == null) return null;
+        return data.length == 0 ? "" : new String(data, StandardCharsets.UTF_8);
     }
 
     private void writeText(String id, String text) {

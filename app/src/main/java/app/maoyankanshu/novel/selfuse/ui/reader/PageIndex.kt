@@ -20,6 +20,15 @@ object PageIndex {
     /** TextMeasurer is deliberately avoided for very large books to prevent OOM/ANR. */
     const val MAX_EXACT_MEASURE_CHARS: Int = 200_000
 
+    /**
+     * Provisional chars/page used for large-book open before the viewport is measured.
+     * Enables a readable first body on the first frame without waiting on layout.
+     */
+    const val DEFAULT_APPROX_CHARS_PER_PAGE: Int = 900
+
+    /** Half-width (in pages) of a progressive page-start window around restored progress. */
+    const val PROGRESSIVE_WINDOW_RADIUS: Int = 4
+
     /** Left third → previous page; center third → chrome; right third → next page. */
     const val ZONE_LEFT_END: Float = 1f / 3f
     const val ZONE_RIGHT_START: Float = 2f / 3f
@@ -127,17 +136,112 @@ object PageIndex {
     }
 
     /**
+     * Safe page body for Compose: an empty / incomplete index must never feed the whole
+     * [fullText] into a single page (regression guard for multi‑MB ANR/black-screen).
+     */
+    fun safePageText(fullText: String, pageStarts: List<Int>, pageIndex: Int): String {
+        if (pageStarts.isEmpty()) return ""
+        return pageText(fullText, pageStarts, pageIndex)
+    }
+
+    /**
+     * Page count for approximate (virtual) pagination — O(1), no list allocation.
+     * Empty book → 1 (single blank page).
+     */
+    fun approximatePageCount(textLength: Int, charsPerPage: Int): Int {
+        val length = textLength.coerceAtLeast(0)
+        if (length == 0) return 1
+        val size = charsPerPage.coerceAtLeast(256)
+        return ((length - 1) / size) + 1
+    }
+
+    /**
+     * Character offset where virtual page [pageIndex] begins — O(1).
+     */
+    fun approximateOffsetForPage(pageIndex: Int, charsPerPage: Int, textLength: Int): Int {
+        val length = textLength.coerceAtLeast(0)
+        if (length == 0) return 0
+        val size = charsPerPage.coerceAtLeast(256)
+        val count = approximatePageCount(length, size)
+        val page = clampPageIndex(pageIndex, count)
+        return (page * size).coerceIn(0, length)
+    }
+
+    /**
+     * Body substring for one approximate page — O(page size), not O(book size).
+     * Never returns the entire multi‑MB string as a single page when [charsPerPage] is sane.
+     */
+    fun approximatePageText(fullText: String, charsPerPage: Int, pageIndex: Int): String {
+        val length = fullText.length
+        if (length == 0) return ""
+        val size = charsPerPage.coerceAtLeast(256)
+        val start = approximateOffsetForPage(pageIndex, size, length)
+        val endExclusive = (start + size).coerceAtMost(length)
+        if (start >= endExclusive) return ""
+        return fullText.substring(start, endExclusive)
+    }
+
+    /**
+     * O(1) half-open range for the page at library [progress] (0…1000).
+     * Used for instant first-body materialization without building a full index.
+     */
+    fun firstReadablePageRange(
+        textLength: Int,
+        charsPerPage: Int,
+        progress: Int,
+    ): Pair<Int, Int> {
+        val length = textLength.coerceAtLeast(0)
+        if (length == 0) return 0 to 0
+        val size = charsPerPage.coerceAtLeast(256)
+        val count = approximatePageCount(length, size)
+        val page = pageForProgress(progress, count)
+        val start = (page * size).coerceIn(0, length)
+        val endExclusive = (start + size).coerceAtMost(length)
+        return if (start >= endExclusive) start to start else start to endExclusive
+    }
+
+    /**
+     * Bounded page-start window around [progress]. Work is O(radius), not O(textLength).
+     *
+     * Each page stays ≤ [charsPerPage] chars. Never collapses a multi-page book into a
+     * single start offset of `0` (which would make [pageText] return the whole book).
+     */
+    fun progressivePageStartWindow(
+        textLength: Int,
+        charsPerPage: Int,
+        progress: Int,
+        radius: Int = PROGRESSIVE_WINDOW_RADIUS,
+    ): List<Int> {
+        val length = textLength.coerceAtLeast(0)
+        if (length == 0) return listOf(0)
+        val size = charsPerPage.coerceAtLeast(256)
+        val pageCount = approximatePageCount(length, size)
+        val focus = pageForProgress(progress, pageCount)
+        val r = radius.coerceAtLeast(0)
+        val from = (focus - r).coerceAtLeast(0)
+        val to = (focus + r).coerceAtMost(pageCount - 1)
+        val starts = ArrayList<Int>(to - from + 1)
+        for (page in from..to) {
+            starts.add(page * size)
+        }
+        return starts
+    }
+
+    /**
      * Build bounded-size page starts without laying out the entire book.
      *
      * This is used for large imports where a full TextMeasurer layout can allocate more memory
      * than a phone can provide. Pages are intentionally approximate; each rendered page remains
      * small and the user can still read, navigate, and save progress safely.
+     *
+     * Prefer [approximatePageCount] + [approximatePageText] on the open hot path so first body
+     * does not wait on allocating one entry per page for multi‑MB books.
      */
     fun approximatePageStartOffsets(textLength: Int, charsPerPage: Int): List<Int> {
         val length = textLength.coerceAtLeast(0)
         if (length == 0) return listOf(0)
         val size = charsPerPage.coerceAtLeast(256)
-        val pageCount = ((length - 1) / size) + 1
+        val pageCount = approximatePageCount(length, size)
         return List(pageCount) { it * size }
     }
 
