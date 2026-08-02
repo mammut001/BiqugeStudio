@@ -41,6 +41,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
@@ -115,6 +116,7 @@ import app.maoyankanshu.novel.selfuse.Book
 import app.maoyankanshu.novel.selfuse.BookmarkStore
 import app.maoyankanshu.novel.selfuse.LibraryStore
 import app.maoyankanshu.novel.selfuse.R
+import app.maoyankanshu.novel.selfuse.ReaderActivity
 import app.maoyankanshu.novel.selfuse.ReaderPreferences
 import app.maoyankanshu.novel.selfuse.ReadingHistory
 import kotlinx.coroutines.Dispatchers
@@ -162,6 +164,10 @@ fun ReaderScreen(
     var fontSizeSp by remember { mutableIntStateOf(preferences.fontSize()) }
     var lineHeightMultiplier by remember { mutableFloatStateOf(preferences.lineHeightMultiplier()) }
     var marginStep by remember { mutableIntStateOf(preferences.margin()) }
+    var fontFamilyId by remember { mutableIntStateOf(preferences.fontFamily()) }
+    var brightness by remember { mutableFloatStateOf(preferences.brightness()) }
+    var keepScreenOn by remember { mutableStateOf(preferences.keepScreenOn()) }
+    var volumePageTurn by remember { mutableStateOf(preferences.volumePageTurn()) }
     var menuVisible by remember { mutableStateOf(false) }
     var showToc by remember { mutableStateOf(false) }
     var showBookmarks by remember { mutableStateOf(false) }
@@ -265,19 +271,37 @@ fun ReaderScreen(
     // Latest progress for leave-save: DisposableEffect keys only on book.id.
     val latestProgress by rememberUpdatedState(progress)
 
-    val bodyTextStyle = remember(fontSizeSp, lineHeightMultiplier, palette.onBackground) {
+    val bodyFontFamily = remember(fontFamilyId) { readerFontFamily(fontFamilyId) }
+    val bodyTextStyle = remember(
+        fontSizeSp,
+        lineHeightMultiplier,
+        palette.onBackground,
+        bodyFontFamily,
+    ) {
         TextStyle(
             color = palette.onBackground,
             fontSize = fontSizeSp.sp,
             lineHeight = (fontSizeSp * lineHeightMultiplier).sp,
-            fontFamily = FontFamily.Serif,
+            fontFamily = bodyFontFamily,
             letterSpacing = 0.2.sp,
         )
     }
 
-    DisposableEffect(Unit) {
-        applyBrightness(activity, preferences.brightness())
+    DisposableEffect(brightness) {
+        applyBrightness(activity, brightness)
         onDispose { applyBrightness(activity, -1f) }
+    }
+
+    DisposableEffect(keepScreenOn) {
+        val window = activity.window
+        if (keepScreenOn) {
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        onDispose {
+            window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
     }
 
     DisposableEffect(book.id) {
@@ -311,6 +335,7 @@ fun ReaderScreen(
         lineHeightMultiplier,
         theme,
         marginStep,
+        fontFamilyId,
         contentWidthPx,
         contentHeightPx,
     ) {
@@ -521,6 +546,36 @@ fun ReaderScreen(
             TapZoneAction.TOGGLE_CHROME -> {
                 menuVisible = !menuVisible
             }
+        }
+    }
+
+    // Volume keys → page turn when enabled (common CN novel-reader gesture).
+    val volumeTurnEnabled by rememberUpdatedState(volumePageTurn)
+    val latestPageCount by rememberUpdatedState(pageCount)
+    DisposableEffect(activity, pagerState) {
+        val readerActivity = activity as? ReaderActivity
+        if (readerActivity != null) {
+            readerActivity.volumePageTurnHandler = handler@{ keyCode ->
+                if (!volumeTurnEnabled) return@handler false
+                when (keyCode) {
+                    android.view.KeyEvent.KEYCODE_VOLUME_UP -> {
+                        animateToPage(
+                            PageIndex.stepPage(pagerState.currentPage, latestPageCount, -1),
+                        )
+                        true
+                    }
+                    android.view.KeyEvent.KEYCODE_VOLUME_DOWN -> {
+                        animateToPage(
+                            PageIndex.stepPage(pagerState.currentPage, latestPageCount, 1),
+                        )
+                        true
+                    }
+                    else -> false
+                }
+            }
+        }
+        onDispose {
+            readerActivity?.volumePageTurnHandler = null
         }
     }
 
@@ -1195,6 +1250,10 @@ fun ReaderScreen(
             fontSize = fontSizeSp,
             lineHeightMultiplier = lineHeightMultiplier,
             marginStep = marginStep,
+            fontFamilyId = fontFamilyId,
+            brightness = brightness,
+            keepScreenOn = keepScreenOn,
+            volumePageTurn = volumePageTurn,
             onDismiss = { showAppearance = false },
             onTheme = { value ->
                 preferences.setTheme(value)
@@ -1211,6 +1270,23 @@ fun ReaderScreen(
             onMarginStep = { step ->
                 marginStep = PageLayout.clampMarginStep(step)
                 preferences.setMargin(marginStep)
+            },
+            onFontFamily = { id ->
+                fontFamilyId = clampFontFamily(id)
+                preferences.setFontFamily(fontFamilyId)
+            },
+            onBrightness = { value ->
+                brightness = value
+                preferences.setBrightness(value)
+                applyBrightness(activity, value)
+            },
+            onKeepScreenOn = { enabled ->
+                keepScreenOn = enabled
+                preferences.setKeepScreenOn(enabled)
+            },
+            onVolumePageTurn = { enabled ->
+                volumePageTurn = enabled
+                preferences.setVolumePageTurn(enabled)
             },
         )
     }
@@ -1503,24 +1579,40 @@ private fun FindDialog(
     )
 }
 
+
 @Composable
 private fun AppearanceDialog(
     selectedTheme: Int,
     fontSize: Int,
     lineHeightMultiplier: Float,
     marginStep: Int,
+    fontFamilyId: Int,
+    brightness: Float,
+    keepScreenOn: Boolean,
+    volumePageTurn: Boolean,
     onDismiss: () -> Unit,
     onTheme: (Int) -> Unit,
     onFontSize: (Int) -> Unit,
     onLineHeightMultiplier: (Float) -> Unit,
     onMarginStep: (Int) -> Unit,
+    onFontFamily: (Int) -> Unit,
+    onBrightness: (Float) -> Unit,
+    onKeepScreenOn: (Boolean) -> Unit,
+    onVolumePageTurn: (Boolean) -> Unit,
 ) {
     val selectedSuffix = stringResource(R.string.reader_selected_suffix)
-    val themes = listOf(
+    val themeLabels = mapOf(
         ReaderPreferences.THEME_PAPER to stringResource(R.string.reader_theme_paper),
-        ReaderPreferences.THEME_NIGHT to stringResource(R.string.reader_theme_night),
+        ReaderPreferences.THEME_WHITE to stringResource(R.string.reader_theme_white),
+        ReaderPreferences.THEME_PARCHMENT to stringResource(R.string.reader_theme_parchment),
         ReaderPreferences.THEME_EYE_CARE to stringResource(R.string.reader_theme_eye),
+        ReaderPreferences.THEME_GREEN to stringResource(R.string.reader_theme_green),
+        ReaderPreferences.THEME_PINK to stringResource(R.string.reader_theme_pink),
+        ReaderPreferences.THEME_GRAY to stringResource(R.string.reader_theme_gray),
+        ReaderPreferences.THEME_NIGHT to stringResource(R.string.reader_theme_night),
+        ReaderPreferences.THEME_SOFT_NIGHT to stringResource(R.string.reader_theme_soft_night),
     )
+    val papers = paperThemeOptions()
     val lineHeights = listOf(
         1.4f to stringResource(R.string.reader_line_height_compact),
         1.85f to stringResource(R.string.reader_line_height_standard),
@@ -1540,27 +1632,138 @@ private fun AppearanceDialog(
                 stringResource(R.string.reader_margin_wide_cd)
             ),
     )
+    val fonts = listOf(
+        ReaderPreferences.FONT_SERIF to (
+            stringResource(R.string.reader_font_serif) to
+                stringResource(R.string.reader_font_serif_cd)
+            ),
+        ReaderPreferences.FONT_SANS to (
+            stringResource(R.string.reader_font_sans) to
+                stringResource(R.string.reader_font_sans_cd)
+            ),
+        ReaderPreferences.FONT_DEFAULT to (
+            stringResource(R.string.reader_font_system) to
+                stringResource(R.string.reader_font_system_cd)
+            ),
+    )
+    val followSystem = brightness < 0f
+    val brightnessPercent = if (followSystem) {
+        -1
+    } else {
+        (brightness.coerceIn(0.08f, 1f) * 100f).roundToInt()
+    }
+    val appearanceScroll = rememberScrollState()
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.reader_appearance_title)) },
         text = {
-            Column {
-                themes.forEach { (value, label) ->
-                    val selected = value == selectedTheme
-                    Text(
-                        text = if (selected) "● $label" else "○ $label",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .defaultMinSize(minHeight = 48.dp)
-                            .clickable { onTheme(value) }
-                            .padding(vertical = 12.dp)
-                            .semantics {
-                                contentDescription =
-                                    label + if (selected) selectedSuffix else ""
-                            },
-                    )
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 460.dp)
+                    .verticalScroll(appearanceScroll),
+            ) {
+                Text(
+                    text = stringResource(R.string.reader_theme_section),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(Modifier.height(8.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    papers.chunked(3).forEach { row ->
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            row.forEach { paper ->
+                                val label = themeLabels[paper.id].orEmpty()
+                                val selected = paper.id == selectedTheme
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .defaultMinSize(minHeight = 48.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable { onTheme(paper.id) }
+                                        .padding(4.dp)
+                                        .semantics {
+                                            contentDescription =
+                                                label + if (selected) selectedSuffix else ""
+                                        },
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(40.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(paper.swatch),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text(
+                                            text = "Aa",
+                                            color = paper.ink,
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = if (selected) {
+                                                FontWeight.Bold
+                                            } else {
+                                                FontWeight.Normal
+                                            },
+                                        )
+                                    }
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (selected) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.padding(top = 4.dp),
+                                    )
+                                }
+                            }
+                            repeat(3 - row.size) {
+                                Spacer(Modifier.weight(1f))
+                            }
+                        }
+                    }
                 }
+
+                Spacer(Modifier.height(14.dp))
+                Text(
+                    text = stringResource(R.string.reader_font_family_section),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.padding(top = 4.dp),
+                ) {
+                    fonts.forEach { (id, labels) ->
+                        val (label, cd) = labels
+                        val selected = id == fontFamilyId
+                        TextButton(
+                            onClick = { onFontFamily(id) },
+                            modifier = Modifier
+                                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                .semantics {
+                                    contentDescription =
+                                        cd + if (selected) selectedSuffix else ""
+                                },
+                        ) {
+                            Text(
+                                text = label,
+                                color = if (selected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        }
+                    }
+                }
+
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = stringResource(R.string.reader_font_size_label, fontSize),
@@ -1581,6 +1784,7 @@ private fun AppearanceDialog(
                         modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
                     ) { Text(stringResource(R.string.reader_font_larger)) }
                 }
+
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = stringResource(R.string.reader_line_height_label, lineHeightMultiplier),
@@ -1632,6 +1836,7 @@ private fun AppearanceDialog(
                         }
                     }
                 }
+
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = stringResource(R.string.reader_margin_label),
@@ -1664,6 +1869,49 @@ private fun AppearanceDialog(
                         }
                     }
                 }
+
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = if (followSystem) {
+                        stringResource(R.string.reader_brightness_title) +
+                            " · " + stringResource(R.string.reader_brightness_follow)
+                    } else {
+                        stringResource(R.string.reader_brightness_value, brightnessPercent)
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    text = stringResource(R.string.reader_brightness_note),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp, bottom = 4.dp),
+                )
+                Slider(
+                    value = if (followSystem) 0.55f else brightness.coerceIn(0.08f, 1f),
+                    onValueChange = { onBrightness(it.coerceIn(0.08f, 1f)) },
+                    valueRange = 0.08f..1f,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                TextButton(
+                    onClick = { onBrightness(-1f) },
+                    modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
+                ) {
+                    Text(stringResource(R.string.reader_brightness_system))
+                }
+
+                Spacer(Modifier.height(4.dp))
+                AppearanceToggleRow(
+                    label = stringResource(R.string.reader_keep_screen_on),
+                    contentDescription = stringResource(R.string.reader_keep_screen_on_cd),
+                    checked = keepScreenOn,
+                    onCheckedChange = onKeepScreenOn,
+                )
+                AppearanceToggleRow(
+                    label = stringResource(R.string.reader_volume_page_turn),
+                    contentDescription = stringResource(R.string.reader_volume_page_turn_cd),
+                    checked = volumePageTurn,
+                    onCheckedChange = onVolumePageTurn,
+                )
             }
         },
         confirmButton = {
@@ -1676,6 +1924,44 @@ private fun AppearanceDialog(
         },
     )
 }
+
+@Composable
+private fun AppearanceToggleRow(
+    label: String,
+    contentDescription: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = 48.dp)
+            .clickable { onCheckedChange(!checked) }
+            .padding(vertical = 6.dp)
+            .semantics {
+                this.contentDescription = contentDescription
+                role = Role.Button
+            },
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = if (checked) "开" else "关",
+            style = MaterialTheme.typography.labelLarge,
+            color = if (checked) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        )
+    }
+}
+
 
 private fun formatTime(): String =
     SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())

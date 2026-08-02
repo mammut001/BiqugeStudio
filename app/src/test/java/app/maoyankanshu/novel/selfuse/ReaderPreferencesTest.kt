@@ -135,6 +135,55 @@ class ReaderPreferencesTest {
         readerPrefs.setTheme(ReaderPreferences.THEME_EYE_CARE)
         assertEquals(ReaderPreferences.THEME_EYE_CARE, readerPrefs.theme())
         assertFalse(readerPrefs.nightMode())
+
+        // Expanded paper themes stay in range and soft-night counts as night mode.
+        readerPrefs.setTheme(ReaderPreferences.THEME_GREEN)
+        assertEquals(ReaderPreferences.THEME_GREEN, readerPrefs.theme())
+        assertFalse(readerPrefs.nightMode())
+
+        readerPrefs.setTheme(ReaderPreferences.THEME_SOFT_NIGHT)
+        assertEquals(ReaderPreferences.THEME_SOFT_NIGHT, readerPrefs.theme())
+        assertTrue(readerPrefs.nightMode())
+
+        readerPrefs.setTheme(99)
+        assertEquals(ReaderPreferences.THEME_SOFT_NIGHT, readerPrefs.theme())
+    }
+
+    @Test
+    fun fontFamily_keepScreenOn_volumePageTurn_defaultsAndClamp() {
+        val prefs = TestSharedPreferences()
+        val readerPrefs = ReaderPreferences.get(prefs)
+
+        assertEquals(ReaderPreferences.FONT_SERIF, readerPrefs.fontFamily())
+        readerPrefs.setFontFamily(ReaderPreferences.FONT_SANS)
+        assertEquals(ReaderPreferences.FONT_SANS, readerPrefs.fontFamily())
+        readerPrefs.setFontFamily(-1)
+        assertEquals(ReaderPreferences.FONT_SERIF, readerPrefs.fontFamily())
+        readerPrefs.setFontFamily(99)
+        assertEquals(ReaderPreferences.FONT_DEFAULT, readerPrefs.fontFamily())
+
+        assertTrue(readerPrefs.keepScreenOn())
+        readerPrefs.setKeepScreenOn(false)
+        assertFalse(readerPrefs.keepScreenOn())
+
+        assertTrue(readerPrefs.volumePageTurn())
+        readerPrefs.setVolumePageTurn(false)
+        assertFalse(readerPrefs.volumePageTurn())
+    }
+
+    @Test
+    fun brightness_systemAndClamp() {
+        val prefs = TestSharedPreferences()
+        val readerPrefs = ReaderPreferences.get(prefs)
+        assertEquals(-1f, readerPrefs.brightness(), 0.001f)
+        readerPrefs.setBrightness(0.5f)
+        assertEquals(0.5f, readerPrefs.brightness(), 0.001f)
+        readerPrefs.setBrightness(0.01f)
+        assertEquals(0.08f, readerPrefs.brightness(), 0.001f)
+        readerPrefs.setBrightness(2f)
+        assertEquals(1f, readerPrefs.brightness(), 0.001f)
+        readerPrefs.setBrightness(-1f)
+        assertEquals(-1f, readerPrefs.brightness(), 0.001f)
     }
 
     @Test

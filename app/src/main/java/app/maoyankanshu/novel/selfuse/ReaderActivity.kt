@@ -1,6 +1,7 @@
 package app.maoyankanshu.novel.selfuse
 
 import android.os.Bundle
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -37,6 +38,20 @@ import kotlinx.coroutines.withContext
 class ReaderActivity : ComponentActivity() {
 
     private var openState by mutableStateOf<OpenState>(OpenState.Loading)
+
+    /**
+     * Optional volume-key page-turn hook set by [ReaderScreen] while composed.
+     * Returns true when the key was consumed (suppresses system volume UI).
+     */
+    var volumePageTurnHandler: ((keyCode: Int) -> Boolean)? = null
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+            val handled = volumePageTurnHandler?.invoke(keyCode) == true
+            if (handled) return true
+        }
+        return super.onKeyDown(keyCode, event)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()

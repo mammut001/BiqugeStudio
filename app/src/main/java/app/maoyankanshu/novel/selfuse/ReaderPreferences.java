@@ -14,13 +14,30 @@ public final class ReaderPreferences {
     private static final String TTS_RATE = "tts_rate";
     /** Body margin step: 0 narrow / 1 standard / 2 wide. Absent key → standard. */
     private static final String MARGIN = "reader_margin";
+    private static final String FONT_FAMILY = "reader_font_family";
+    private static final String KEEP_SCREEN_ON = "reader_keep_screen_on";
+    private static final String VOLUME_PAGE_TURN = "reader_volume_page_turn";
+
+    // ── Themes (stable ints — never reorder existing values) ───────────────
     public static final int THEME_PAPER = 0;
     public static final int THEME_NIGHT = 1;
     public static final int THEME_EYE_CARE = 2;
+    public static final int THEME_WHITE = 3;
+    public static final int THEME_GREEN = 4;
+    public static final int THEME_PINK = 5;
+    public static final int THEME_GRAY = 6;
+    public static final int THEME_PARCHMENT = 7;
+    public static final int THEME_SOFT_NIGHT = 8;
+    public static final int THEME_MIN = THEME_PAPER;
+    public static final int THEME_MAX = THEME_SOFT_NIGHT;
 
     public static final int MARGIN_NARROW = 0;
     public static final int MARGIN_STANDARD = 1;
     public static final int MARGIN_WIDE = 2;
+
+    public static final int FONT_SERIF = 0;
+    public static final int FONT_SANS = 1;
+    public static final int FONT_DEFAULT = 2;
 
     public static final float DEFAULT_LINE_HEIGHT = 1.85f;
     public static final float MIN_LINE_HEIGHT = 1.2f;
@@ -79,12 +96,14 @@ public final class ReaderPreferences {
 
     public int theme() {
         if (!prefs.contains(THEME)) return nightMode() ? THEME_NIGHT : THEME_PAPER;
-        return Math.max(THEME_PAPER, Math.min(THEME_EYE_CARE, prefs.getInt(THEME, THEME_PAPER)));
+        int raw = prefs.getInt(THEME, THEME_PAPER);
+        return Math.max(THEME_MIN, Math.min(THEME_MAX, raw));
     }
 
     public void setTheme(int value) {
-        int theme = Math.max(THEME_PAPER, Math.min(THEME_EYE_CARE, value));
-        prefs.edit().putInt(THEME, theme).putBoolean(NIGHT, theme == THEME_NIGHT).apply();
+        int theme = Math.max(THEME_MIN, Math.min(THEME_MAX, value));
+        boolean isNight = theme == THEME_NIGHT || theme == THEME_SOFT_NIGHT;
+        prefs.edit().putInt(THEME, theme).putBoolean(NIGHT, isNight).apply();
     }
 
     /** -1 uses the system default; otherwise Android expects a value in 0..1. */
@@ -116,5 +135,34 @@ public final class ReaderPreferences {
     public void setMargin(int value) {
         int step = Math.max(MARGIN_NARROW, Math.min(MARGIN_WIDE, value));
         prefs.edit().putInt(MARGIN, step).apply();
+    }
+
+    /** Body typeface: serif (default) / sans / system default. */
+    public int fontFamily() {
+        if (!prefs.contains(FONT_FAMILY)) return FONT_SERIF;
+        return Math.max(FONT_SERIF, Math.min(FONT_DEFAULT, prefs.getInt(FONT_FAMILY, FONT_SERIF)));
+    }
+
+    public void setFontFamily(int value) {
+        int id = Math.max(FONT_SERIF, Math.min(FONT_DEFAULT, value));
+        prefs.edit().putInt(FONT_FAMILY, id).apply();
+    }
+
+    /** Keep the screen awake while the Compose reader is open. Default true. */
+    public boolean keepScreenOn() {
+        return prefs.getBoolean(KEEP_SCREEN_ON, true);
+    }
+
+    public void setKeepScreenOn(boolean enabled) {
+        prefs.edit().putBoolean(KEEP_SCREEN_ON, enabled).apply();
+    }
+
+    /** Volume keys turn pages in the Compose reader. Default true (common CN reader UX). */
+    public boolean volumePageTurn() {
+        return prefs.getBoolean(VOLUME_PAGE_TURN, true);
+    }
+
+    public void setVolumePageTurn(boolean enabled) {
+        prefs.edit().putBoolean(VOLUME_PAGE_TURN, enabled).apply();
     }
 }
