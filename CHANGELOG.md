@@ -13,70 +13,41 @@ They do **not** assert a Google Play ship date, store listing URL, or remote CI 
 
 ### Added
 
-- `CHANGELOG.md` (this file) with Keep a Changelog layout.
-- `ROADMAP.md`: known direction and gaps (license decision, privacy HTTPS URL, security contact placeholder, TTS→Compose / download queue, CI honesty — not a ship schedule); linked from README and `RELEASECHECKLIST.md`.
-- Dependabot weekly updates for Gradle and GitHub Actions (`.github/dependabot.yml`).
-- JVM tests: blank/whitespace/HTTP remote URL rejection; pure `canAcceptUi` finishing/destroyed matrix (`ImportUiGate`).
-- Remote/Web import: in-flight **取消下载 / 取消导入** (`Job.cancel`) with strings + TalkBack content descriptions; loading status polite `liveRegion`.
-- `ReaderLeaveSave` + `ProgressMath.clampProgress`: pure leave-duration / 0…1000 helpers with JVM tests (`ReaderLeaveSaveTest`).
-- `SearchWorkOutcomes`: pure cancel / local multi-URI batch Toast / oversized-file classification with JVM tests (`SearchWorkOutcomesTest`).
-- Search: in-flight **取消导入 / 取消搜索** (`Job.cancel`) strings + TalkBack content descriptions.
-- `ProfileBackupOutcomes`: pure cancel / backup Toast / restore success·empty·invalid classification with JVM tests (`ProfileBackupOutcomesTest`).
-- Profile: in-flight **取消备份 / 取消恢复** (`Job.cancel`) strings + TalkBack content descriptions.
-- `BookDetailExportOutcomes`: pure cancel / export Toast classification with JVM tests (`BookDetailExportOutcomesTest`).
-- Book detail: in-flight **取消导出** (`Job.cancel`) strings + TalkBack content descriptions.
-
 ### Changed
-
-- README and `RELEASECHECKLIST.md`: changelog, dependency-update, and release-tag guidance; pointer to `ROADMAP.md` for maturity and migration gaps.
-
-- README: document API 23 vs `networkSecurityConfig` (API 24+), HTTPS import `Job` cancel (button + back), TalkBack `liveRegion` on remote/web loading and errors.
-- `canAcceptUi` extracted to `ImportUiGate.kt` for shared use and JVM tests.
-- README: Compose reader leave-save uses process-lifetime IO scope (not per-`onDispose` `CoroutineScope`) and `rememberUpdatedState` for latest 0…1000 progress.
-- README: `SearchActivity` shares cancel / `canAcceptUi` conventions with Remote/Web import (local URI + HTTPS Wikisource).
-- README: `ProfileScreen` CreateDocument/OpenDocument backup shares cancel / `canAcceptUi` / polite `liveRegion` conventions.
-- README: `BookDetailActivity` CreateDocument single-book TXT export shares cancel / `canAcceptUi` / polite `liveRegion` conventions.
 
 ### Fixed
 
-- `RemoteImportActivity` / `WebImportActivity`: track import `Job` on `rememberCoroutineScope`; rethrow `CancellationException` (user cancel / back / leave) so it is never shown as import failure; skip Toast / state / finish when the host Activity cannot accept UI.
-- Loading no longer disables the back affordance (back cancels the Job and leaves).
-- TalkBack: polite `liveRegion` on remote/web URL validation, loading status, and import failure messages.
-- `LibraryStore.save`: single `SharedPreferences.edit().apply()` (CommitPrefEdits lint).
-- `ReaderScreen` `DisposableEffect(book.id)` `onDispose`: no unstructured `CoroutineScope(Dispatchers.IO).launch` per leave; clamp progress 0…1000; skip non-positive reading duration for `ReadingStats`.
-- `SearchActivity`: track local shelf / SAF-URI import / HTTPS Wikisource work as `Job`s on `rememberCoroutineScope`; rethrow `CancellationException` so cancel/back/leave is never fail Toast or error liveRegion; clear busy flags; skip Toast/state when host cannot accept UI; back stays enabled while busy.
-- `ProfileScreen`: track CreateDocument backup / OpenDocument restore as `Job`s on `rememberCoroutineScope` + `Dispatchers.IO`; rethrow `CancellationException` so cancel/leave is never fail Toast or error dialog; clear busy flags; skip Toast/state when host cannot accept UI; soft cancel via dialog button / dismiss; polite `liveRegion` on loading and error dialog text.
-- `BookDetailActivity`: track CreateDocument TXT export (`LibraryStore.exportBook`) as a `Job` on `rememberCoroutineScope` + `Dispatchers.IO`; rethrow `CancellationException` so cancel/leave is never fail Toast; clear busy flags; skip Toast/state when host cannot accept UI; soft cancel via dialog button / dismiss; polite `liveRegion` on loading status.
+## [1.0.1] — versionCode 2 — 2026-08-03
 
-## [1.0.1] — versionCode 2
-
-`versionName` / `versionCode` set in git (`app/build.gradle`) on 2026-07-27.
-Summary of commits on the 1.0.1 line through the Auto Backup policy work (2026-07-31).
+GitHub public release tag **`v1.0.1`**. `versionName` / `versionCode` in `app/build.gradle`.
 
 ### Added
 
-- Compose + Material 3 surfaces for shelf (filters, sort, optional author grouping), store, discover, profile, search/import, book detail, HTTPS remote/web import, and Compose `ReaderActivity`.
-- System share/open import: `ACTION_VIEW` / `ACTION_SEND` / `ACTION_SEND_MULTIPLE` (TXT/EPUB; multi-URI capped at 20).
-- EPUB: OPF `dc:title` / `dc:creator`, optional cover extract (≤ 2 MiB) with BookCard display and ZIP backup of covers, MIME `application/epub+zip` when the name lacks `.epub`.
-- Chapter headings: Chinese matter + English Chapter/Prologue/Epilogue; Roman numerals with false-positive rejection.
-- Import safety: 32 MiB local/stream bounds, HTTPS Content-Length fail-fast, EPUB ZipInputStream expansion cap.
-- Encoding: BOM/XML-aware EPUB decode; UTF-32 LE/BE BOM for TXT/EPUB.
-- Classic TTS / auto-scroll via `LegacyReaderActivity` entry from Compose reader toolbar.
-- Accessibility: TalkBack roles/labels, ≥ 48dp targets on key lists and profile rows.
-- Unit tests for offline library/import helpers and shelf filters; instrumented Compose smoke wiring (Espresso 3.7+ force for API 35/36).
-- OSS hygiene: `CONTRIBUTING`, `CODE_OF_CONDUCT`, `SECURITY`, issue/PR templates, GitHub Actions workflow for unit test + lint + `assembleDebug`.
-- Explicit Auto Backup include-only rules (`backup_rules.xml` + `data_extraction_rules.xml`) for library prefs, books, and covers.
+- **大 TXT 秒开**：首屏正文即时可读；渐进分页 / 窗口加载，避免打开时整本 decode 或主线程 layout。
+- **阅读体验**：多纸张主题、亮度、系统/自定义字体、常亮、音量键翻页、翻页动画、自动夜间、段首缩进。
+- **目录**：进入目录自动滚到当前章；侧边 scrub 轨（1→20→30 式快速跳章）。
+- **系统分享 / 打开方式导入**：`VIEW` / `SEND` 标签「导入到阅笺」；书库页浏览器下载 → 分享打开指引。
+- **书架列表元数据路径**：`booksForListing` / `getForListing`，主壳刷新不解码多 MB 正文；`.chars` 缓存字数。
+- Compose + Material 3 主壳（书架 / 书库 / 发现 / 我的）、搜索导入、书籍详情、HTTPS 远程/Web 导入、Compose `ReaderActivity`。
+- 系统 share/open：`ACTION_VIEW` / `ACTION_SEND` / `ACTION_SEND_MULTIPLE`（TXT/EPUB；多 URI 上限 20）。
+- EPUB：OPF `dc:title` / `dc:creator`、可选封面（≤ 2 MiB）、ZIP 备份封面。
+- 章节标题识别（中文章回 + English Chapter 等）、本地 32 MiB 导入边界、编码 BOM/XML 感知。
+- 经典 TTS / 自动滚读（`LegacyReaderActivity`）。
+- 无障碍：TalkBack 角色与标签、关键列表 ≥ 48dp。
+- 导入/搜索/备份/导出/离开保存：`Job.cancel` + `canAcceptUi` + JVM 纯函数测试。
+- OSS：`LICENSE` **GNU GPL-3.0**、`CONTRIBUTING` / `CODE_OF_CONDUCT` / `SECURITY`、issue/PR 模板、Dependabot、CI（unit + lint + assembleDebug）、`ROADMAP` / `RELEASECHECKLIST` / README 截图。
+- Auto Backup include-only 规则（库 prefs、书籍、封面）。
 
 ### Changed
 
-- `compileSdk` / `targetSdk` **36**; SplashScreen API; display-name unification via `app_name`.
-- Reader progress saves debounced off the main thread; cover decode off the main thread with bounded sample size.
-- Legacy seed-author matching for older library rows.
+- 许可证从准备开源文档阶段收敛为 **GPL-3.0** copyleft；README 重写许可证说明与截图区。
+- `compileSdk` / `targetSdk` **36**；SplashScreen；显示名统一 `app_name`。
+- 阅读进度主线程外防抖保存；封面解码离主线程。
+- 阅读路径跳过整库 migration；大书章节扫描延后。
 
 ### Fixed
 
-- Search SAF import opens the picker once per `EXTRA_IMPORT`.
-- Remote import type/title detection after HTTP redirects.
-- Reader/API minSdk 23 NewApi resolution without blanket suppress or desugaring.
-- BookCard “unstarted” progress label and TalkBack CTA at position 0.
-- EPUB spine chapter join and HTML/entity stripping for cleaner body text.
+- 列表 seed migration 不再经 `books()` 全量 decode 正文。
+- 渐进→全文切换时进度保持；分页前不全书 layout；末行裁切；目录定位当前章。
+- Remote/Web/Search/Profile/BookDetail：取消不报失败 Toast；`CancellationException` 正确上抛。
+- Search SAF 一次打开选择器；远程导入重定向后类型/标题；BookCard 未开读进度文案。
