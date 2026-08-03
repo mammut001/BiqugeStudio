@@ -53,9 +53,11 @@ public final class LegacyReaderActivity extends Activity {
     private static final String TAG = "YueJianLegacyReader";
 
     /** Max chars shown in the ScrollView TextView at once (layout stays O(window)). */
-    private static final int WINDOW_CHARS = 48_000;
+    private static final int WINDOW_CHARS = 32_000;
     /** When scroll / speech approaches this edge distance, rebind the window. */
-    private static final int WINDOW_REBIND_MARGIN = 6_000;
+    private static final int WINDOW_REBIND_MARGIN = 4_000;
+    /** Debounce window rebind so fling-scroll does not thrash setText on main. */
+    private static final long REBIND_DEBOUNCE_MS = 90L;
 
     private final List<Chapter> chapters = new ArrayList<>();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -95,6 +97,8 @@ public final class LegacyReaderActivity extends Activity {
     private TextView footerProgress;
     private boolean menuVisible;
     private TextView titleView;
+    private TextView ttsStatusLabel;
+    private final Runnable debouncedRebind = this::maybeRebindWindowFromScrollNow;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -154,7 +158,7 @@ public final class LegacyReaderActivity extends Activity {
         body.setOrientation(LinearLayout.VERTICAL);
         loadingBar = new ProgressBar(this);
         loadingLabel = new TextView(this);
-        loadingLabel.setText("正在打开…");
+        loadingLabel.setText(R.string.reader_open_loading);
         loadingLabel.setTextColor(textColorFor(theme));
         loadingLabel.setTextSize(16);
         loadingLabel.setPadding(0, dp(24), 0, dp(12));
@@ -169,12 +173,24 @@ public final class LegacyReaderActivity extends Activity {
         scroll.addView(body);
         scroll.setOnScrollChangeListener((view, x, y, oldX, oldY) -> {
             if (!bodyReady) return;
-            maybeRebindWindowFromScroll();
+            // Debounce rebind — rapid setText during fling was a jank/ANR risk.
+            mainHandler.removeCallbacks(debouncedRebind);
+            mainHandler.postDelayed(debouncedRebind, REBIND_DEBOUNCE_MS);
             updateCurrentChapter();
             updateFooter();
         });
+        // Tap body only toggles chrome when controls are intentionally immersive;
+        // classic TTS keeps chrome visible by default (see setMenuVisible at end of build).
         text.setOnClickListener(v -> setMenuVisible(!menuVisible));
         root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+
+        ttsStatusLabel = new TextView(this);
+        ttsStatusLabel.setText(R.string.reader_tts_status_preparing);
+        ttsStatusLabel.setTextSize(12);
+        ttsStatusLabel.setTextColor(night ? Color.rgb(180, 180, 180) : Color.rgb(90, 90, 90));
+        ttsStatusLabel.setPadding(pad, dp(4), pad, dp(2));
+        ttsStatusLabel.setMaxLines(1);
+        root.addView(ttsStatusLabel, new LinearLayout.LayoutParams(-1, -2));
 
         LinearLayout footer = new LinearLayout(this);
         footer.setGravity(Gravity.CENTER_VERTICAL);
@@ -216,7 +232,9 @@ public final class LegacyReaderActivity extends Activity {
         addControl(controls, getString(R.string.reader_next_chapter), v -> goChapter(currentChapter + 1));
         root.addView(controls, new LinearLayout.LayoutParams(-1, dp(56)));
         setContentView(root);
-        setMenuVisible(false);
+        // Classic/TTS surface: keep chrome visible so 朗读 is never “empty UI / can't find button”.
+        setMenuVisible(true);
+        updateSpeakButtonUi();
         updateFooter();
     }
 
@@ -230,6 +248,7 @@ public final class LegacyReaderActivity extends Activity {
                 if (destroyed.get()) return;
                 if (status != TextToSpeech.SUCCESS || speaker == null) {
                     speechReady = false;
+                    mainHandler.post(this::updateSpeakButtonUi);
                     return;
                 }
                 final TextToSpeech engine = speaker;
@@ -253,27 +272,29 @@ public final class LegacyReaderActivity extends Activity {
                     mainHandler.post(() -> {
                         if (destroyed.get() || speaker != engine) return;
                         speechReady = ok;
-                        if (!ok) return;
-                        try {
-                            engine.setOnUtteranceProgressListener(new UtteranceProgressListener() {
-                                @Override
-                                public void onStart(String utteranceId) {
-                                }
+                        if (ok) {
+                            try {
+                                engine.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                                    @Override
+                                    public void onStart(String utteranceId) {
+                                    }
 
-                                @Override
-                                public void onDone(String utteranceId) {
-                                    mainHandler.post(() -> continueSpeech());
-                                }
+                                    @Override
+                                    public void onDone(String utteranceId) {
+                                        mainHandler.post(() -> continueSpeech());
+                                    }
 
-                                @Override
-                                public void onError(String utteranceId) {
-                                    mainHandler.post(() -> stopSpeech());
-                                }
-                            });
-                        } catch (Exception e) {
-                            Log.w(TAG, "TTS listener failed", e);
-                            speechReady = false;
+                                    @Override
+                                    public void onError(String utteranceId) {
+                                        mainHandler.post(() -> stopSpeech());
+                                    }
+                                });
+                            } catch (Exception e) {
+                                Log.w(TAG, "TTS listener failed", e);
+                                speechReady = false;
+                            }
                         }
+                        updateSpeakButtonUi();
                     });
                 });
             });
@@ -281,25 +302,24 @@ public final class LegacyReaderActivity extends Activity {
             Log.w(TAG, "TTS create failed", e);
             speechReady = false;
             speaker = null;
+            updateSpeakButtonUi();
         }
     }
 
     private void openBookAsync(String id) {
+        // Capture string on main (or UI thread context) before IO work.
+        final String fullChapterLabel = getString(R.string.reader_chapter_full);
         ioExecutor.execute(() -> {
             try {
-                LibraryStore store = LibraryStore.getForReading(this);
+                LibraryStore store = LibraryStore.getForReading(getApplicationContext());
                 LibraryStore.BookRecord record = store.recordById(id);
                 if (record == null) {
-                    mainHandler.post(() -> {
-                        if (!destroyed.get()) finish();
-                    });
+                    mainHandler.post(this::finishIfAlive);
                     return;
                 }
                 byte[] bytes = store.readBookBytes(id);
                 if (bytes == null) {
-                    mainHandler.post(() -> {
-                        if (!destroyed.get()) finish();
-                    });
+                    mainHandler.post(this::finishIfAlive);
                     return;
                 }
                 String full = ProgressiveTextOpen.INSTANCE.decodeFullText(bytes);
@@ -310,19 +330,21 @@ public final class LegacyReaderActivity extends Activity {
                 final String title = record.title;
                 final int position = record.position;
                 // Chapter scan off main — regex over multi‑MB must not run on UI thread.
-                final List<Chapter> found = ChapterIndex.INSTANCE.findChapters(
-                        body,
-                        getString(R.string.reader_chapter_full));
+                final List<Chapter> found = ChapterIndex.INSTANCE.findChapters(body, fullChapterLabel);
                 mainHandler.post(() -> onBookLoaded(title, position, body, found));
             } catch (Exception e) {
                 Log.e(TAG, "open book failed", e);
                 mainHandler.post(() -> {
                     if (destroyed.get()) return;
-                    Toast.makeText(this, R.string.reader_tts_unavailable, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, R.string.reader_open_failed, Toast.LENGTH_SHORT).show();
                     finish();
                 });
             }
         });
+    }
+
+    private void finishIfAlive() {
+        if (!destroyed.get() && !isFinishing()) finish();
     }
 
     private void onBookLoaded(
@@ -351,6 +373,7 @@ public final class LegacyReaderActivity extends Activity {
         int offset = offsetForProgress(savedPosition);
         bindWindowAround(offset, /* scrollToOffset */ true);
         updateCurrentChapter();
+        updateSpeakButtonUi();
         updateFooter();
     }
 
@@ -402,8 +425,8 @@ public final class LegacyReaderActivity extends Activity {
         }
     }
 
-    private void maybeRebindWindowFromScroll() {
-        if (!bodyReady || text.getLayout() == null) return;
+    private void maybeRebindWindowFromScrollNow() {
+        if (destroyed.get() || !bodyReady || text == null || text.getLayout() == null) return;
         int localTop = text.getLayout().getOffsetForHorizontal(
                 text.getLayout().getLineForVertical(Math.max(0, scroll.getScrollY())), 0);
         int global = windowStart + localTop;
@@ -497,7 +520,7 @@ public final class LegacyReaderActivity extends Activity {
         }
         final String snapshot = bodyText;
         loadingLabel.setVisibility(android.view.View.VISIBLE);
-        loadingLabel.setText("查找中…");
+        loadingLabel.setText(R.string.reader_find_loading);
         ioExecutor.execute(() -> {
             String content = snapshot.toLowerCase(Locale.ROOT);
             String needle = keyword.toLowerCase(Locale.ROOT);
@@ -706,11 +729,12 @@ public final class LegacyReaderActivity extends Activity {
 
     private void toggleSpeech() {
         if (!bodyReady) {
-            Toast.makeText(this, "正文仍在打开…", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, R.string.reader_tts_body_not_ready, Toast.LENGTH_SHORT).show();
             return;
         }
         if (!speechReady || speaker == null) {
             Toast.makeText(this, R.string.reader_tts_unavailable, Toast.LENGTH_SHORT).show();
+            updateSpeakButtonUi();
             return;
         }
         if (readingAloud) {
@@ -719,8 +743,42 @@ public final class LegacyReaderActivity extends Activity {
         }
         speechOffset = currentGlobalOffset();
         readingAloud = true;
-        speakButton.setText(R.string.reader_tts_stop);
+        updateSpeakButtonUi();
         speakNextChunk();
+    }
+
+    /** TTS button + status strip: never leave blank / dead-looking chrome. */
+    private void updateSpeakButtonUi() {
+        if (speakButton == null) return;
+        if (readingAloud) {
+            speakButton.setEnabled(true);
+            speakButton.setText(R.string.reader_tts_stop);
+            if (ttsStatusLabel != null) {
+                ttsStatusLabel.setText(R.string.reader_tts_status_speaking);
+            }
+            return;
+        }
+        if (!bodyReady) {
+            speakButton.setEnabled(false);
+            speakButton.setText(R.string.reader_tts_waiting_body);
+            if (ttsStatusLabel != null) {
+                ttsStatusLabel.setText(R.string.reader_open_loading);
+            }
+            return;
+        }
+        if (!speechReady || speaker == null) {
+            speakButton.setEnabled(false);
+            speakButton.setText(R.string.reader_tts_preparing);
+            if (ttsStatusLabel != null) {
+                ttsStatusLabel.setText(R.string.reader_tts_status_preparing);
+            }
+            return;
+        }
+        speakButton.setEnabled(true);
+        speakButton.setText(R.string.reader_tts);
+        if (ttsStatusLabel != null) {
+            ttsStatusLabel.setText(R.string.reader_tts_status_idle);
+        }
     }
 
     private void speakNextChunk() {
@@ -778,7 +836,7 @@ public final class LegacyReaderActivity extends Activity {
             } catch (Exception ignored) {
             }
         }
-        if (speakButton != null) speakButton.setText(R.string.reader_tts);
+        updateSpeakButtonUi();
     }
 
     private void showTtsSettings() {
