@@ -88,7 +88,7 @@ cd BiqugeStudio
 | 备份 | 本地 ZIP（含可选封面文件），用户自选路径 |
 | 权限 | 仅 `INTERNET`（可选在线导入） |
 | 测试 | `./gradlew :app:testDebugUnitTest` 通过；有设备时 `connectedDebugAndroidTest` |
-| 上架前已知缺口 | TTS 仍经 `LegacyReaderActivity`；**无**下载队列；许可证未选、隐私 HTTPS URL 未托管等见 [`ROADMAP.md`](./ROADMAP.md) 与 README「待继续迁移」 |
+| 上架前已知缺口 | TTS 仍经 `LegacyReaderActivity`；**无**下载队列；**许可证为 GPL-3.0**（见 [`LICENSE`](./LICENSE)）；隐私 HTTPS URL 未托管等见 [`ROADMAP.md`](./ROADMAP.md) |
 
 ---
 
@@ -109,7 +109,7 @@ cd BiqugeStudio
 | 项 | 动作 |
 |----|------|
 | `[Unreleased]` → 版本节 | [ ] 将本轮用户可见/安全/构建相关变更写入 [`CHANGELOG.md`](./CHANGELOG.md) 的 `## [versionName]`，并清空或重置 Unreleased |
-| 仅写有证据的内容 | [ ] 条目对应 git / 代码；不写未选许可证、未公开联系邮箱、未托管的发布 URL、未验证的远端 CI 结论 |
+| 仅写有证据的内容 | [ ] 条目对应 git / 代码；不写未公开联系邮箱、未托管的发布 URL、未验证的远端 CI 结论；许可证以仓库 `LICENSE`（GPL-3.0）为准 |
 | 依赖更新 | [ ] Dependabot（Gradle + GitHub Actions，weekly）PR 单独审合；重大 AGP/Kotlin/Compose bump 先本地全量构建 |
 | Git 标签 | [ ] `versionCode`/`versionName` 已提交后：`git tag -a v{versionName} -m "{versionName}"`；需要时再 `git push origin v{versionName}` |
 | 范围 | 本清单与依赖配置仅覆盖 **BiqugeStudio** 本仓库；勿改动无关应用工程 |

@@ -6,7 +6,7 @@ Thanks for helping improve this local Android reader. This guide covers workflow
 
 - **In scope:** the `BiqugeStudio` Android app module (`:app`), its docs, and GitHub project hygiene under this tree.
 - **Out of scope:** unrelated projects, applications, or directories outside this repository. Do not include unrelated trees in a PR.
-- **License:** no open-source license has been chosen yet. That is an **explicit maintainer decision**. Do not add a `LICENSE` file or relicense third-party code without maintainer approval.
+- **License:** this project is licensed under the **[GNU General Public License v3.0](./LICENSE)** (GPL-3.0). Contributions are accepted under the same terms. Do **not** relicense the project or vendor third-party code under an incompatible license without maintainer approval. See [README.md](./README.md) for a plain-language summary of copyleft vs MIT/BSD/Apache.
 
 ## Development environment
 

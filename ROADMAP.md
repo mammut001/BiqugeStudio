@@ -25,7 +25,7 @@
 | 阅读进度 | **0…1000**；书库 SharedPreferences / 文件格式勿无迁移地改 key |
 | 明文 HTTP | **禁止**；在线导入仅 `https://` |
 | 密钥 | `keystore.properties` / `keystore/*.jks` **永不**提交 |
-| 许可证 | 未选定前**不要**自行添加 `LICENSE` 或假定 MIT/Apache/GPL |
+| 许可证 | **GNU GPL v3.0**（[`LICENSE`](./LICENSE)）；勿擅自改为 MIT/Apache 等宽松许可 |
 
 ---
 
@@ -35,7 +35,7 @@
 
 | 项 | 状态 | 说明 |
 |----|------|------|
-| **开源许可证** | 未选定 | 属维护者明确决策；见 README「许可证」与 CONTRIBUTING |
+| **开源许可证** | **GPL-3.0** | 全文见 [`LICENSE`](./LICENSE)；白话说明见 README「许可证」 |
 | **隐私政策 HTTPS URL** | 正文已有、公网 URL 未托管 | [`PRIVACY.md`](./PRIVACY.md) 须托管为可匿名访问的 `https://` 后填入 Play Console |
 | **安全联系渠道** | 占位 | [`SECURITY.md`](./SECURITY.md)：私密报告；邮箱/表单未发布前勿猜测 |
 | **Data safety / 商店文案** | 清单就绪 | 按 README 表 + [RELEASECHECKLIST.md](./RELEASECHECKLIST.md) 填写；产品名 **阅笺** |
