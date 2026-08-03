@@ -1,14 +1,29 @@
-# 阅笺
+# 阅笺（Yuejian）· BiqugeStudio
 
-**阅笺**是一个**本地优先**的 Android TXT / EPUB 阅读器，使用 **Kotlin、Jetpack Compose、Material 3** 构建。
+**阅笺**是一个**本地优先、无账号、无广告**的 Android **TXT / EPUB 开源阅读器**，使用 **Kotlin、Jetpack Compose、Material 3** 构建。
+
+> **一句话**：把你自己的书（本机文件 / 浏览器下载后「分享到阅笺」）安静读完——**不是**在线书城，**不是**笔趣阁网站或任何商业「笔趣阁」客户端，也**不提供**小说站抓取/书源。
+
+仓库历史工程名 **BiqugeStudio**（拼音 *Biquge* + Studio）；产品显示名为 **阅笺**。若你在找「去广告改包 / 在线笔趣阁源」，本项目对不上；若你要 **离线 TXT·EPUB、大文件秒开、Compose 阅读体验、GPL 自由软件**，这里就是。
 
 书籍正文、阅读进度、书签与阅读偏好默认只保存在你的设备上；只有你主动使用导入相关功能时才会联网。
 
 | | |
 |:--|:--|
+| **产品名** | 阅笺（Yuejian） |
+| **仓库名** | [BiqugeStudio](https://github.com/mammut001/BiqugeStudio) |
 | **包名** | `app.maoyankanshu.novel.selfuse` |
-| **许可证** | [**GNU GPL v3.0**](./LICENSE)（强 copyleft / 开源传染） |
-| **仓库** | [github.com/mammut001/BiqugeStudio](https://github.com/mammut001/BiqugeStudio) |
+| **许可证** | [**GNU GPL v3.0**](./LICENSE)（强 copyleft） |
+| **最新安装包** | [Releases · v1.0.1](https://github.com/mammut001/BiqugeStudio/releases/tag/v1.0.1)（`yuejian-1.0.1-release.apk`） |
+| **关键词** | 本地阅读器 · TXT · EPUB · 离线 · 大 TXT 秒开 · 开源 · Android · Compose · 无广告 |
+
+### 适合 / 不适合
+
+| 适合 | 不适合 |
+|:--|:--|
+| 本机或 SAF 导入的 TXT / EPUB | 指望内置「笔趣阁」书城、搜索全网小说 |
+| 浏览器下载后「分享 / 打开方式 → 导入到阅笺」 | 去广告破解版、云书架同步商业站 |
+| 大 TXT 首屏秒开、纸张主题、目录 scrub | 闭源二改后当专有 App 上架售卖（与 GPL 冲突） |
 
 ---
 
