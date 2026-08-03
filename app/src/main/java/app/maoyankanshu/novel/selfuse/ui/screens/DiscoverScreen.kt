@@ -52,11 +52,9 @@ fun DiscoverScreen(
 ) {
     val context = LocalContext.current
     var showClearDialog by remember { mutableStateOf(false) }
-    val characters = remember(books) { books.sumOf { it.text.length } }
-    val started = remember(books) { books.count { it.position > 0 } }
-    val inProgress = remember(books) {
-        books.filter { it.position > 0 && it.position < 1000 }
-    }
+    val characters = remember(books) { LibraryListModels.totalCharacters(books) }
+    val started = remember(books) { LibraryListModels.startedCount(books) }
+    val inProgress = remember(books) { LibraryListModels.inProgressBooks(books) }
     val booksById = remember(books) { books.associateBy { it.id } }
     val history = remember(historyVersion) { ReadingHistory.get(context).list() }
     val timeFormat = remember {

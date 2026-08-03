@@ -17,6 +17,16 @@ class BookTest {
         val book = Book("id", "t", "a", "text", 10, "/tmp/x.cover")
         assertEquals("/tmp/x.cover", book.coverPath)
         assertEquals(10, book.position)
+        assertEquals(4, book.bodyLength())
+    }
+
+    @Test
+    fun listRow_emptyTextUsesExplicitTextLength() {
+        val row = Book("id", "t", "a", "", 500, null, 1_500_000)
+        assertEquals("", row.text)
+        assertEquals(1_500_000, row.textLength)
+        assertEquals(1_500_000, row.bodyLength())
+        assertEquals("已读 50%", row.progressLabel())
     }
 
     @Test

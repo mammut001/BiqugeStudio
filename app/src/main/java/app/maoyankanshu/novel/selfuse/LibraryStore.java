@@ -9,7 +9,9 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -158,6 +160,39 @@ public final class LibraryStore {
     }
 
     /**
+     * Shelf / store / discover list rows: title, author, progress, cover path, and
+     * character count — without decoding multi‑MB TXT bodies into [Book.text].
+     * [Book.text] is empty; use [Book.bodyLength] for overview stats.
+     */
+    public List<Book> booksForListing() {
+        List<Book> books = new ArrayList<>();
+        String raw = prefs.getString(KEY, "");
+        if (raw == null || raw.isEmpty()) return books;
+        for (String row : raw.split("\\n", -1)) {
+            if (row.trim().isEmpty()) continue;
+            String[] values = row.split("\\|", 4);
+            if (values.length != 4) continue;
+            try {
+                String id = values[0];
+                if (!bookFileExists(id)) continue;
+                String title = decode(values[1]);
+                String author = decode(values[2]);
+                int pos = Math.max(0, Math.min(Integer.parseInt(values[3]), 1000));
+                int chars = textCharCount(id);
+                books.add(new Book(
+                        id,
+                        title,
+                        author,
+                        "",
+                        pos,
+                        coverPathIfPresent(id),
+                        chars));
+            } catch (Exception ignored) { }
+        }
+        return books;
+    }
+
+    /**
      * Metadata only (no TXT body). Used on the progressive open path so the reader can
      * paint chrome / progress before a multi‑MB decode finishes.
      */
@@ -286,6 +321,7 @@ public final class LibraryStore {
         }
         File file = new File(bookDir(), id + ".txt");
         if (file.exists()) file.delete();
+        deleteCharCount(id);
         deleteCover(id);
         save(all);
     }
@@ -479,13 +515,75 @@ public final class LibraryStore {
     private String readText(String id) {
         byte[] data = readTextBytes(id);
         if (data == null) return null;
-        return data.length == 0 ? "" : new String(data, StandardCharsets.UTF_8);
+        String text = data.length == 0 ? "" : new String(data, StandardCharsets.UTF_8);
+        // Keep list length cache warm after full reads.
+        writeCharCount(id, text.length());
+        return text;
     }
 
     private void writeText(String id, String text) {
         try (FileOutputStream output = new FileOutputStream(new File(bookDir(), id + ".txt"))) {
             output.write(text.getBytes(StandardCharsets.UTF_8));
+            writeCharCount(id, text == null ? 0 : text.length());
         } catch (IOException ignored) { }
+    }
+
+    private boolean bookFileExists(String id) {
+        File file = new File(bookDir(), id + ".txt");
+        return file.exists();
+    }
+
+    private File charCountFile(String id) {
+        return new File(bookDir(), id + ".chars");
+    }
+
+    private void writeCharCount(String id, int count) {
+        try (FileOutputStream output = new FileOutputStream(charCountFile(id))) {
+            output.write(Integer.toString(Math.max(0, count)).getBytes(StandardCharsets.UTF_8));
+        } catch (IOException ignored) { }
+    }
+
+    private void deleteCharCount(String id) {
+        File file = charCountFile(id);
+        if (file.exists()) file.delete();
+    }
+
+    /**
+     * Character count for list/overview UI. Prefers a side cache written on save;
+     * otherwise counts UTF‑8 chars with a bounded buffer (no multi‑MB String).
+     */
+    private int textCharCount(String id) {
+        File cache = charCountFile(id);
+        if (cache.exists() && cache.length() > 0 && cache.length() < 32) {
+            try (FileInputStream input = new FileInputStream(cache)) {
+                byte[] data = new byte[(int) cache.length()];
+                int read = input.read(data);
+                if (read > 0) {
+                    return Math.max(0, Integer.parseInt(new String(data, 0, read, StandardCharsets.UTF_8).trim()));
+                }
+            } catch (Exception ignored) { }
+        }
+        File file = new File(bookDir(), id + ".txt");
+        if (!file.exists()) return 0;
+        int count = countUtf8Chars(file);
+        writeCharCount(id, count);
+        return count;
+    }
+
+    /** Stream UTF‑8 char count with fixed buffer — O(file) time, O(buffer) memory. */
+    static int countUtf8Chars(File file) {
+        if (file == null || !file.exists()) return 0;
+        try (Reader reader = new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8)) {
+            char[] buf = new char[8192];
+            int total = 0;
+            int n;
+            while ((n = reader.read(buf)) >= 0) {
+                total += n;
+            }
+            return Math.max(0, total);
+        } catch (IOException ignored) {
+            return 0;
+        }
     }
 
     private static String cleanTitle(String value, String fallback) {

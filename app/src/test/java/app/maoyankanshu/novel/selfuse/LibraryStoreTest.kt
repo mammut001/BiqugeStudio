@@ -301,6 +301,42 @@ class LibraryStoreTest {
         assertEquals("正文内容足够用来存盘", book.text)
     }
 
+    @Test
+    fun booksForListing_metadataOnly_noFullBodyPayload() {
+        val store = createStore()
+        // Multi‑MB class body must not appear in list-row Book.text.
+        val largeBody = "章".repeat(200_000)
+        store.add("大书", "作者", largeBody)
+        store.add("小书", "乙", "短")
+        store.savePosition(store.books().first { it.title == "大书" }.id, 420)
+
+        val listing = store.booksForListing()
+        val big = listing.first { it.title == "大书" }
+        val small = listing.first { it.title == "小书" }
+
+        assertEquals("", big.text)
+        assertEquals("", small.text)
+        assertEquals(largeBody.length, big.bodyLength())
+        assertEquals(1, small.bodyLength())
+        assertEquals(420, big.position)
+        assertEquals("大书", big.title)
+
+        // Full path still loads body for reading/export.
+        val full = store.byId(big.id)
+        assertNotNull(full)
+        assertEquals(largeBody.length, full!!.text.length)
+        assertEquals(largeBody.length, full.bodyLength())
+    }
+
+    @Test
+    fun countUtf8Chars_matchesStringLength() {
+        val dir = tempFolder.newFolder()
+        val file = java.io.File(dir, "sample.txt")
+        val body = "Hello中文😀"
+        file.writeText(body, StandardCharsets.UTF_8)
+        assertEquals(body.length, LibraryStore.countUtf8Chars(file))
+    }
+
     private fun createOversizedSingleEntryZipStream(entrySize: Int): InputStream {
         val chunk = ByteArray(64 * 1024) { 'a'.code.toByte() }
         val baos = ByteArrayOutputStream()

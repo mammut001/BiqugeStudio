@@ -66,9 +66,11 @@ fun BiqugeApp(
 
     var booksState by remember { mutableStateOf<List<Book>?>(null) }
 
+    // Metadata-only list rows: titles/progress/covers without multi‑MB body Strings.
+    // Full text stays on reader / detail / export paths (byId or full library dump).
     LaunchedEffect(libraryVersion) {
         val updatedBooks = withContext(Dispatchers.IO) {
-            LibraryStore.get(context).books()
+            LibraryStore.get(context).booksForListing()
         }
         booksState = updatedBooks
     }

@@ -219,7 +219,8 @@ private fun SearchScreen(
         localSearchJob = scope.launch {
             try {
                 val books = withContext(Dispatchers.IO) {
-                    LibraryStore.get(context).books().filter { book ->
+                    // Title/author filter only — no need to decode multi‑MB bodies.
+                    LibraryStore.get(context).booksForListing().filter { book ->
                         term.isEmpty() ||
                             book.title.lowercase().contains(term) ||
                             book.author.lowercase().contains(term)
