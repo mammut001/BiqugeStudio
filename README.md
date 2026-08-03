@@ -2,11 +2,31 @@
 
 阅笺是一个本地优先的 Android TXT/EPUB 阅读器，使用 Kotlin、Jetpack Compose 和 Material 3 构建。书籍、阅读进度、书签和阅读偏好默认保存在设备本地；联网功能只在用户主动导入时使用。
 
+## 截图
+
+模拟器实机截图（Pixel 风格，Debug 构建）：
+
+| 书架 | 书库 |
+|:---:|:---:|
+| ![书架](docs/screenshots/01-shelf.png) | ![书库](docs/screenshots/02-store.png) |
+
+| 发现 | 我的 |
+|:---:|:---:|
+| ![发现](docs/screenshots/03-discover.png) | ![我的](docs/screenshots/04-profile.png) |
+
+| 阅读正文 | 阅读菜单 |
+|:---:|:---:|
+| ![阅读正文](docs/screenshots/05-reader.png) | ![阅读菜单](docs/screenshots/06-reader-chrome.png) |
+
+| 阅读外观（纸张 / 字体） |
+|:---:|
+| ![阅读外观](docs/screenshots/07-appearance.png) |
+
 ## 功能
 
 - 本地 TXT / EPUB 导入，支持 EPUB 书名、作者和可选封面
 - 书架筛选、排序、作者分组、继续阅读和阅读历史
-- Compose 阅读器：分页阅读、章节目录、书签、书内查找、主题、字号、行高和亮度调节
+- Compose 阅读器：分页阅读、章节目录、书签、书内查找、多种纸张主题、字号、行高、亮度、字体与段首缩进
 - 系统 TTS 与自动滚动（经典阅读界面）
 - HTTPS 直链、授权网页和维基文库公版内容导入
 - 本地书库 ZIP 备份与恢复，以及单书 TXT 导出
