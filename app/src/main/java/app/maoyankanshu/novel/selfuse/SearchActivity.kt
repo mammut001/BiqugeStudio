@@ -220,7 +220,7 @@ private fun SearchScreen(
             try {
                 val books = withContext(Dispatchers.IO) {
                     // Title/author filter only — no need to decode multi‑MB bodies.
-                    LibraryStore.get(context).booksForListing().filter { book ->
+                    LibraryStore.getForListing(context).booksForListing().filter { book ->
                         term.isEmpty() ||
                             book.title.lowercase().contains(term) ||
                             book.author.lowercase().contains(term)

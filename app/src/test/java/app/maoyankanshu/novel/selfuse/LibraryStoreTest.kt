@@ -310,6 +310,7 @@ class LibraryStoreTest {
         store.add("小书", "乙", "短")
         store.savePosition(store.books().first { it.title == "大书" }.id, 420)
 
+        store.fullBodyDecodeCount = 0
         val listing = store.booksForListing()
         val big = listing.first { it.title == "大书" }
         val small = listing.first { it.title == "小书" }
@@ -320,12 +321,50 @@ class LibraryStoreTest {
         assertEquals(1, small.bodyLength())
         assertEquals(420, big.position)
         assertEquals("大书", big.title)
+        // Listing must not full-decode any book body (char cache / stream count only).
+        assertEquals(0, store.fullBodyDecodeCount)
 
         // Full path still loads body for reading/export.
         val full = store.byId(big.id)
         assertNotNull(full)
         assertEquals(largeBody.length, full!!.text.length)
         assertEquals(largeBody.length, full.bodyLength())
+        assertTrue(store.fullBodyDecodeCount >= 1)
+    }
+
+    @Test
+    fun seedMigrations_doNotFullDecodeUserMultiMbBooks() {
+        val store = createStore()
+        val largeBody = "文".repeat(250_000)
+        store.add("用户大书", "用户作者", largeBody)
+        // Seed-like row with legacy author (prefs only) + short body file already via add.
+        store.add("使用说明", "笔趣阁（自用）", "旧的一页说明没有标记")
+
+        val largeId = store.books().first { it.title == "用户大书" }.id
+        store.fullBodyDecodeCount = 0
+
+        // Production get() runs these migrations before booksForListing on main shell.
+        store.migrateLegacySeedAuthor("阅笺", "使用说明")
+        store.migrateWelcomeSeedBody(
+            "阅笺",
+            "使用说明",
+            "【阅笺使用说明】\n\n加长的欢迎正文。",
+        )
+        store.fullBodyDecodeCount = 0
+        val listing = store.booksForListing()
+        assertEquals(0, store.fullBodyDecodeCount)
+
+        val user = listing.first { it.title == "用户大书" }
+        assertEquals("", user.text)
+        assertEquals(largeBody.length, user.bodyLength())
+        assertEquals(largeId, user.id)
+
+        // Seed author upgraded without loading user multi‑MB body during migration listing.
+        val seed = store.recordById(store.booksForListing().first { it.title == "使用说明" }.id)
+        assertNotNull(seed)
+        assertEquals("阅笺", seed!!.author)
+        val seedBody = store.byId(seed.id)!!.text
+        assertTrue(seedBody.contains("【阅笺使用说明】"))
     }
 
     @Test

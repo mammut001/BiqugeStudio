@@ -80,50 +80,124 @@ public final class LibraryStore {
     /**
      * If the built-in seed book still uses the old product name as author, update only that
      * author field to {@link R.string#app_name}. Never changes titles or user-imported books.
+     * Prefs-row rewrite only — does <strong>not</strong> call [books] / full-body decode.
      */
     private void migrateLegacySeedAuthor() {
         if (context == null) return;
-        String appName = context.getString(R.string.app_name);
-        String seedTitle = context.getString(R.string.welcome_book_title);
+        migrateLegacySeedAuthor(
+                context.getString(R.string.app_name),
+                context.getString(R.string.welcome_book_title));
+    }
+
+    /**
+     * Package-visible for tests: same as production seed-author migration without Context strings.
+     */
+    void migrateLegacySeedAuthor(String appName, String seedTitle) {
+        if (appName == null || seedTitle == null) return;
         if (LEGACY_SEED_AUTHOR.equals(appName)) return;
-        List<Book> all = books();
+        String raw = prefs.getString(KEY, "");
+        if (raw == null || raw.isEmpty()) return;
+        StringBuilder output = new StringBuilder(raw.length());
         boolean changed = false;
-        for (int i = 0; i < all.size(); i++) {
-            Book book = all.get(i);
-            if (seedTitle.equals(book.title) && (LEGACY_SEED_AUTHOR.equals(book.author) || "笔趣阁".equals(book.author))) {
-                all.set(i, new Book(book.id, book.title, appName, book.text, book.position, book.coverPath));
-                changed = true;
+        for (String row : raw.split("\\n", -1)) {
+            if (row.trim().isEmpty()) continue;
+            String[] values = row.split("\\|", 4);
+            if (values.length != 4) {
+                output.append(row).append('\n');
+                continue;
+            }
+            try {
+                String title = decode(values[1]);
+                String author = decode(values[2]);
+                if (seedTitle.equals(title)
+                        && (LEGACY_SEED_AUTHOR.equals(author) || "笔趣阁".equals(author))) {
+                    output.append(values[0]).append('|').append(values[1]).append('|')
+                            .append(encode(appName)).append('|').append(values[3]).append('\n');
+                    changed = true;
+                } else {
+                    output.append(row).append('\n');
+                }
+            } catch (Exception ignored) {
+                output.append(row).append('\n');
             }
         }
-        if (changed) save(all);
+        if (changed) {
+            prefs.edit().putString(KEY, output.toString()).apply();
+        }
     }
 
     /**
      * Refresh the built-in《使用说明》when it still has the short one-page body so users can
      * try multi-page Kindle pagination without reinstalling. Only touches books whose title
      * is the seed title and author is the app name / legacy product name; never user imports.
+     * Loads at most the matching seed file(s) — never the whole multi‑MB library.
      */
     private void migrateWelcomeSeedBody() {
         if (context == null) return;
         String appName = context.getString(R.string.app_name);
         String seedTitle = context.getString(R.string.welcome_book_title);
         String newBody = context.getString(R.string.welcome_book_body, appName);
-        List<Book> all = books();
-        boolean changed = false;
-        for (int i = 0; i < all.size(); i++) {
-            Book book = all.get(i);
-            if (!seedTitle.equals(book.title)) continue;
-            if (!(appName.equals(book.author)
-                    || LEGACY_SEED_AUTHOR.equals(book.author)
-                    || "笔趣阁".equals(book.author))) {
+        migrateWelcomeSeedBody(appName, seedTitle, newBody);
+    }
+
+    /**
+     * Package-visible for tests: seed-body migration without Android string resources.
+     */
+    void migrateWelcomeSeedBody(String appName, String seedTitle, String newBody) {
+        if (appName == null || seedTitle == null || newBody == null) return;
+        String raw = prefs.getString(KEY, "");
+        if (raw == null || raw.isEmpty()) return;
+        StringBuilder output = new StringBuilder(raw.length());
+        boolean prefsChanged = false;
+        for (String row : raw.split("\\n", -1)) {
+            if (row.trim().isEmpty()) continue;
+            String[] values = row.split("\\|", 4);
+            if (values.length != 4) {
+                output.append(row).append('\n');
                 continue;
             }
-            String text = book.text == null ? "" : book.text;
-            if (text.contains(WELCOME_BODY_MARKER)) continue;
-            all.set(i, new Book(book.id, book.title, appName, newBody, book.position, book.coverPath));
-            changed = true;
+            try {
+                String id = values[0];
+                String title = decode(values[1]);
+                String author = decode(values[2]);
+                if (!seedTitle.equals(title)) {
+                    output.append(row).append('\n');
+                    continue;
+                }
+                if (!(appName.equals(author)
+                        || LEGACY_SEED_AUTHOR.equals(author)
+                        || "笔趣阁".equals(author))) {
+                    output.append(row).append('\n');
+                    continue;
+                }
+                // Only the seed book body is read (welcome text is small; not user multi‑MB imports).
+                String text = readText(id);
+                if (text == null) {
+                    output.append(row).append('\n');
+                    continue;
+                }
+                if (text.contains(WELCOME_BODY_MARKER)) {
+                    // Author may still need upgrade without rewriting body.
+                    if (!appName.equals(author)) {
+                        output.append(id).append('|').append(values[1]).append('|')
+                                .append(encode(appName)).append('|').append(values[3]).append('\n');
+                        prefsChanged = true;
+                    } else {
+                        output.append(row).append('\n');
+                    }
+                    continue;
+                }
+                writeText(id, newBody);
+                output.append(id).append('|').append(values[1]).append('|')
+                        .append(encode(appName)).append('|').append(values[3]).append('\n');
+                prefsChanged = true;
+            } catch (Exception ignored) {
+                output.append(row).append('\n');
+            }
         }
-        if (changed) save(all);
+        if (prefsChanged) {
+            prefs.edit().putString(KEY, output.toString()).apply();
+        }
     }
 
     public static LibraryStore get(Context context) { return new LibraryStore(context); }
@@ -134,6 +208,14 @@ public final class LibraryStore {
      */
     public static LibraryStore getForReading(Context context) {
         return new LibraryStore(context, false);
+    }
+
+    /**
+     * Main-shell / shelf listing entry. Same migrations as [get], but migrations never
+     * materialize multi‑MB user bodies (prefs-only author fix; seed body load is seed-only).
+     */
+    public static LibraryStore getForListing(Context context) {
+        return new LibraryStore(context, true);
     }
 
     public List<Book> books() {
@@ -512,9 +594,16 @@ public final class LibraryStore {
         }
     }
 
+    /**
+     * Full-body decode counter for JVM tests of the list path (package-visible).
+     * Production code does not read this field.
+     */
+    int fullBodyDecodeCount = 0;
+
     private String readText(String id) {
         byte[] data = readTextBytes(id);
         if (data == null) return null;
+        fullBodyDecodeCount++;
         String text = data.length == 0 ? "" : new String(data, StandardCharsets.UTF_8);
         // Keep list length cache warm after full reads.
         writeCharCount(id, text.length());
