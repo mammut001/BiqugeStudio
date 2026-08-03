@@ -100,10 +100,12 @@ class SearchActivity : ComponentActivity() {
         applyImportIntent(intent)
 
         setContent {
+            // Observe share / open-with URIs so SEND and onNewIntent recompose SearchScreen.
+            val sharedUris by intentUrisState
             BiqugeTheme(darkTheme = ReaderPreferences.get(this).nightMode()) {
                 SearchScreen(
                     openImportOnStart = openImport,
-                    initialUris = intentUrisState.value,
+                    initialUris = sharedUris,
                     onClose = { finish() },
                 )
             }
@@ -311,18 +313,21 @@ private fun SearchScreen(
                 if (ok > 0) libraryVersion++
                 when (SearchWorkOutcomes.localBatchNotice(ok, fail, cancelled = false)) {
                     SearchWorkOutcomes.LocalBatchNotice.SINGLE_OK -> {
-                        Toast.makeText(
-                            context,
-                            context.getString(R.string.search_local_ok, lastTitle),
-                            Toast.LENGTH_SHORT,
-                        ).show()
+                        // Prefer explicit share/open-with wording when URI came from the system.
+                        val msg = if (initialUris.isNotEmpty()) {
+                            context.getString(R.string.search_share_import_ok, ok)
+                        } else {
+                            context.getString(R.string.search_local_ok, lastTitle)
+                        }
+                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                     }
                     SearchWorkOutcomes.LocalBatchNotice.MULTI_OK -> {
-                        Toast.makeText(
-                            context,
-                            context.getString(R.string.search_local_ok_multi, ok),
-                            Toast.LENGTH_SHORT,
-                        ).show()
+                        val msg = if (initialUris.isNotEmpty()) {
+                            context.getString(R.string.search_share_import_ok, ok)
+                        } else {
+                            context.getString(R.string.search_local_ok_multi, ok)
+                        }
+                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                     }
                     SearchWorkOutcomes.LocalBatchNotice.PARTIAL -> {
                         Toast.makeText(
@@ -626,6 +631,14 @@ private fun SearchScreen(
                 ) {
                     Text(stringResource(R.string.search_import_local))
                 }
+                Text(
+                    text = stringResource(R.string.search_share_import_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp),
+                )
             }
             Spacer(Modifier.height(8.dp))
             if (listState is SearchListState.WikiLoading) {

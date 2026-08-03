@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,6 +17,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
@@ -80,7 +84,42 @@ fun StoreScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.semantics { contentDescription = summaryCd },
                 )
-                Spacer(Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(16.dp))
+                // Browser download → Share / Open with → 阅笺 (no Download-folder hunt).
+                val shareTipTitle = stringResource(R.string.store_share_import_title)
+                val shareTipBody = stringResource(R.string.store_share_import_body)
+                val shareTipCd = stringResource(R.string.store_share_import_cd)
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .semantics { contentDescription = shareTipCd },
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    ),
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(
+                                imageVector = Icons.Filled.Share,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                            )
+                            Text(
+                                text = shareTipTitle,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.semantics { heading() },
+                            )
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = shareTipBody,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
                 Text(
                     text = stringResource(R.string.store_import_section),
                     style = MaterialTheme.typography.titleMedium,

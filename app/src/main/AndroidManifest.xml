@@ -37,14 +37,20 @@
           honored for content://; see ImportIntentUris.takeReadPermissionIfPossible.
           singleTop delivers repeat shares via onNewIntent.
         -->
+        <!--
+          Share / Open-with target for browser downloads:
+          Downloads notification → Share / Open with → 「导入到阅笺」.
+          Labels on SEND filters appear in the system share sheet.
+        -->
         <activity
             android:name=".SearchActivity"
             android:exported="true"
             android:launchMode="singleTop"
+            android:label="@string/app_name"
             android:theme="@style/Theme.BiqugeStudio"
             android:windowSoftInputMode="adjustResize">
-            <!-- ACTION_VIEW content:// (SAF / DocumentsUI / other apps) -->
-            <intent-filter>
+            <!-- ACTION_VIEW content:// (SAF / Downloads / DocumentsUI) -->
+            <intent-filter android:label="@string/import_share_target_label">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
@@ -54,7 +60,7 @@
                 <data android:mimeType="application/octet-stream" />
             </intent-filter>
             <!-- ACTION_VIEW content:// by extension when MIME is generic (host required by lint) -->
-            <intent-filter>
+            <intent-filter android:label="@string/import_share_target_label">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
@@ -64,7 +70,7 @@
                 <data android:scheme="content" android:host="*" android:mimeType="*/*" android:pathPattern=".*\\.EPUB" />
             </intent-filter>
             <!-- ACTION_VIEW file:// (legacy paths; minSdk 23 still sees some providers) -->
-            <intent-filter>
+            <intent-filter android:label="@string/import_share_target_label">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
@@ -73,7 +79,7 @@
                 <data android:mimeType="application/epub+zip" />
                 <data android:mimeType="application/octet-stream" />
             </intent-filter>
-            <intent-filter>
+            <intent-filter android:label="@string/import_share_target_label">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
@@ -83,7 +89,7 @@
                 <data android:scheme="file" android:host="*" android:pathPattern=".*\\.EPUB" />
             </intent-filter>
             <!-- ACTION_SEND share sheet: EXTRA_STREAM content URI (+ MIME) -->
-            <intent-filter>
+            <intent-filter android:label="@string/import_share_target_label">
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
@@ -92,7 +98,7 @@
                 <data android:mimeType="*/*" />
             </intent-filter>
             <!-- ACTION_SEND_MULTIPLE: EXTRA_STREAM ArrayList&lt;Uri&gt; (capped at 20 in code) -->
-            <intent-filter>
+            <intent-filter android:label="@string/import_share_target_label">
                 <action android:name="android.intent.action.SEND_MULTIPLE" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />

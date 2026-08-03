@@ -35,6 +35,13 @@
     <string name="import_local_txt_epub_cd">导入本地 TXT 或 EPUB 文件</string>
     <string name="import_remote_txt_epub">从我的 HTTPS 直链下载 TXT / EPUB</string>
     <string name="import_remote_txt_epub_cd">从我的 HTTPS 直链下载 TXT 或 EPUB</string>
+    <!-- Share / Open-with target label in system chooser -->
+    <string name="import_share_target_label">导入到阅笺</string>
+    <string name="store_share_import_title">浏览器下载后怎么导入？</string>
+    <string name="store_share_import_body">在 Chrome / Firefox 下载完成后，打开通知或「下载内容」→ 点文件 →「分享」或「用其他应用打开」→ 选择「导入到阅笺」。无需在文件夹里翻找。</string>
+    <string name="store_share_import_cd">说明：浏览器下载完成后可通过分享或用其他应用打开导入到阅笺</string>
+    <string name="search_share_import_hint">提示：浏览器下完的 TXT/EPUB，用「分享 → 导入到阅笺」最快。</string>
+    <string name="search_share_import_ok">已从分享/打开方式导入 %1$d 本到书架</string>
     <string name="import_web_article">从授权 HTTPS 网页导入文章</string>
     <string name="import_web_article_cd">从授权 HTTPS 网页导入文章</string>
     <string name="https_url_required">请输入以 https:// 开头的地址（不支持 http 明文）</string>
