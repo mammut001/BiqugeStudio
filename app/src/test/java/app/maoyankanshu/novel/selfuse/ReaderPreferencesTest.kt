@@ -159,6 +159,23 @@ class ReaderPreferencesTest {
     }
 
     @Test
+    fun ttsRate_defaultAndClamping() {
+        val prefs = TestSharedPreferences()
+        val readerPrefs = ReaderPreferences.get(prefs)
+
+        assertEquals(1f, readerPrefs.ttsRate(), 0.01f)
+
+        readerPrefs.setTtsRate(0.1f)
+        assertEquals(0.5f, readerPrefs.ttsRate(), 0.01f)
+
+        readerPrefs.setTtsRate(9f)
+        assertEquals(2f, readerPrefs.ttsRate(), 0.01f)
+
+        readerPrefs.setTtsRate(1.25f)
+        assertEquals(1.25f, readerPrefs.ttsRate(), 0.01f)
+    }
+
+    @Test
     fun fontFamily_keepScreenOn_volumePageTurn_defaultsAndClamp() {
         val prefs = TestSharedPreferences()
         val readerPrefs = ReaderPreferences.get(prefs)

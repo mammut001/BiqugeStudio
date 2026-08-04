@@ -316,6 +316,7 @@
     <string name="reader_tts_body_not_ready">正文仍在打开，请稍候再朗读</string>
     <string name="reader_tts_preparing_toast">朗读引擎准备中，请稍候</string>
     <string name="reader_tts_rate_title">朗读语速</string>
+    <string name="reader_tts_rate_label">当前 %1$s</string>
     <string name="reader_open_loading">正在打开…</string>
     <string name="reader_open_failed">无法打开本书</string>
     <string name="reader_find_loading">查找中…</string>

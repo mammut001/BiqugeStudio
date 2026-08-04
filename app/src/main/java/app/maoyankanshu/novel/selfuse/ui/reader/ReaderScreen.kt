@@ -180,6 +180,7 @@ fun ReaderScreen(
     var customFontName by remember { mutableStateOf(preferences.customFontName()) }
     // In-page system TTS (no jump to legacy UI). Same engine family as Accessibility.
     var ttsState by remember { mutableStateOf(ReaderTtsState.Preparing) }
+    var ttsRate by remember { mutableFloatStateOf(TtsRate.clamp(preferences.ttsRate())) }
     var menuVisible by remember { mutableStateOf(false) }
     var showToc by remember { mutableStateOf(false) }
     var showBookmarks by remember { mutableStateOf(false) }
@@ -623,7 +624,7 @@ fun ReaderScreen(
             onChunkStart = { off -> ttsChunkJump.value(off) },
         )
         ttsController = ctrl
-        ctrl.prepare(preferences.ttsRate())
+        ctrl.prepare(TtsRate.clamp(preferences.ttsRate()))
         onDispose {
             ctrl.shutdown()
             ttsController = null
@@ -1454,6 +1455,7 @@ fun ReaderScreen(
             customFontName = customFontName,
             autoNightStartHour = preferences.autoNightStartHour(),
             autoNightEndHour = preferences.autoNightEndHour(),
+            ttsRate = ttsRate,
             onDismiss = { showAppearance = false },
             onTheme = { value ->
                 val t = clampReaderTheme(value)
@@ -1554,6 +1556,12 @@ fun ReaderScreen(
                     theme = resolved
                     preferences.setTheme(resolved)
                 }
+            },
+            onTtsRate = { rate ->
+                val clamped = TtsRate.clamp(rate)
+                ttsRate = clamped
+                preferences.setTtsRate(clamped)
+                ttsController?.setSpeechRate(clamped)
             },
         )
     }
@@ -1865,6 +1873,7 @@ private fun AppearanceDialog(
     customFontName: String,
     autoNightStartHour: Int,
     autoNightEndHour: Int,
+    ttsRate: Float,
     onDismiss: () -> Unit,
     onTheme: (Int) -> Unit,
     onFontSize: (Int) -> Unit,
@@ -1879,6 +1888,7 @@ private fun AppearanceDialog(
     onPageTurnAnimation: (Boolean) -> Unit,
     onParagraphIndent: (Boolean) -> Unit,
     onAutoNight: (Boolean) -> Unit,
+    onTtsRate: (Float) -> Unit,
 ) {
     val selectedSuffix = stringResource(R.string.reader_selected_suffix)
     val themeLabels = mapOf(
@@ -2161,6 +2171,47 @@ private fun AppearanceDialog(
                         TextButton(
                             onClick = { onLineHeightMultiplier(preset) },
                             modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
+                        ) {
+                            Text(
+                                text = label,
+                                color = if (selected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.reader_tts_rate_title),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    text = stringResource(
+                        R.string.reader_tts_rate_label,
+                        TtsRate.label(ttsRate),
+                    ),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.padding(top = 4.dp),
+                ) {
+                    TtsRate.PRESETS.forEach { preset ->
+                        val selected = TtsRate.isPresetSelected(ttsRate, preset)
+                        val label = TtsRate.label(preset)
+                        TextButton(
+                            onClick = { onTtsRate(preset) },
+                            modifier = Modifier
+                                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                .semantics {
+                                    contentDescription =
+                                        label + if (selected) selectedSuffix else ""
+                                },
                         ) {
                             Text(
                                 text = label,

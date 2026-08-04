@@ -46,6 +46,17 @@ class PageLayoutTest {
         assertEquals(1, PageLayout.displayPageNumber(0, 0))
     }
 
+    // ── Footer gap (body vs time/page strip) ───────────────────────────────
+
+    @Test
+    fun bodyFooterGap_isComfortableNotTight() {
+        // Gap must exist and stay in a human-friendly band (not flush, not huge).
+        assertTrue(PageLayout.BODY_FOOTER_GAP_DP >= 10)
+        assertTrue(PageLayout.BODY_FOOTER_GAP_DP <= 24)
+        assertTrue(PageLayout.FOOTER_BAR_DP >= 28)
+        assertTrue(PageLayout.FOOTER_BAR_DP <= 48)
+    }
+
     // ── Margin steps → pad dp ──────────────────────────────────────────────
 
     @Test
