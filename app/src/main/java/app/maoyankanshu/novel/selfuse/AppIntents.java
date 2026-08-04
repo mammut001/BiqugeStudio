@@ -66,10 +66,6 @@ public final class AppIntents {
         return new Intent(context, ReaderActivity.class).putExtra(ReaderActivity.EXTRA_ID, bookId);
     }
 
-    public static Intent legacyReader(Context context, String bookId) {
-        return new Intent(context, LegacyReaderActivity.class).putExtra(LegacyReaderActivity.EXTRA_ID, bookId);
-    }
-
     public static Intent remoteImport(Context context) {
         return new Intent(context, RemoteImportActivity.class);
     }

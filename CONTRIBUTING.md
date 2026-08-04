@@ -51,14 +51,14 @@ Instrumented / Compose UI tests need a device or emulator and are **not** requir
 
 ## Style and code conventions
 
-- Prefer **Kotlin + Jetpack Compose + Material 3** for new UI. Keep `LegacyReaderActivity` (Java TTS / auto-scroll) unless a change explicitly migrates that path.
+- Prefer **Kotlin + Jetpack Compose + Material 3** for new UI. TTS lives in Compose (`ReaderTtsController` / `ReaderScreen`).
 - Match surrounding code: package `app.maoyankanshu.novel.selfuse`, existing naming, and file layout under `app/src/main/java/...`.
 - Do **not** change:
 
   | Contract | Rule |
   |--------|------|
   | `applicationId` / package | Keep `app.maoyankanshu.novel.selfuse` (coexistence with older installs) |
-  | `ReaderActivity.EXTRA_ID` / `LegacyReaderActivity.EXTRA_ID` | Always `"book_id"` |
+  | `ReaderActivity.EXTRA_ID` | Always `"book_id"` |
   | Library / SharedPreferences keys | No renames without a migration plan |
   | Display name | Change only `app_name` in `strings.xml` |
   | Auto Backup policy | Include-only lists in `res/xml/backup_rules.xml` + `data_extraction_rules.xml` must stay aligned with real storage paths; do not add orphan `<exclude>` paths (lint `FullBackupContent`). Update both XML files and `AndroidManifest` attributes together |

@@ -100,7 +100,7 @@ GPL 的出发点是：
 - **浏览器下载后**：系统「分享 / 用其他应用打开」→ **导入到阅笺**（不必在 Download 目录里硬找）
 - 书架：筛选、排序、作者分组、继续阅读与阅读历史
 - Compose 阅读器：分页、目录、书签、书内查找；纸张主题、字号、行高、亮度、字体、段首缩进等
-- 系统 TTS 与自动滚动（经典朗读界面）
+- 系统 TTS 连续朗读（阅读页内喇叭，`TextToSpeech`）
 - HTTPS 直链、授权网页、维基文库公版文本导入
 - 本地书库 ZIP 备份/恢复，单书 TXT 导出
 - TalkBack 与基础无障碍标签
@@ -110,7 +110,7 @@ GPL 的出发点是：
 ## 当前状态
 
 - 主界面、搜索/导入、书籍详情、书架与 Compose 阅读器已在本工程内可用。
-- TTS / 自动滚动仍经兼容界面 `LegacyReaderActivity`。
+- TTS 已在 Compose 阅读页内完成（`ReaderTtsController`）；旧版 `LegacyReaderActivity` 已移除。
 - 下载队列、更丰富编码探测、完整在线书城等**尚未**作为产品目标实现。
 - 本仓库已采用 **GPL-3.0** 开源；欢迎在同样许可下使用与贡献。
 
@@ -184,13 +184,12 @@ app/src/main/java/app/maoyankanshu/novel/selfuse/
 ├── BookDetailActivity.kt           # 书籍详情、导出与删除
 ├── RemoteImportActivity.kt         # HTTPS 直链导入
 ├── WebImportActivity.kt            # HTTPS 网页导入
-├── ReaderActivity.kt               # Compose 主阅读器
-├── LegacyReaderActivity.java       # TTS 与自动滚动兼容界面
+├── ReaderActivity.kt               # Compose 主阅读器（含 TTS）
 ├── ui/                             # Compose screens、reader、theme、components
 └── LibraryStore / BookmarkStore / … # 本地数据层
 ```
 
-`ReaderActivity.EXTRA_ID` 与 `LegacyReaderActivity.EXTRA_ID` 均为 `"book_id"`，属既有兼容契约；修改前必须提供迁移方案。
+`ReaderActivity.EXTRA_ID` 为 `"book_id"`，属既有兼容契约；修改前必须提供迁移方案。
 
 ---
 

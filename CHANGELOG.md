@@ -13,7 +13,11 @@ They do **not** assert a Google Play ship date, store listing URL, or remote CI 
 
 ### Added
 
+- Compose 阅读页内系统 TTS（`ReaderTtsController`）；喇叭短按朗读/停止。
+
 ### Changed
+
+- **移除** `LegacyReaderActivity`（经典朗读 / 自动滚动兼容界面）及所有入口。
 
 ### Fixed
 
@@ -32,7 +36,7 @@ GitHub public release tag **`v1.0.1`**. `versionName` / `versionCode` in `app/bu
 - 系统 share/open：`ACTION_VIEW` / `ACTION_SEND` / `ACTION_SEND_MULTIPLE`（TXT/EPUB；多 URI 上限 20）。
 - EPUB：OPF `dc:title` / `dc:creator`、可选封面（≤ 2 MiB）、ZIP 备份封面。
 - 章节标题识别（中文章回 + English Chapter 等）、本地 32 MiB 导入边界、编码 BOM/XML 感知。
-- 经典 TTS / 自动滚读（`LegacyReaderActivity`）。
+- （历史）经典 TTS 曾经 `LegacyReaderActivity`；现已迁入 Compose 并删除该 Activity。
 - 无障碍：TalkBack 角色与标签、关键列表 ≥ 48dp。
 - 导入/搜索/备份/导出/离开保存：`Job.cancel` + `canAcceptUi` + JVM 纯函数测试。
 - OSS：`LICENSE` **GNU GPL-3.0**、`CONTRIBUTING` / `CODE_OF_CONDUCT` / `SECURITY`、issue/PR 模板、Dependabot、CI（unit + lint + assembleDebug）、`ROADMAP` / `RELEASECHECKLIST` / README 截图。

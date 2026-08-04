@@ -4,7 +4,7 @@ import java.util.Locale
 
 /**
  * Locale preference order for novel TTS (Chinese-first, then device default).
- * Pure helpers — engine binding stays in [ReaderTtsController] / LegacyReader.
+ * Pure helpers — engine binding stays in [ReaderTtsController].
  *
  * Note: This uses the system [android.speech.tts.TextToSpeech] engine (same family
  * of voices Accessibility/TalkBack uses). Driving TalkBack itself via AccessibilityService

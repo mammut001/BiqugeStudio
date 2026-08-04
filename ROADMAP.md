@@ -21,7 +21,7 @@
 | 项 | 约定 |
 |----|------|
 | `applicationId` | `app.maoyankanshu.novel.selfuse`（可与原版共存，勿为改名而改包名） |
-| Intent `EXTRA_ID` | 恒为 **`"book_id"`**（`ReaderActivity` / `LegacyReaderActivity` / 详情等） |
+| Intent `EXTRA_ID` | 恒为 **`"book_id"`**（`ReaderActivity` / 详情等） |
 | 阅读进度 | **0…1000**；书库 SharedPreferences / 文件格式勿无迁移地改 key |
 | 明文 HTTP | **禁止**；在线导入仅 `https://` |
 | 密钥 | `keystore.properties` / `keystore/*.jks` **永不**提交 |
@@ -54,8 +54,9 @@
 
 | 方向 | 现状 | 备注 |
 |------|------|------|
-| **TTS / 语速 / 自动滚动 → Compose** | 仍经 **`LegacyReaderActivity`（Java）**；Compose `ReaderScreen` 顶栏入口跳转 | 安全迁入 Compose 后再评估是否弱化（非删除）经典 Activity |
-| 翻页动画 | 未做 | 可选体验项 |
+| **TTS → Compose** | **已完成**（`ReaderTtsController` + 阅读页喇叭；`LegacyReaderActivity` 已删除） | 语速 UI / 自动滚动可再增强 |
+| 翻页动画 | 已有基础 3D 翻页 | 可再细化 |
+
 | 更多文本编码检测 | 部分 BOM/XML 已有 | 在现有 UTF-32 BOM 等基础上扩展 |
 
 **已完成、勿再当缺口：** Compose 主阅读（`ReaderActivity` / `ReaderScreen`）、离开进度与时长安全落库（`ReaderLeaveSave`）、详情 / 搜索 / 远程·网页导入 / 个人备份的 Job 取消与 `canAcceptUi` 约定。

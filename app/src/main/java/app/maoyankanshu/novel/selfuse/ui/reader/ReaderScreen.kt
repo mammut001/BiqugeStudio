@@ -10,10 +10,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
@@ -118,7 +116,6 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
-import app.maoyankanshu.novel.selfuse.AppIntents
 import app.maoyankanshu.novel.selfuse.Book
 import app.maoyankanshu.novel.selfuse.BookmarkStore
 import app.maoyankanshu.novel.selfuse.LibraryStore
@@ -139,7 +136,7 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class, FlowPreview::class)
+@OptIn(ExperimentalMaterial3Api::class, FlowPreview::class)
 @Composable
 fun ReaderScreen(
     book: Book,
@@ -162,7 +159,6 @@ fun ReaderScreen(
     val findCd = stringResource(R.string.reader_find_cd)
     val bookmarksCd = stringResource(R.string.reader_bookmarks_cd)
     val tocCd = stringResource(R.string.reader_toc_cd)
-    val legacyCd = stringResource(R.string.reader_legacy_cd)
     val ttsCd = stringResource(R.string.reader_tts_cd)
     val ttsStopCd = stringResource(R.string.reader_tts_stop_cd)
     val fontSmallerCd = stringResource(R.string.reader_font_smaller_cd)
@@ -978,24 +974,10 @@ fun ReaderScreen(
                     ) {
                         Icon(Icons.AutoMirrored.Filled.List, contentDescription = null)
                     }
-                    // Short press: in-page system TTS. Long press: optional legacy chrome.
-                    Box(
+                    IconButton(
+                        onClick = { toggleInPageTts() },
                         modifier = Modifier
                             .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                            .combinedClickable(
-                                role = Role.Button,
-                                onClick = { toggleInPageTts() },
-                                onLongClick = {
-                                    ttsController?.stop()
-                                    LibraryStore.getForReading(context).savePosition(
-                                        book.id,
-                                        ProgressMath.clampProgress(progress),
-                                    )
-                                    context.startActivity(
-                                        AppIntents.legacyReader(context, book.id),
-                                    )
-                                },
-                            )
                             .semantics {
                                 contentDescription = if (ttsState == ReaderTtsState.Speaking) {
                                     ttsStopCd
@@ -1003,7 +985,6 @@ fun ReaderScreen(
                                     ttsCd
                                 }
                             },
-                        contentAlignment = Alignment.Center,
                     ) {
                         Icon(
                             imageVector = if (ttsState == ReaderTtsState.Speaking) {
@@ -1012,7 +993,6 @@ fun ReaderScreen(
                                 Icons.AutoMirrored.Filled.VolumeUp
                             },
                             contentDescription = null,
-                            tint = palette.onBar,
                         )
                     }
                 },
