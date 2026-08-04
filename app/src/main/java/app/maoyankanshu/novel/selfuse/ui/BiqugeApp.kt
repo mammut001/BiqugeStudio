@@ -1,9 +1,12 @@
 package app.maoyankanshu.novel.selfuse.ui
 
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -21,12 +24,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -36,6 +41,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import app.maoyankanshu.novel.selfuse.AppIntents
+import app.maoyankanshu.novel.selfuse.Book
 import app.maoyankanshu.novel.selfuse.LibraryStore
 import app.maoyankanshu.novel.selfuse.R
 import app.maoyankanshu.novel.selfuse.ui.navigation.MainTab
@@ -43,10 +49,6 @@ import app.maoyankanshu.novel.selfuse.ui.screens.DiscoverScreen
 import app.maoyankanshu.novel.selfuse.ui.screens.ProfileScreen
 import app.maoyankanshu.novel.selfuse.ui.screens.ShelfScreen
 import app.maoyankanshu.novel.selfuse.ui.screens.StoreScreen
-
-import app.maoyankanshu.novel.selfuse.Book
-import androidx.compose.foundation.layout.defaultMinSize
-import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -63,11 +65,12 @@ fun BiqugeApp(
 
     var libraryVersion by remember { mutableIntStateOf(0) }
     var historyVersion by remember { mutableIntStateOf(0) }
+    var showProfileSettings by rememberSaveable { mutableStateOf(false) }
 
     var booksState by remember { mutableStateOf<List<Book>?>(null) }
 
-    // Metadata-only list rows: titles/progress/covers without multi‑MB body Strings.
-    // getForListing runs seed migrations that never full-decode user multi‑MB TXT.
+    // Metadata-only list rows: titles/progress/covers without multi-MB body Strings.
+    // getForListing runs seed migrations that never full-decode user multi-MB TXT.
     // Full text stays on reader / detail / export paths (byId or full library dump).
     LaunchedEffect(libraryVersion) {
         val updatedBooks = withContext(Dispatchers.IO) {
@@ -78,6 +81,13 @@ fun BiqugeApp(
 
     val isLoading = booksState == null
     val books = booksState ?: emptyList()
+
+    // Leaving “我的” always returns it to the overview/history landing page.
+    LaunchedEffect(currentTab) {
+        if (currentTab != MainTab.Profile) {
+            showProfileSettings = false
+        }
+    }
 
     // Refresh shelf/history when returning from Java Activities (import, reader, detail).
     DisposableEffect(lifecycleOwner) {
@@ -92,6 +102,7 @@ fun BiqugeApp(
     }
 
     fun navigateTo(tab: MainTab) {
+        showProfileSettings = false
         navController.navigate(tab.route) {
             popUpTo(navController.graph.findStartDestination().id) {
                 saveState = true
@@ -101,43 +112,76 @@ fun BiqugeApp(
         }
     }
 
+    val profileSettingsVisible = currentTab == MainTab.Profile && showProfileSettings
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
                 title = {
-                    val tabLabel = stringResource(currentTab.labelRes)
-                    val pageCd = stringResource(R.string.reader_page_title_cd, tabLabel)
+                    val pageLabel = if (profileSettingsVisible) {
+                        stringResource(R.string.profile_settings_heading)
+                    } else {
+                        stringResource(currentTab.labelRes)
+                    }
+                    val pageCd = stringResource(R.string.reader_page_title_cd, pageLabel)
                     Text(
-                        text = tabLabel,
+                        text = pageLabel,
                         modifier = Modifier.semantics {
                             contentDescription = pageCd
                         },
                     )
                 },
-                actions = {
-                    if (currentTab == MainTab.Shelf) {
-                        val searchCd = stringResource(R.string.search_shelf_cd)
-                        val importCd = stringResource(R.string.toolbar_import_cd)
+                navigationIcon = {
+                    if (profileSettingsVisible) {
+                        val backCd = stringResource(R.string.search_back_cd)
                         IconButton(
-                            onClick = {
-                                context.startActivity(AppIntents.search(context))
-                            },
+                            onClick = { showProfileSettings = false },
                             modifier = Modifier
                                 .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                                .semantics { contentDescription = searchCd },
+                                .semantics { contentDescription = backCd },
                         ) {
-                            Icon(Icons.Filled.Search, contentDescription = null)
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
                         }
-                        IconButton(
-                            onClick = {
-                                context.startActivity(AppIntents.importLocal(context))
-                            },
-                            modifier = Modifier
-                                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                                .semantics { contentDescription = importCd },
-                        ) {
-                            Icon(Icons.Filled.Add, contentDescription = null)
+                    }
+                },
+                actions = {
+                    when {
+                        currentTab == MainTab.Shelf -> {
+                            val searchCd = stringResource(R.string.search_shelf_cd)
+                            val importCd = stringResource(R.string.toolbar_import_cd)
+                            IconButton(
+                                onClick = {
+                                    context.startActivity(AppIntents.search(context))
+                                },
+                                modifier = Modifier
+                                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                    .semantics { contentDescription = searchCd },
+                            ) {
+                                Icon(Icons.Filled.Search, contentDescription = null)
+                            }
+                            IconButton(
+                                onClick = {
+                                    context.startActivity(AppIntents.importLocal(context))
+                                },
+                                modifier = Modifier
+                                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                    .semantics { contentDescription = importCd },
+                            ) {
+                                Icon(Icons.Filled.Add, contentDescription = null)
+                            }
+                        }
+
+                        currentTab == MainTab.Profile && !profileSettingsVisible -> {
+                            val settingsCd = stringResource(R.string.profile_settings_heading)
+                            IconButton(
+                                onClick = { showProfileSettings = true },
+                                modifier = Modifier
+                                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                    .semantics { contentDescription = settingsCd },
+                            ) {
+                                Icon(Icons.Filled.Settings, contentDescription = null)
+                            }
                         }
                     }
                 },
@@ -146,6 +190,7 @@ fun BiqugeApp(
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                     titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                     actionIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                     scrolledContainerColor = MaterialTheme.colorScheme.primaryContainer,
                 ),
             )
@@ -191,25 +236,26 @@ fun BiqugeApp(
             }
             composable(MainTab.Store.route) {
                 StoreScreen(
-                    books = books,
-                    contentPadding = innerPadding,
-                )
-            }
-            composable(MainTab.Discover.route) {
-                DiscoverScreen(
-                    books = books,
-                    historyVersion = historyVersion,
-                    onHistoryCleared = { historyVersion++ },
-                    onOpenShelf = { navigateTo(MainTab.Shelf) },
+                    bookCount = books.size,
                     contentPadding = innerPadding,
                 )
             }
             composable(MainTab.Profile.route) {
-                ProfileScreen(
-                    contentPadding = innerPadding,
-                    onLibraryRestored = { libraryVersion++ },
-                    onDarkThemeChanged = onDarkThemeChanged,
-                )
+                if (showProfileSettings) {
+                    ProfileScreen(
+                        contentPadding = innerPadding,
+                        onLibraryRestored = { libraryVersion++ },
+                        onDarkThemeChanged = onDarkThemeChanged,
+                    )
+                } else {
+                    DiscoverScreen(
+                        books = books,
+                        historyVersion = historyVersion,
+                        onHistoryCleared = { historyVersion++ },
+                        onOpenShelf = { navigateTo(MainTab.Shelf) },
+                        contentPadding = innerPadding,
+                    )
+                }
             }
         }
     }
