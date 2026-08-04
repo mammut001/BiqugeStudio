@@ -18,6 +18,18 @@ object PageLayout {
     const val MARGIN_MAX: Int = MARGIN_WIDE
     const val MARGIN_DEFAULT: Int = MARGIN_STANDARD
 
+    /**
+     * Extra space (dp) between the last line of body text and the time / page footer.
+     * Keeps status labels from sitting on top of the reading surface — not flush-tight.
+     */
+    const val BODY_FOOTER_GAP_DP: Int = 14
+
+    /**
+     * Approximate footer bar height (dp) reserved in the reading column so pagination
+     * never packs lines into the clock / page-location strip.
+     */
+    const val FOOTER_BAR_DP: Int = 36
+
     /** Clamp any raw margin step into the supported 0…2 range. */
     fun clampMarginStep(step: Int): Int = step.coerceIn(MARGIN_MIN, MARGIN_MAX)
 

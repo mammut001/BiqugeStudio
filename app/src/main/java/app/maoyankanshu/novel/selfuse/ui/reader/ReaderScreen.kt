@@ -89,6 +89,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
@@ -636,15 +637,20 @@ fun ReaderScreen(
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.safeDrawing),
         ) {
+            // Body + gap + footer: reserve gap so time/page never sits on the last line.
+            val bodyFooterGap = PageLayout.BODY_FOOTER_GAP_DP.dp
             BoxWithConstraints(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth(),
+                    .fillMaxWidth()
+                    // Keep a clear band above the footer strip (not flush against page %).
+                    .padding(bottom = bodyFooterGap),
             ) {
                 // Kindle-style adjustable body margins (narrow / standard / wide).
                 val padH = PageLayout.horizontalPadDp(marginStep).dp
                 val padV = PageLayout.verticalPadDp(marginStep).dp
                 val widthPx = with(density) { (maxWidth - padH * 2).toPx().toInt().coerceAtLeast(1) }
+                // maxHeight already excludes footer gap; still subtract body pad for measure.
                 val heightPx = with(density) { (maxHeight - padV * 2).toPx().toInt().coerceAtLeast(1) }
                 // Publish measured viewport for page breaking (side-effect free after first frame).
                 LaunchedEffect(widthPx, heightPx, marginStep) {
@@ -656,6 +662,8 @@ fun ReaderScreen(
                     state = pagerState,
                     modifier = Modifier
                         .fillMaxSize()
+                        // Clip page paint so Visible overflow cannot bleed onto the footer.
+                        .clipToBounds()
                         .semantics { contentDescription = tapHint },
                     userScrollEnabled = true,
                     beyondViewportPageCount = 1,
@@ -777,9 +785,8 @@ fun ReaderScreen(
                                 text = pageBody,
                                 modifier = Modifier.fillMaxWidth(),
                                 style = pageTextStyle,
-                                // Visible avoids half-glyph cut when packer is slightly optimistic;
-                                // page packing already reserves a full empty line at the bottom.
-                                overflow = TextOverflow.Visible,
+                                // Clip within the padded body; footer gap + line safety prevent cut-off.
+                                overflow = TextOverflow.Clip,
                                 softWrap = true,
                             )
                         }
@@ -799,7 +806,7 @@ fun ReaderScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
                         .semantics {
                             contentDescription = "$pageLocationCd，$progressCd"
                         },
