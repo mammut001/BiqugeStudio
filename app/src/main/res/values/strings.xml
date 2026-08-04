@@ -379,8 +379,17 @@
     <!-- Discover -->
     <string name="discover_overview_heading">阅读概览</string>
     <string name="discover_overview_body">今日阅读：%1$s\n书籍：%2$d 本\n已开始：%3$d 本\n本地文本：%4$d 字</string>
-    <string name="discover_overview_cd">今日阅读 %1$s，共 %2$d 本书，已开始 %3$d 本，本地文本 %4$d 字</string>
+    <string name="discover_overview_cd">%1$s %2$s，共 %3$d 本书，已开始 %4$d 本，本地文本 %5$d 字</string>
     <string name="discover_stat_today">今日阅读</string>
+    <string name="discover_stat_last_7_days">近7天阅读</string>
+    <string name="discover_stat_last_30_days">近30天阅读</string>
+    <string name="discover_range_today">今日</string>
+    <string name="discover_range_last_7_days">近7天</string>
+    <string name="discover_range_last_30_days">近30天</string>
+    <string name="discover_range_today_cd">查看今日阅读时长</string>
+    <string name="discover_range_last_7_days_cd">查看近7天阅读时长</string>
+    <string name="discover_range_last_30_days_cd">查看近30天阅读时长</string>
+    <string name="discover_duration_chart_cd">%1$s合计 %2$s</string>
     <string name="discover_stat_books">书籍</string>
     <string name="discover_stat_started">已开始</string>
     <string name="discover_stat_characters">本地文本</string>
