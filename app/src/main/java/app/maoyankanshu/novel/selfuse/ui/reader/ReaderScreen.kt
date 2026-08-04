@@ -107,6 +107,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntOffset
@@ -290,6 +291,7 @@ fun ReaderScreen(
         lineHeightMultiplier,
         palette.onBackground,
         bodyFontFamily,
+        paragraphIndent,
     ) {
         TextStyle(
             color = palette.onBackground,
@@ -297,6 +299,11 @@ fun ReaderScreen(
             lineHeight = (fontSizeSp * lineHeightMultiplier).sp,
             fontFamily = bodyFontFamily,
             letterSpacing = 0.2.sp,
+            textIndent = if (paragraphIndent) {
+                TextIndent(firstLine = (fontSizeSp * 2).sp, restLine = 0.sp)
+            } else {
+                null
+            },
         )
     }
 
@@ -371,6 +378,7 @@ fun ReaderScreen(
         theme,
         marginStep,
         fontFamilyId,
+        paragraphIndent,
         contentWidthPx,
         contentHeightPx,
     ) {
@@ -732,16 +740,10 @@ fun ReaderScreen(
                             },
                     ) {
                         SelectionContainer {
-                            // Top-aligned, clipped: page packing leaves bottom safety so the
-                            // last line paints fully instead of being cut at the footer edge.
-                            val displayBody = remember(pageBody, paragraphIndent) {
-                                ReaderReadingPolish.withParagraphFirstLineIndent(
-                                    pageBody,
-                                    paragraphIndent,
-                                )
-                            }
+                            // Pagination and rendering share the same TextStyle, including
+                            // paragraph indentation, so page packing cannot gain an extra line.
                             Text(
-                                text = displayBody,
+                                text = pageBody,
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .padding(horizontal = padH, vertical = padV),
