@@ -4,19 +4,19 @@ import androidx.annotation.StringRes
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.automirrored.outlined.LibraryBooks
-import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.ui.graphics.vector.ImageVector
 import app.maoyankanshu.novel.selfuse.R
 
 /**
- * Bottom navigation destinations.
- * Labels live in [R.string] (`tab_shelf` …) — resolve with stringResource in Compose UI.
- * Avoid embedding R.string in enum constructors that run at class-load time.
+ * Primary bottom navigation destinations.
+ *
+ * Keep the shell focused on three user goals: read from the shelf, add content,
+ * and review personal reading data/settings. Reading overview and history now
+ * live under [Profile] instead of competing for a separate bottom-tab slot.
  */
 enum class MainTab(
     val route: String,
@@ -34,17 +34,10 @@ enum class MainTab(
     ),
     Store(
         route = "store",
-        labelRes = R.string.tab_store,
+        labelRes = R.string.store_import_section,
         contentDescriptionRes = R.string.tab_store_cd,
         selectedIcon = Icons.AutoMirrored.Filled.LibraryBooks,
         unselectedIcon = Icons.AutoMirrored.Outlined.LibraryBooks,
-    ),
-    Discover(
-        route = "discover",
-        labelRes = R.string.tab_discover,
-        contentDescriptionRes = R.string.tab_discover_cd,
-        selectedIcon = Icons.Filled.Explore,
-        unselectedIcon = Icons.Outlined.Explore,
     ),
     Profile(
         route = "profile",
