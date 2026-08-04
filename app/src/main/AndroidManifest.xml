@@ -28,9 +28,12 @@
             android:exported="false"
             android:theme="@style/Theme.BiqugeStudio"
             android:windowSoftInputMode="adjustResize" />
+        <!-- Explicit theme: avoids black flash while progressive open paints the shell. -->
         <activity
             android:name=".LegacyReaderActivity"
-            android:exported="false" />
+            android:exported="false"
+            android:theme="@style/Theme.BiqugeStudio"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
         <!--
           TXT/EPUB open-with + share target.
           Temporary URI grants from the sender (FLAG_GRANT_READ_URI_PERMISSION) are

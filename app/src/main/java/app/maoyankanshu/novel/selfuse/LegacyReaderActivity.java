@@ -53,7 +53,7 @@ public final class LegacyReaderActivity extends Activity {
     private static final String TAG = "YueJianLegacyReader";
 
     /** Max chars shown in the ScrollView TextView at once (layout stays O(window)). */
-    private static final int WINDOW_CHARS = 32_000;
+    private static final int WINDOW_CHARS = 24_000;
     /** When scroll / speech approaches this edge distance, rebind the window. */
     private static final int WINDOW_REBIND_MARGIN = 4_000;
     /** Debounce window rebind so fling-scroll does not thrash setText on main. */
@@ -307,47 +307,118 @@ public final class LegacyReaderActivity extends Activity {
     }
 
     private void openBookAsync(String id) {
-        // Capture string on main (or UI thread context) before IO work.
+        // Capture string on main before IO work.
         final String fullChapterLabel = getString(R.string.reader_chapter_full);
         ioExecutor.execute(() -> {
             try {
                 LibraryStore store = LibraryStore.getForReading(getApplicationContext());
                 LibraryStore.BookRecord record = store.recordById(id);
                 if (record == null) {
-                    mainHandler.post(this::finishIfAlive);
+                    mainHandler.post(() -> failOpen(R.string.reader_open_failed));
                     return;
                 }
                 byte[] bytes = store.readBookBytes(id);
-                if (bytes == null) {
-                    mainHandler.post(this::finishIfAlive);
+                if (bytes == null || bytes.length == 0) {
+                    mainHandler.post(() -> failOpen(R.string.reader_open_failed));
                     return;
                 }
-                String full = ProgressiveTextOpen.INSTANCE.decodeFullText(bytes);
+                final String title = record.title;
+                final int position = record.position;
+
+                // 1) First paint: bounded window only — avoids multi‑MB String + full-book
+                // TextView layout (the black-screen / process-kill path on large novels).
+                // Java cannot use Kotlin default args — pass window size explicitly.
+                final String firstWindow = ProgressiveTextOpen.INSTANCE.firstWindowText(
+                        bytes,
+                        position,
+                        ProgressiveTextOpen.FIRST_WINDOW_BYTES);
+                mainHandler.post(() -> onBookPreview(title, position, firstWindow));
+
+                // 2) Full body + chapter index off main (may allocate multi‑MB; keep UI alive).
+                String full;
+                try {
+                    full = ProgressiveTextOpen.INSTANCE.decodeFullText(bytes);
+                } catch (OutOfMemoryError oom) {
+                    Log.e(TAG, "full decode OOM — keep preview window only", oom);
+                    mainHandler.post(() -> onBookFullyReady(
+                            title,
+                            position,
+                            firstWindow != null ? firstWindow : "",
+                            java.util.Collections.singletonList(
+                                    new Chapter(fullChapterLabel, 0))));
+                    return;
+                }
                 if (full == null || full.isEmpty()) {
                     full = new String(bytes, StandardCharsets.UTF_8);
                 }
                 final String body = full;
-                final String title = record.title;
-                final int position = record.position;
-                // Chapter scan off main — regex over multi‑MB must not run on UI thread.
-                final List<Chapter> found = ChapterIndex.INSTANCE.findChapters(body, fullChapterLabel);
-                mainHandler.post(() -> onBookLoaded(title, position, body, found));
+                final List<Chapter> found;
+                try {
+                    found = ChapterIndex.INSTANCE.findChapters(body, fullChapterLabel);
+                } catch (OutOfMemoryError oom) {
+                    Log.e(TAG, "chapter scan OOM", oom);
+                    mainHandler.post(() -> onBookFullyReady(
+                            title, position, body,
+                            java.util.Collections.singletonList(
+                                    new Chapter(fullChapterLabel, 0))));
+                    return;
+                }
+                mainHandler.post(() -> onBookFullyReady(title, position, body, found));
+            } catch (OutOfMemoryError oom) {
+                Log.e(TAG, "open book OOM", oom);
+                mainHandler.post(() -> failOpen(R.string.reader_open_failed));
             } catch (Exception e) {
                 Log.e(TAG, "open book failed", e);
-                mainHandler.post(() -> {
-                    if (destroyed.get()) return;
-                    Toast.makeText(this, R.string.reader_open_failed, Toast.LENGTH_SHORT).show();
-                    finish();
-                });
+                mainHandler.post(() -> failOpen(R.string.reader_open_failed));
             }
         });
+    }
+
+    private void failOpen(int messageRes) {
+        if (destroyed.get()) return;
+        try {
+            Toast.makeText(this, messageRes, Toast.LENGTH_SHORT).show();
+        } catch (Exception ignored) {
+        }
+        if (!isFinishing()) finish();
     }
 
     private void finishIfAlive() {
         if (!destroyed.get() && !isFinishing()) finish();
     }
 
-    private void onBookLoaded(
+    /**
+     * First readable body (window only). UI leaves the black loading state immediately;
+     * TTS waits until {@link #onBookFullyReady}.
+     */
+    private void onBookPreview(String title, int position, String windowText) {
+        if (destroyed.get()) return;
+        bookTitle = title != null ? title : "";
+        savedPosition = ProgressMath.INSTANCE.clampProgress(position);
+        // Preview uses the window as temporary body so layout can measure.
+        bodyText = windowText != null ? windowText : "";
+        bodyReady = false; // full body not ready for continuous TTS yet
+        chapters.clear();
+        chapters.add(new Chapter(getString(R.string.reader_chapter_full), 0));
+        if (titleView != null) titleView.setText(bookTitle);
+        if (loadingBar != null) loadingBar.setVisibility(android.view.View.GONE);
+        if (loadingLabel != null) {
+            loadingLabel.setVisibility(android.view.View.VISIBLE);
+            loadingLabel.setText(R.string.reader_open_loading);
+        }
+        text.setVisibility(android.view.View.VISIBLE);
+        try {
+            bindWindowAround(0, true);
+        } catch (OutOfMemoryError oom) {
+            Log.e(TAG, "preview bind OOM", oom);
+            failOpen(R.string.reader_open_failed);
+            return;
+        }
+        updateSpeakButtonUi();
+        updateFooter();
+    }
+
+    private void onBookFullyReady(
             String title,
             int position,
             String body,
@@ -371,7 +442,21 @@ public final class LegacyReaderActivity extends Activity {
         text.setVisibility(android.view.View.VISIBLE);
 
         int offset = offsetForProgress(savedPosition);
-        bindWindowAround(offset, /* scrollToOffset */ true);
+        try {
+            bindWindowAround(offset, /* scrollToOffset */ true);
+        } catch (OutOfMemoryError oom) {
+            Log.e(TAG, "full bind OOM", oom);
+            // Fall back to a short head so the activity stays alive.
+            if (bodyText.length() > WINDOW_CHARS) {
+                bodyText = bodyText.substring(0, WINDOW_CHARS);
+            }
+            try {
+                bindWindowAround(0, true);
+            } catch (OutOfMemoryError oom2) {
+                failOpen(R.string.reader_open_failed);
+                return;
+            }
+        }
         updateCurrentChapter();
         updateSpeakButtonUi();
         updateFooter();
