@@ -713,6 +713,32 @@ fun ReaderScreen(
                     val pageOffset =
                         (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
                     val turn = PageTurnEffect.transform(pageOffset, pageTurnAnimation)
+                    // Page-local indent: only true paragraph starts (offset 0 or after \n).
+                    // Applying firstLineIndent on every page re-wraps mid-paragraph lines and
+                    // clips the last line — the longstanding half-line bug.
+                    val pageStartOffset = when {
+                        useApproxPaging -> PageIndex.approximateOffsetForPage(
+                            page,
+                            approxCharsPerPage,
+                            book.text.length,
+                        )
+                        pageStarts.isNotEmpty() -> PageIndex.offsetForPage(pageStarts, page)
+                        else -> 0
+                    }
+                    val pageTextStyle = remember(
+                        bodyTextStyle,
+                        paragraphIndent,
+                        pageStartOffset,
+                        book.text,
+                    ) {
+                        if (!paragraphIndent) {
+                            bodyTextStyle
+                        } else if (PageIndex.shouldApplyParagraphIndent(book.text, pageStartOffset)) {
+                            bodyTextStyle
+                        } else {
+                            bodyTextStyle.copy(textIndent = null)
+                        }
+                    }
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -727,6 +753,8 @@ fun ReaderScreen(
                                 alpha = turn.alpha
                                 scaleX = turn.scale
                                 scaleY = turn.scale
+                                // Prevent 3D layer from cropping descenders at the bottom edge.
+                                clip = false
                             }
                             .pointerInput(pageCount) {
                                 detectTapGestures { offset ->
@@ -739,16 +767,19 @@ fun ReaderScreen(
                                 }
                             },
                     ) {
-                        SelectionContainer {
-                            // Pagination and rendering share the same TextStyle, including
-                            // paragraph indentation, so page packing cannot gain an extra line.
+                        SelectionContainer(
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .fillMaxWidth()
+                                .padding(horizontal = padH, vertical = padV),
+                        ) {
                             Text(
                                 text = pageBody,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = padH, vertical = padV),
-                                style = bodyTextStyle,
-                                overflow = TextOverflow.Clip,
+                                modifier = Modifier.fillMaxWidth(),
+                                style = pageTextStyle,
+                                // Visible avoids half-glyph cut when packer is slightly optimistic;
+                                // page packing already reserves a full empty line at the bottom.
+                                overflow = TextOverflow.Visible,
                                 softWrap = true,
                             )
                         }

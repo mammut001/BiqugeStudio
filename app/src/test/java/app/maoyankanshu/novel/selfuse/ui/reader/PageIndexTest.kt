@@ -159,30 +159,46 @@ class PageIndexTest {
     @Test
     fun approximateCharsPerPage_isPositiveAndConservative() {
         val count = PageIndex.approximateCharsPerPage(1080, 2000, 54f, 1.5f)
-        assertTrue(count in 256..4096)
-        assertEquals(256, PageIndex.approximateCharsPerPage(1, 1, 1000f, 10f))
+        assertTrue(count in 200..3600)
+        assertEquals(200, PageIndex.approximateCharsPerPage(1, 1, 1000f, 10f))
         // Must stay below theoretical full fill so last line is not clipped.
         val font = 54f
         val lineH = font * 1.5f
-        val cols = ((1080 / font) * 0.96f).toInt()
-        val lines = ((2000 / lineH).toInt() - 1).coerceAtLeast(1)
+        val cols = ((1080 / font) * 0.92f).toInt()
+        val lines = ((2000 / lineH).toInt() - 2).coerceAtLeast(1)
         val theoretical = cols * lines
         assertTrue(count < theoretical)
+        assertTrue(count <= (theoretical * PageIndex.APPROX_FILL_FACTOR).toInt() + 1)
     }
 
     @Test
     fun effectivePageViewportHeight_reservesBottomSafety() {
         val effective = PageIndex.effectivePageViewportHeight(1000f, typicalLineHeightPx = 40f)
         assertTrue(effective < 1000f)
-        assertTrue(effective >= 1000f - 40f) // at most one line reserved at 0.35 fraction
+        // Full line reserved (1.0 × line height) so last line is not half-clipped.
         assertEquals(
             1000f - (40f * PageIndex.PAGE_BOTTOM_SAFETY_LINE_FRACTION),
             effective,
             0.01f,
         )
+        assertEquals(1.0f, PageIndex.PAGE_BOTTOM_SAFETY_LINE_FRACTION, 0.001f)
         val noLine = PageIndex.effectivePageViewportHeight(500f, 0f)
         assertTrue(noLine < 500f)
-        assertTrue(noLine >= 500f - 20f)
+        assertTrue(noLine >= 500f * 0.5f)
+    }
+
+    @Test
+    fun shouldApplyParagraphIndent_onlyAtParagraphStarts() {
+        val text = "第一段开头\n第二段开头续写"
+        assertTrue(PageIndex.shouldApplyParagraphIndent(text, 0))
+        assertTrue(PageIndex.shouldApplyParagraphIndent(text, text.indexOf('第', 1))) // 第二段
+        // Mid-paragraph (after first char of line 1)
+        assertTrue(!PageIndex.shouldApplyParagraphIndent(text, 1))
+        assertTrue(!PageIndex.shouldApplyParagraphIndent(text, 3))
+        assertTrue(!PageIndex.shouldApplyParagraphIndent("", 0))
+        // After newline
+        val nl = text.indexOf('\n')
+        assertTrue(PageIndex.shouldApplyParagraphIndent(text, nl + 1))
     }
 
     @Test
@@ -231,11 +247,11 @@ class PageIndexTest {
 
     @Test
     fun pageStartOffsets_multiPagePacking() {
-        // 5 lines × 30px; viewport 100 with bottom safety (~10.5) → effective ~89.5
-        // line0+1: bottom 60 ≤ 89.5 → same page
-        // line2: bottom 90 > 89.5 → new page at char 20
-        // line3: 120-60=60 ≤ 89.5
-        // line4: 150-60=90 > 89.5 → new page at char 40
+        // 5 lines × 30px; viewport 100 with full-line safety (30) → effective 70
+        // line0+1: bottom 60 ≤ 70 → same page
+        // line2: bottom 90 > 70 → new page at char 20
+        // line3: 120-60=60 ≤ 70
+        // line4: 150-60=90 > 70 → new page at char 40
         val tops = floatArrayOf(0f, 30f, 60f, 90f, 120f)
         val bottoms = floatArrayOf(30f, 60f, 90f, 120f, 150f)
         val chars = intArrayOf(0, 10, 20, 30, 40)
@@ -246,9 +262,8 @@ class PageIndexTest {
 
     @Test
     fun pageStartOffsets_doesNotPackLineThatTouchesViewportEdge() {
-        // Without bottom safety, line bottom==vh used to stay on the page and clip.
-        // line0: 0-50, line1: 50-100, viewport 100, typical line 50 → effective 100-17.5=82.5
-        // line1 bottom 100-0=100 > 82.5 → new page (last line of page0 fully fits alone)
+        // Full-line safety: line height 50, viewport 100 → effective 50
+        // line0: 0-50 fits alone; line1: 100-0=100 > 50 → new page
         val tops = floatArrayOf(0f, 50f)
         val bottoms = floatArrayOf(50f, 100f)
         val chars = intArrayOf(0, 20)
@@ -268,8 +283,8 @@ class PageIndexTest {
 
     @Test
     fun pageStartOffsets_thenProgressMapsAcrossPages() {
-        // viewport 120, line height 40 → effective ~106
-        // line0+1: 80 ≤ 106; line2: 120 > 106 → page at 16; line3: 160-80=80; line4: 200-80=120 > 106 → page at 32
+        // viewport 120, line height 40 → effective 80 (full line reserved)
+        // line0+1: 80 ≤ 80; line2: 120 > 80 → page at 16; line3: 160-80=80; line4: 200-80=120 > 80 → page at 32
         val tops = floatArrayOf(0f, 40f, 80f, 120f, 160f)
         val bottoms = floatArrayOf(40f, 80f, 120f, 160f, 200f)
         val chars = intArrayOf(0, 8, 16, 24, 32)

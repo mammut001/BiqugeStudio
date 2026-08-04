@@ -249,25 +249,47 @@ object PageIndex {
      * Fraction of theoretical columns×lines kept for approximate paging.
      * Below 1.0 so Chinese full-width + letterSpacing rarely overfill the screen
      * (overfill clips the last line in a non-scrolling page Text).
+     *
+     * Kept deliberately low: approx paging has no real TextLayout, and overfill
+     * shows as “last line half-cut” which users reported after earlier 0.70 fixes.
      */
-    const val APPROX_FILL_FACTOR: Float = 0.70f
+    const val APPROX_FILL_FACTOR: Float = 0.58f
 
     /**
-     * Reserve this fraction of one line height at the bottom of the exact-measure
-     * viewport so the last line's descenders / subpixel paint are not clipped.
+     * Reserve this many line-heights at the bottom of the exact-measure viewport.
+     * 1.0 = leave a full empty line so platform font padding / subpixel paint never
+     * clips the last glyph (0.35 was still cutting half a line on some devices).
      */
-    const val PAGE_BOTTOM_SAFETY_LINE_FRACTION: Float = 0.35f
+    const val PAGE_BOTTOM_SAFETY_LINE_FRACTION: Float = 1.0f
 
     /** Minimum absolute bottom safety in px when line height is unknown. */
-    const val PAGE_BOTTOM_SAFETY_MIN_PX: Float = 4f
+    const val PAGE_BOTTOM_SAFETY_MIN_PX: Float = 12f
+
+    /**
+     * Whether a page whose body starts at [pageStartOffset] should apply paragraph
+     * first-line indent.
+     *
+     * Full-book measure indents only true paragraph starts. Re-laying each page as
+     * its own [androidx.compose.ui.text.Text] would re-indent mid-paragraph lines,
+     * wrap more, and clip the last line — the recurring “last line half-visible” bug.
+     */
+    fun shouldApplyParagraphIndent(fullText: String, pageStartOffset: Int): Boolean {
+        if (fullText.isEmpty()) return false
+        val o = pageStartOffset.coerceIn(0, fullText.length)
+        if (o <= 0) return true
+        // Paragraph start: previous char is a line break (and skip trailing CR).
+        var i = o - 1
+        if (i >= 0 && fullText[i] == '\r') i--
+        return i < 0 || fullText[i] == '\n'
+    }
 
     /**
      * Effective height used when packing lines onto a page.
-     * Slightly smaller than the painted viewport so the last line fully displays.
+     * Smaller than the painted viewport so the last line fully displays.
      *
      * @param viewportHeightPx measured body height (already after margins)
      * @param typicalLineHeightPx optional average line height; when >0 reserves a
-     *   fraction of one line, otherwise a small % of the viewport.
+     *   full line (see [PAGE_BOTTOM_SAFETY_LINE_FRACTION]), otherwise a % of viewport.
      */
     fun effectivePageViewportHeight(
         viewportHeightPx: Float,
@@ -278,9 +300,11 @@ object PageIndex {
             (typicalLineHeightPx * PAGE_BOTTOM_SAFETY_LINE_FRACTION)
                 .coerceAtLeast(PAGE_BOTTOM_SAFETY_MIN_PX)
         } else {
-            (vh * 0.02f).coerceAtLeast(PAGE_BOTTOM_SAFETY_MIN_PX)
+            (vh * 0.06f).coerceAtLeast(PAGE_BOTTOM_SAFETY_MIN_PX)
         }
-        return (vh - reserve).coerceAtLeast(1f)
+        // Never reserve more than ~40% of the viewport (tiny screens / huge fonts).
+        val capped = reserve.coerceAtMost(vh * 0.4f)
+        return (vh - capped).coerceAtLeast(1f)
     }
 
     /** Estimate a conservative page size for the current viewport and text style. */
@@ -293,11 +317,11 @@ object PageIndex {
         val font = fontSizePx.coerceAtLeast(1f)
         val lineHeight = (font * lineHeightMultiplier.coerceAtLeast(1f)).coerceAtLeast(1f)
         // Full-width CJK ≈ 1em; letterSpacing makes real columns slightly fewer.
-        val columns = ((widthPx.coerceAtLeast(1) / font) * 0.96f).toInt().coerceAtLeast(1)
-        // Leave one line empty so the last painted line is not clipped at the footer edge.
+        val columns = ((widthPx.coerceAtLeast(1) / font) * 0.92f).toInt().coerceAtLeast(1)
+        // Leave two lines empty: one for safety, one for wrap/indent variance.
         val rawLines = (heightPx.coerceAtLeast(1) / lineHeight).toInt().coerceAtLeast(1)
-        val lines = (rawLines - 1).coerceAtLeast(1)
-        return (columns * lines * APPROX_FILL_FACTOR).roundToInt().coerceIn(256, 4096)
+        val lines = (rawLines - 2).coerceAtLeast(1)
+        return (columns * lines * APPROX_FILL_FACTOR).roundToInt().coerceIn(200, 3600)
     }
 
     /**
