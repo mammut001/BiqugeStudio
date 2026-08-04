@@ -34,6 +34,7 @@ import app.maoyankanshu.novel.selfuse.ui.reader.Chapter;
 import app.maoyankanshu.novel.selfuse.ui.reader.ChapterIndex;
 import app.maoyankanshu.novel.selfuse.ui.reader.ProgressMath;
 import app.maoyankanshu.novel.selfuse.ui.reader.ProgressiveTextOpen;
+import app.maoyankanshu.novel.selfuse.ui.reader.TtsLanguagePicker;
 import app.maoyankanshu.novel.selfuse.ui.reader.TtsSpeechChunks;
 
 /**
@@ -63,6 +64,12 @@ public final class LegacyReaderActivity extends Activity {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "legacy-reader-io");
+        t.setPriority(Thread.NORM_PRIORITY - 1);
+        return t;
+    });
+    /** Separate from book-open IO so setLanguage is not stuck behind multi‑MB decode. */
+    private final ExecutorService ttsExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "legacy-reader-tts");
         t.setPriority(Thread.NORM_PRIORITY - 1);
         return t;
     });
@@ -239,8 +246,9 @@ public final class LegacyReaderActivity extends Activity {
     }
 
     /**
-     * TTS engine construction is async; {@link TextToSpeech#setLanguage} is moved off the
-     * main thread because OEM engines often block for seconds (classic ANR with “Wait”).
+     * TTS engine construction is async; {@link TextToSpeech#setLanguage} runs on
+     * [ttsExecutor] (not the book-open queue, not the main thread) to avoid ANR and
+     * “永远准备中” when openBook blocks the only worker.
      */
     private void startTtsEngineAsync() {
         try {
@@ -253,46 +261,36 @@ public final class LegacyReaderActivity extends Activity {
                 }
                 final TextToSpeech engine = speaker;
                 final float rate = preferences.ttsRate();
-                ioExecutor.execute(() -> {
-                    int lang = TextToSpeech.LANG_NOT_SUPPORTED;
+                ttsExecutor.execute(() -> {
                     try {
-                        lang = engine.setLanguage(Locale.CHINA);
-                        if (lang < 0) {
-                            lang = engine.setLanguage(Locale.CHINESE);
-                        }
-                        if (lang < 0) {
-                            lang = engine.setLanguage(Locale.getDefault());
-                        }
+                        applyPreferredTtsLanguage(engine);
                         engine.setSpeechRate(rate);
                     } catch (Exception e) {
-                        Log.w(TAG, "TTS setLanguage failed", e);
-                        lang = TextToSpeech.LANG_NOT_SUPPORTED;
+                        Log.w(TAG, "TTS configure failed", e);
                     }
-                    final boolean ok = lang >= TextToSpeech.LANG_AVAILABLE;
                     mainHandler.post(() -> {
                         if (destroyed.get() || speaker != engine) return;
-                        speechReady = ok;
-                        if (ok) {
-                            try {
-                                engine.setOnUtteranceProgressListener(new UtteranceProgressListener() {
-                                    @Override
-                                    public void onStart(String utteranceId) {
-                                    }
+                        // Engine connected → Ready even if locale pick was imperfect
+                        // (default voice may still speak). Stuck “准备中” was worse.
+                        speechReady = true;
+                        try {
+                            engine.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                                @Override
+                                public void onStart(String utteranceId) {
+                                }
 
-                                    @Override
-                                    public void onDone(String utteranceId) {
-                                        mainHandler.post(() -> continueSpeech());
-                                    }
+                                @Override
+                                public void onDone(String utteranceId) {
+                                    mainHandler.post(() -> continueSpeech());
+                                }
 
-                                    @Override
-                                    public void onError(String utteranceId) {
-                                        mainHandler.post(() -> stopSpeech());
-                                    }
-                                });
-                            } catch (Exception e) {
-                                Log.w(TAG, "TTS listener failed", e);
-                                speechReady = false;
-                            }
+                                @Override
+                                public void onError(String utteranceId) {
+                                    mainHandler.post(() -> stopSpeech());
+                                }
+                            });
+                        } catch (Exception e) {
+                            Log.w(TAG, "TTS listener failed", e);
                         }
                         updateSpeakButtonUi();
                     });
@@ -304,6 +302,23 @@ public final class LegacyReaderActivity extends Activity {
             speaker = null;
             updateSpeakButtonUi();
         }
+    }
+
+    private void applyPreferredTtsLanguage(TextToSpeech engine) {
+        for (Locale locale : TtsLanguagePicker.INSTANCE.preferredLocales()) {
+            try {
+                int avail = engine.isLanguageAvailable(locale);
+                if (!TtsLanguagePicker.INSTANCE.isUsable(avail)) continue;
+                int set = engine.setLanguage(locale);
+                if (TtsLanguagePicker.INSTANCE.isUsable(set)) {
+                    Log.i(TAG, "TTS language=" + locale + " result=" + set);
+                    return;
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "locale " + locale + " failed", e);
+            }
+        }
+        Log.w(TAG, "no preferred TTS locale; engine default may still speak");
     }
 
     private void openBookAsync(String id) {
@@ -569,6 +584,7 @@ public final class LegacyReaderActivity extends Activity {
             speaker = null;
         }
         ioExecutor.shutdownNow();
+        ttsExecutor.shutdownNow();
         super.onDestroy();
     }
 

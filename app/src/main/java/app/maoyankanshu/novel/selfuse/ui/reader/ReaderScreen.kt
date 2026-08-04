@@ -10,8 +10,10 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
@@ -54,6 +56,7 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.FormatSize
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -136,7 +139,7 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
 
-@OptIn(ExperimentalMaterial3Api::class, FlowPreview::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class, FlowPreview::class)
 @Composable
 fun ReaderScreen(
     book: Book,
@@ -160,6 +163,8 @@ fun ReaderScreen(
     val bookmarksCd = stringResource(R.string.reader_bookmarks_cd)
     val tocCd = stringResource(R.string.reader_toc_cd)
     val legacyCd = stringResource(R.string.reader_legacy_cd)
+    val ttsCd = stringResource(R.string.reader_tts_cd)
+    val ttsStopCd = stringResource(R.string.reader_tts_stop_cd)
     val fontSmallerCd = stringResource(R.string.reader_font_smaller_cd)
     val fontLargerCd = stringResource(R.string.reader_font_larger_cd)
     val lineHeightSmallerCd = stringResource(R.string.reader_line_height_smaller_cd)
@@ -177,6 +182,8 @@ fun ReaderScreen(
     var paragraphIndent by remember { mutableStateOf(preferences.paragraphIndent()) }
     var autoNight by remember { mutableStateOf(preferences.autoNight()) }
     var customFontName by remember { mutableStateOf(preferences.customFontName()) }
+    // In-page system TTS (no jump to legacy UI). Same engine family as Accessibility.
+    var ttsState by remember { mutableStateOf(ReaderTtsState.Preparing) }
     var menuVisible by remember { mutableStateOf(false) }
     var showToc by remember { mutableStateOf(false) }
     var showBookmarks by remember { mutableStateOf(false) }
@@ -597,6 +604,75 @@ fun ReaderScreen(
         }
     }
 
+    fun currentReadingOffset(): Int {
+        return if (useApproxPaging) {
+            PageIndex.approximateOffsetForPage(
+                pagerState.currentPage,
+                approxCharsPerPage,
+                book.text.length,
+            )
+        } else {
+            PageIndex.offsetForPage(pageStarts, pagerState.currentPage)
+        }
+    }
+
+    // In-page system TTS — stays on Compose reader (no jump to legacy chrome).
+    val ttsChunkJump = remember { mutableStateOf<(Int) -> Unit>({}) }
+    ttsChunkJump.value = { jumpToOffset(it) }
+    var ttsController by remember { mutableStateOf<ReaderTtsController?>(null) }
+    DisposableEffect(Unit) {
+        val ctrl = ReaderTtsController(
+            context = context,
+            onState = { ttsState = it },
+            onChunkStart = { off -> ttsChunkJump.value(off) },
+        )
+        ttsController = ctrl
+        ctrl.prepare(preferences.ttsRate())
+        onDispose {
+            ctrl.shutdown()
+            ttsController = null
+        }
+    }
+
+    fun toggleInPageTts() {
+        val ctrl = ttsController
+        when (ttsState) {
+            ReaderTtsState.Speaking -> ctrl?.stop()
+            ReaderTtsState.Ready -> {
+                if (!textFullyLoaded && book.text.isEmpty()) {
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.reader_tts_body_not_ready),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                    return
+                }
+                val started = ctrl?.start(book.text, currentReadingOffset()) == true
+                if (!started) {
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.reader_tts_unavailable),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
+            ReaderTtsState.Preparing -> {
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.reader_tts_preparing_toast),
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+            ReaderTtsState.Unavailable -> {
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.reader_tts_unavailable),
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }
+    }
+
     // Volume keys → page turn when enabled (common CN novel-reader gesture).
     val volumeTurnEnabled by rememberUpdatedState(volumePageTurn)
     val latestPageCount by rememberUpdatedState(pageCount)
@@ -902,19 +978,42 @@ fun ReaderScreen(
                     ) {
                         Icon(Icons.AutoMirrored.Filled.List, contentDescription = null)
                     }
-                    IconButton(
-                        onClick = {
-                            LibraryStore.getForReading(context).savePosition(
-                                book.id,
-                                ProgressMath.clampProgress(progress),
-                            )
-                            context.startActivity(AppIntents.legacyReader(context, book.id))
-                        },
+                    // Short press: in-page system TTS. Long press: optional legacy chrome.
+                    Box(
                         modifier = Modifier
                             .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                            .semantics { contentDescription = legacyCd },
+                            .combinedClickable(
+                                role = Role.Button,
+                                onClick = { toggleInPageTts() },
+                                onLongClick = {
+                                    ttsController?.stop()
+                                    LibraryStore.getForReading(context).savePosition(
+                                        book.id,
+                                        ProgressMath.clampProgress(progress),
+                                    )
+                                    context.startActivity(
+                                        AppIntents.legacyReader(context, book.id),
+                                    )
+                                },
+                            )
+                            .semantics {
+                                contentDescription = if (ttsState == ReaderTtsState.Speaking) {
+                                    ttsStopCd
+                                } else {
+                                    ttsCd
+                                }
+                            },
+                        contentAlignment = Alignment.Center,
                     ) {
-                        Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null)
+                        Icon(
+                            imageVector = if (ttsState == ReaderTtsState.Speaking) {
+                                Icons.Filled.Stop
+                            } else {
+                                Icons.AutoMirrored.Filled.VolumeUp
+                            },
+                            contentDescription = null,
+                            tint = palette.onBar,
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
