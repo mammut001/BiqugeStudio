@@ -40,7 +40,8 @@ object TtsEngineCatalog {
             p.contains("samsung") || p.contains(".smt") || p.endsWith(".smt") -> "三星语音"
             p.contains("huawei") || p.contains("harmony") -> "华为语音"
             p.contains("xiaomi") || p.contains("miui") || p.contains("xiaoai") -> "小米语音"
-            p.contains("oppo") || p.contains("coloros") || p.contains("heytap") -> "OPPO 语音"
+            p.contains("oppo") || p.contains("coloros") || p.contains("heytap") ||
+                p.contains("oplus") || p.contains("oneplus") -> "OPPO/一加 语音"
             p.contains("vivo") || p.contains("bbk") -> "vivo 语音"
             p.contains("meizu") || p.contains("flyme") -> "魅族语音"
             p.contains("baidu") -> "百度语音"
@@ -105,11 +106,18 @@ object TtsEngineCatalog {
         "com.iflytek.speechsuite",
         "com.iflytek.inputmethod.tts",
         "com.iflytek.vflynote",
+        "com.iflytek.speechcloud",
         "com.samsung.SMT",
         "com.huawei.voiceservice",
         "com.huawei.voiceengine",
         "com.xiaomi.mibrain.speech",
         "com.baidu.duersdk.opensdk",
+        // ColorOS / OnePlus / OPPO
+        "com.coloros.tts",
+        "com.heytap.speechassist",
+        "com.oplus.tts",
+        "com.oppo.tts",
+        "com.oneplus.speech",
         "com.github.olga_yakovleva.rhvoice.android",
     )
 

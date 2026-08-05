@@ -9,12 +9,13 @@ import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
-import android.os.HandlerThread
 import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /** UI-facing TTS lifecycle for the Compose reader (in-page). */
 enum class ReaderTtsState {
@@ -27,11 +28,11 @@ enum class ReaderTtsState {
 /**
  * System [TextToSpeech] for continuous reading.
  *
- * Critical OEM constraints:
- * - All TTS API calls must run on the **same** thread that owns the engine
- *   (cross-thread setLanguage/speak often yields silence or ERROR).
- * - Use a dedicated [HandlerThread] for create / language / speak / stop / shutdown.
- * - Set [AudioAttributes] + request audio focus so speech is audible under media routing.
+ * Compatibility notes (ColorOS / OnePlus / many OEMs):
+ * - Create and call TTS **on the main thread** — HandlerThread init often returns
+ *   [TextToSpeech.ERROR] onInit and surfaces as “语音朗读服务不可用”.
+ * - Pin user-selected engine package when set (Google / 讯飞 / …).
+ * - [AudioAttributes] + audio focus so speech is not routed to a silent stream.
  */
 class ReaderTtsController(
     context: Context,
@@ -42,9 +43,7 @@ class ReaderTtsController(
     private val audioManager = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val main = Handler(Looper.getMainLooper())
     private val destroyed = AtomicBoolean(false)
-
-    private val ttsThread = HandlerThread("yuejian-tts").apply { start() }
-    private val ttsHandler = Handler(ttsThread.looper)
+    private val initGeneration = AtomicInteger(0)
 
     private var tts: TextToSpeech? = null
     private var focusRequest: AudioFocusRequest? = null
@@ -55,39 +54,19 @@ class ReaderTtsController(
     @Volatile private var offset: Int = 0
     @Volatile private var speechRate: Float = 1f
     @Volatile private var engineReady = false
-    /** Empty = system default; otherwise pinned engine package (Google / 讯飞 / …). */
     @Volatile private var preferredEnginePackage: String = ""
 
-    /**
-     * @param rate speech rate 0.5…2
-     * @param enginePackage empty for system default, or an installed engine package
-     */
     fun prepare(rate: Float, enginePackage: String = "") {
         speechRate = TtsRate.clamp(rate)
         preferredEnginePackage = TtsEngineCatalog.normalizePackage(enginePackage)
         postState(ReaderTtsState.Preparing)
-        ttsHandler.post { createEngineLocked() }
-    }
-
-    /** Recreate the engine with a new package (stops speech first). */
-    fun switchEngine(enginePackage: String, rate: Float = speechRate) {
-        speaking = false
-        preferredEnginePackage = TtsEngineCatalog.normalizePackage(enginePackage)
-        speechRate = TtsRate.clamp(rate)
-        postState(ReaderTtsState.Preparing)
-        ttsHandler.post {
-            try {
-                tts?.stop()
-            } catch (_: Exception) {
-            }
-            abandonAudioFocusLocked()
-            createEngineLocked()
-        }
+        // Main thread: required for reliable onInit on ColorOS / OxygenOS.
+        main.post { createEngineOnMain() }
     }
 
     fun setSpeechRate(rate: Float) {
         speechRate = TtsRate.clamp(rate)
-        ttsHandler.post {
+        main.post {
             try {
                 tts?.setSpeechRate(speechRate)
             } catch (e: Exception) {
@@ -96,34 +75,44 @@ class ReaderTtsController(
         }
     }
 
-    /**
-     * Start continuous reading of [fullText] from [startOffset].
-     * Returns immediately; actual speak runs on the TTS thread.
-     */
+    fun switchEngine(enginePackage: String, rate: Float = speechRate) {
+        speaking = false
+        preferredEnginePackage = TtsEngineCatalog.normalizePackage(enginePackage)
+        speechRate = TtsRate.clamp(rate)
+        postState(ReaderTtsState.Preparing)
+        main.post {
+            try {
+                tts?.stop()
+            } catch (_: Exception) {
+            }
+            abandonAudioFocus()
+            createEngineOnMain()
+        }
+    }
+
     fun start(fullText: String, startOffset: Int): Boolean {
         if (destroyed.get()) return false
         if (fullText.isEmpty()) return false
         if (!engineReady || tts == null) {
-            // Kick prepare again in case first init failed or is still pending.
-            ttsHandler.post { if (tts == null) createEngineLocked() }
+            main.post { if (tts == null) createEngineOnMain() }
             return false
         }
         body = fullText
         offset = startOffset.coerceIn(0, fullText.length)
         speaking = true
         postState(ReaderTtsState.Speaking)
-        ttsHandler.post { speakNextLocked() }
+        main.post { speakNext() }
         return true
     }
 
     fun stop() {
         speaking = false
-        ttsHandler.post {
+        main.post {
             try {
                 tts?.stop()
             } catch (_: Exception) {
             }
-            abandonAudioFocusLocked()
+            abandonAudioFocus()
             if (!destroyed.get()) {
                 postState(if (engineReady) ReaderTtsState.Ready else ReaderTtsState.Unavailable)
             }
@@ -133,8 +122,8 @@ class ReaderTtsController(
     fun shutdown() {
         destroyed.set(true)
         speaking = false
-        ttsHandler.post {
-            abandonAudioFocusLocked()
+        main.post {
+            abandonAudioFocus()
             try {
                 tts?.stop()
                 tts?.shutdown()
@@ -142,13 +131,13 @@ class ReaderTtsController(
             }
             tts = null
             engineReady = false
-            ttsThread.quitSafely()
         }
     }
 
-    private fun createEngineLocked() {
+    private fun createEngineOnMain() {
         if (destroyed.get()) return
-        // Tear down a half-open instance.
+        check(Looper.myLooper() == Looper.getMainLooper()) { "TTS must init on main" }
+
         try {
             tts?.stop()
             tts?.shutdown()
@@ -157,62 +146,88 @@ class ReaderTtsController(
         tts = null
         engineReady = false
 
-        // User pick first (Google / 讯飞 / …), then system default, then Google as last resort.
-        val packages = ArrayList<String?>(4)
-        val userPick = preferredEnginePackage.trim()
-        if (userPick.isNotEmpty() && TtsEngineCatalog.isPackageInstalled(app, userPick)) {
-            packages.add(userPick)
-        }
-        packages.add(null) // system default constructor
-        val discovered = preferredEnginePackage(app)
-        if (!discovered.isNullOrBlank() && discovered != userPick) {
-            packages.add(discovered)
-        }
-        if (userPick != "com.google.android.tts" &&
-            discovered != "com.google.android.tts" &&
-            TtsEngineCatalog.isPackageInstalled(app, "com.google.android.tts")
-        ) {
-            packages.add("com.google.android.tts")
-        }
-        openEngineWithRetry(packages.distinct())
+        val packages = buildEngineTryOrder()
+        openEngineWithRetry(packages, initGeneration.incrementAndGet())
     }
 
-    /**
-     * Try engine packages in order. [null] means system default constructor.
-     * All callbacks are re-posted onto [ttsHandler] so speak/setLanguage stay single-threaded.
-     */
-    private fun openEngineWithRetry(packages: List<String?>) {
-        if (destroyed.get() || packages.isEmpty()) {
+    private fun buildEngineTryOrder(): List<String?> {
+        val order = ArrayList<String?>()
+        val user = preferredEnginePackage.trim()
+        if (user.isNotEmpty() && TtsEngineCatalog.isPackageInstalled(app, user)) {
+            order.add(user)
+        }
+        // System default (respects phone Settings → 文字转语音).
+        order.add(null)
+        // Every installed engine as fallback (Google, 讯飞, …).
+        for (opt in TtsEngineCatalog.listInstalled(app)) {
+            val pkg = opt.packageName
+            if (pkg.isEmpty()) continue
+            if (pkg == user) continue
+            order.add(pkg)
+        }
+        if (TtsEngineCatalog.isPackageInstalled(app, "com.google.android.tts") &&
+            !order.contains("com.google.android.tts")
+        ) {
+            order.add("com.google.android.tts")
+        }
+        return order.distinct()
+    }
+
+    private fun openEngineWithRetry(packages: List<String?>, generation: Int) {
+        if (destroyed.get() || generation != initGeneration.get()) return
+        if (packages.isEmpty()) {
             engineReady = false
             postState(ReaderTtsState.Unavailable)
+            Log.e(TAG, "all TTS engines failed to init")
             return
         }
         val enginePackage = packages.first()
         val rest = packages.drop(1)
+        Log.i(TAG, "trying TTS engine=${enginePackage ?: "SYSTEM_DEFAULT"} remaining=${rest.size}")
+
         val listener = TextToSpeech.OnInitListener { status ->
-            ttsHandler.post {
-                if (destroyed.get()) return@post
+            main.post {
+                if (destroyed.get() || generation != initGeneration.get()) return@post
                 if (status != TextToSpeech.SUCCESS) {
-                    Log.w(TAG, "onInit status=$status engine=$enginePackage")
+                    Log.w(TAG, "onInit ERROR status=$status engine=$enginePackage")
                     try {
                         tts?.shutdown()
                     } catch (_: Exception) {
                     }
                     tts = null
-                    openEngineWithRetry(rest)
+                    openEngineWithRetry(rest, generation)
                     return@post
                 }
                 val engine = tts
                 if (engine == null) {
-                    openEngineWithRetry(rest)
+                    openEngineWithRetry(rest, generation)
                     return@post
                 }
-                configureEngineLocked(engine)
+                if (!configureEngine(engine)) {
+                    Log.w(TAG, "configure failed, try next engine")
+                    try {
+                        engine.shutdown()
+                    } catch (_: Exception) {
+                    }
+                    tts = null
+                    openEngineWithRetry(rest, generation)
+                    return@post
+                }
                 engineReady = true
                 postState(ReaderTtsState.Ready)
-                Log.i(TAG, "TTS ready defaultEngine=${engine.defaultEngine} pinned=$enginePackage")
+                Log.i(
+                    TAG,
+                    "TTS ready pinned=$enginePackage defaultEngine=${
+                        try {
+                            engine.defaultEngine
+                        } catch (_: Exception) {
+                            "?"
+                        }
+                    }",
+                )
             }
         }
+
         try {
             tts = if (enginePackage.isNullOrEmpty()) {
                 TextToSpeech(app, listener)
@@ -220,69 +235,75 @@ class ReaderTtsController(
                 TextToSpeech(app, listener, enginePackage)
             }
         } catch (e: Exception) {
-            Log.e(TAG, "TextToSpeech create failed package=$enginePackage", e)
+            Log.e(TAG, "create failed engine=$enginePackage", e)
             tts = null
-            openEngineWithRetry(rest)
+            openEngineWithRetry(rest, generation)
         }
     }
 
-    private fun configureEngineLocked(engine: TextToSpeech) {
+    /**
+     * @return false only if the engine is completely unusable for any locale
+     * (we still return true when Chinese is missing but English works — user may
+     * switch engine / install voice data).
+     */
+    private fun configureEngine(engine: TextToSpeech): Boolean {
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                val attrs = AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                    .build()
-                engine.setAudioAttributes(attrs)
-            }
+            val attrs = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build()
+            engine.setAudioAttributes(attrs)
         } catch (e: Exception) {
             Log.w(TAG, "setAudioAttributes failed", e)
         }
 
-        val applied = applyPreferredLanguageLocked(engine)
-        if (!applied) {
-            Log.w(TAG, "no preferred locale; keeping engine default")
+        // Always try to set a language; do not fail init if Chinese data is missing.
+        val langOk = applyPreferredLanguage(engine)
+        if (!langOk) {
+            Log.w(TAG, "no preferred locale applied; engine may still speak default voice")
         }
         try {
             engine.setSpeechRate(speechRate)
             engine.setPitch(1.0f)
         } catch (e: Exception) {
-            Log.w(TAG, "setSpeechRate/pitch failed", e)
+            Log.w(TAG, "rate/pitch failed", e)
         }
-        attachListenerLocked(engine)
+        attachListener(engine)
+        // Probe with a silent empty speak? Skip — some engines error on empty.
+        // Consider engine usable if onInit succeeded.
+        return true
     }
 
-    private fun applyPreferredLanguageLocked(engine: TextToSpeech): Boolean {
+    private fun applyPreferredLanguage(engine: TextToSpeech): Boolean {
         for (locale in TtsLanguagePicker.preferredLocales()) {
             try {
                 val avail = engine.isLanguageAvailable(locale)
                 Log.d(TAG, "isLanguageAvailable($locale)=$avail")
-                // LANG_MISSING_DATA (-1) / NOT_SUPPORTED (-2) are unusable.
-                // Some engines return LANG_COUNTRY_AVAILABLE without voice packs but still speak.
-                if (avail < TextToSpeech.LANG_AVAILABLE && avail != TextToSpeech.LANG_MISSING_DATA) {
-                    // still try setLanguage for MISSING_DATA? No — skip truly unsupported.
-                }
                 if (avail == TextToSpeech.LANG_NOT_SUPPORTED) continue
-                // Try set even for MISSING_DATA on some Chinese engines that report wrong codes.
                 val set = engine.setLanguage(locale)
                 Log.d(TAG, "setLanguage($locale)=$set")
-                if (set >= TextToSpeech.LANG_AVAILABLE) {
-                    return true
-                }
-                // MISSING_DATA: still accept if engine claims success path later via speak.
+                if (set >= TextToSpeech.LANG_AVAILABLE) return true
+                // Some Chinese engines return MISSING_DATA but still speak with network/offline packs.
                 if (set == TextToSpeech.LANG_MISSING_DATA) {
-                    // Keep trying other locales; if none work, default remains.
+                    // Keep as candidate but continue looking for a better match.
                     continue
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "locale $locale failed", e)
             }
         }
-        return false
+        // Last resort: device default locale.
+        return try {
+            val def = Locale.getDefault()
+            engine.setLanguage(def) >= TextToSpeech.LANG_AVAILABLE
+        } catch (_: Exception) {
+            false
+        }
     }
 
-    private fun speakNextLocked() {
+    private fun speakNext() {
         if (!speaking || destroyed.get()) return
+        check(Looper.myLooper() == Looper.getMainLooper())
         val engine = tts
         if (engine == null) {
             speaking = false
@@ -291,7 +312,7 @@ class ReaderTtsController(
         }
         if (offset >= body.length) {
             speaking = false
-            abandonAudioFocusLocked()
+            abandonAudioFocus()
             postState(ReaderTtsState.Ready)
             return
         }
@@ -299,101 +320,73 @@ class ReaderTtsController(
         val end = TtsSpeechChunks.nextChunkEnd(body, start)
         if (end <= start) {
             speaking = false
-            abandonAudioFocusLocked()
+            abandonAudioFocus()
             postState(ReaderTtsState.Ready)
             return
         }
         val chunk = body.substring(start, end).trim()
         offset = end
         if (chunk.isEmpty()) {
-            // Skip whitespace-only slices.
-            speakNextLocked()
+            speakNext()
             return
         }
 
-        main.post {
-            if (!destroyed.get()) onChunkStart(start)
-        }
-
-        if (!requestAudioFocusLocked()) {
-            Log.w(TAG, "audio focus denied — still attempting speak")
-        }
+        if (!destroyed.get()) onChunkStart(start)
+        requestAudioFocus()
 
         try {
+            val utteranceId = "yuejian-$end"
             val params = Bundle().apply {
-                putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "yuejian-$end")
+                putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId)
+                // Ensure music stream routing on older engines.
+                putString(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC.toString())
             }
-            @Suppress("DEPRECATION")
-            val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                engine.speak(chunk, TextToSpeech.QUEUE_FLUSH, params, "yuejian-$end")
-            } else {
-                val map = HashMap<String, String>()
-                map[TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID] = "yuejian-$end"
-                engine.speak(chunk, TextToSpeech.QUEUE_FLUSH, map)
-            }
+            val result = engine.speak(chunk, TextToSpeech.QUEUE_ADD, params, utteranceId)
             if (result == TextToSpeech.ERROR) {
-                Log.w(TAG, "speak ERROR len=${chunk.length}")
-                // Retry once after re-configure language.
-                val retry = trySpeakFallbackLocked(engine, chunk, end)
-                if (!retry) {
+                Log.w(TAG, "speak ERROR, retry FLUSH once")
+                val retry = engine.speak(chunk, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
+                if (retry == TextToSpeech.ERROR) {
                     speaking = false
-                    abandonAudioFocusLocked()
+                    abandonAudioFocus()
                     postState(ReaderTtsState.Unavailable)
                 }
             }
         } catch (e: Exception) {
             Log.w(TAG, "speak failed", e)
             speaking = false
-            abandonAudioFocusLocked()
+            abandonAudioFocus()
             postState(ReaderTtsState.Unavailable)
         }
     }
 
-    private fun trySpeakFallbackLocked(engine: TextToSpeech, chunk: String, end: Int): Boolean {
-        return try {
-            applyPreferredLanguageLocked(engine)
-            engine.setSpeechRate(speechRate)
-            val result = engine.speak(chunk, TextToSpeech.QUEUE_FLUSH, null, "yuejian-retry-$end")
-            result == TextToSpeech.SUCCESS
-        } catch (e: Exception) {
-            Log.w(TAG, "fallback speak failed", e)
-            false
-        }
-    }
-
-    private fun attachListenerLocked(engine: TextToSpeech) {
+    private fun attachListener(engine: TextToSpeech) {
         try {
             engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {}
 
                 override fun onDone(utteranceId: String?) {
-                    ttsHandler.post {
+                    main.post {
                         if (!speaking || destroyed.get()) return@post
-                        speakNextLocked()
+                        speakNext()
                     }
                 }
 
                 @Deprecated("Deprecated in Java")
                 override fun onError(utteranceId: String?) {
-                    ttsHandler.post {
+                    main.post {
                         Log.w(TAG, "utterance error id=$utteranceId")
                         speaking = false
-                        abandonAudioFocusLocked()
-                        if (!destroyed.get()) {
-                            postState(ReaderTtsState.Ready)
-                        }
+                        abandonAudioFocus()
+                        if (!destroyed.get()) postState(ReaderTtsState.Ready)
                     }
                 }
 
                 override fun onError(utteranceId: String?, errorCode: Int) {
-                    ttsHandler.post {
+                    main.post {
                         Log.w(TAG, "utterance error id=$utteranceId code=$errorCode")
                         speaking = false
-                        abandonAudioFocusLocked()
-                        if (!destroyed.get()) {
-                            // Don't mark Unavailable on a single chunk error — allow retry.
-                            postState(ReaderTtsState.Ready)
-                        }
+                        abandonAudioFocus()
+                        if (!destroyed.get()) postState(ReaderTtsState.Ready)
                     }
                 }
             })
@@ -402,9 +395,9 @@ class ReaderTtsController(
         }
     }
 
-    private fun requestAudioFocusLocked(): Boolean {
-        if (hasAudioFocus) return true
-        return try {
+    private fun requestAudioFocus() {
+        if (hasAudioFocus) return
+        try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
                     .setAudioAttributes(
@@ -416,26 +409,22 @@ class ReaderTtsController(
                     .setOnAudioFocusChangeListener { }
                     .build()
                 focusRequest = req
-                val r = audioManager.requestAudioFocus(req)
-                hasAudioFocus = r == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-                hasAudioFocus
+                hasAudioFocus =
+                    audioManager.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
             } else {
                 @Suppress("DEPRECATION")
-                val r = audioManager.requestAudioFocus(
+                hasAudioFocus = audioManager.requestAudioFocus(
                     null,
                     AudioManager.STREAM_MUSIC,
                     AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK,
-                )
-                hasAudioFocus = r == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-                hasAudioFocus
+                ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
             }
         } catch (e: Exception) {
             Log.w(TAG, "requestAudioFocus failed", e)
-            false
         }
     }
 
-    private fun abandonAudioFocusLocked() {
+    private fun abandonAudioFocus() {
         if (!hasAudioFocus) return
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -459,23 +448,17 @@ class ReaderTtsController(
     companion object {
         private const val TAG = "YueJianReaderTts"
 
-        /**
-         * Prefer a known working TTS package when the system default is missing/broken.
-         * Pure package-name resolution — no speak calls.
-         */
         fun preferredEnginePackage(context: Context): String? {
-            // Secure setting (may be null).
             try {
                 val secure = android.provider.Settings.Secure.getString(
                     context.contentResolver,
                     "tts_default_synth",
                 )
-                if (!secure.isNullOrBlank() && isPackageInstalled(context, secure)) {
+                if (!secure.isNullOrBlank() && TtsEngineCatalog.isPackageInstalled(context, secure)) {
                     return secure
                 }
             } catch (_: Exception) {
             }
-            // Query engines via intent.
             try {
                 val pm = context.packageManager
                 val intent = Intent(TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE)
@@ -486,34 +469,12 @@ class ReaderTtsController(
                     pm.queryIntentServices(intent, 0)
                 }
                 for (info in services) {
-                    val pkg = info.serviceInfo?.packageName ?: continue
-                    if (pkg.isNotBlank()) return pkg
+                    val pkg = info.serviceInfo?.packageName
+                    if (!pkg.isNullOrBlank()) return pkg
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "query TTS engines failed", e)
-            }
-            // Common packages.
-            val candidates = listOf(
-                "com.google.android.tts",
-                "com.samsung.SMT",
-                "com.iflytek.speechsuite",
-                "com.iflytek.inputmethod.tts",
-                "com.huawei.voiceservice",
-                "com.github.olga_yakovleva.rhvoice.android",
-            )
-            for (pkg in candidates) {
-                if (isPackageInstalled(context, pkg)) return pkg
+            } catch (_: Exception) {
             }
             return null
-        }
-
-        fun isPackageInstalled(context: Context, packageName: String): Boolean {
-            return try {
-                context.packageManager.getPackageInfo(packageName, 0)
-                true
-            } catch (_: Exception) {
-                false
-            }
         }
     }
 }

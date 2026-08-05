@@ -724,9 +724,11 @@ fun ReaderScreen(
                 // Prefer full body when loaded; progressive window still speaks what we have.
                 val started = ctrl?.start(book.text, currentReadingOffset()) == true
                 if (!started) {
+                    // Engine not ready or speak rejected — offer engine picker.
+                    showTtsEngineDialog = true
                     Toast.makeText(
                         context,
-                        context.getString(R.string.reader_tts_unavailable),
+                        context.getString(R.string.reader_tts_pick_engine_hint),
                         Toast.LENGTH_SHORT,
                     ).show()
                 } else {
@@ -740,10 +742,13 @@ fun ReaderScreen(
                     context.getString(R.string.reader_tts_preparing_toast),
                     Toast.LENGTH_SHORT,
                 ).show()
+                // Let user pick Google / 国产 while init finishes.
+                showTtsEngineDialog = true
             }
             ReaderTtsState.Unavailable -> {
-                // Re-prepare with the user's chosen engine, then ask them to tap again.
+                // Re-prepare and open engine picker (Google / 国产) so user can switch.
                 ctrl?.prepare(TtsRate.clamp(ttsRate), ttsEnginePackage)
+                showTtsEngineDialog = true
                 Toast.makeText(
                     context,
                     context.getString(R.string.reader_tts_unavailable),
