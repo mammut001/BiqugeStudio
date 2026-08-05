@@ -3,6 +3,29 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- TTS playback may request transient audio focus on media stream. -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!--
+      Android 11+ package visibility: without this, queryIntentServices(TTS_SERVICE)
+      returns empty and the in-app engine picker cannot show Google / 讯飞 / etc.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+        <package android:name="com.google.android.tts" />
+        <package android:name="com.iflytek.speechsuite" />
+        <package android:name="com.iflytek.inputmethod.tts" />
+        <package android:name="com.iflytek.vflynote" />
+        <package android:name="com.samsung.SMT" />
+        <package android:name="com.huawei.voiceservice" />
+        <package android:name="com.huawei.voiceengine" />
+        <package android:name="com.xiaomi.mibrain.speech" />
+        <package android:name="com.coloros.tts" />
+        <package android:name="com.heytap.speechassist" />
+        <package android:name="com.oplus.tts" />
+        <package android:name="com.oppo.tts" />
+        <package android:name="com.oneplus.speech" />
+        <package android:name="com.baidu.duersdk.opensdk" />
+    </queries>
     <application
         android:allowBackup="true"
         android:fullBackupContent="@xml/backup_rules"

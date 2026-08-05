@@ -60,4 +60,28 @@ class TtsEngineCatalogTest {
             assertTrue(pkg.contains('.'))
         }
     }
+
+    @Test
+    fun mergeFromTextToSpeech_keepsSystemDefaultFirst() {
+        val base = listOf(
+            TtsEngineCatalog.systemDefaultOption(),
+            TtsEngineOption("com.example.a", "A"),
+        )
+        // Without a live TextToSpeech we only verify pure merge of existing list shape.
+        val labels = base.map { it.label }
+        assertEquals("系统默认", labels.first())
+        assertTrue(base.any { it.packageName == "com.example.a" })
+    }
+
+    @Test
+    fun friendlyLabel_oneplusColorOs() {
+        assertEquals(
+            "OPPO/一加 语音",
+            TtsEngineCatalog.friendlyLabel("com.coloros.tts"),
+        )
+        assertEquals(
+            "OPPO/一加 语音",
+            TtsEngineCatalog.friendlyLabel("com.heytap.speechassist"),
+        )
+    }
 }

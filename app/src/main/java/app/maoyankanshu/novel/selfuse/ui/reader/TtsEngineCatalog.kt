@@ -60,7 +60,8 @@ object TtsEngineCatalog {
 
     /**
      * Installed engines on this device, always starting with system default.
-     * Safe to call off the main thread (PackageManager only).
+     * Uses PackageManager + known packages. For a complete list, also call
+     * [mergeFromTextToSpeech] after a live [TextToSpeech] is ready ([getEngines]).
      */
     fun listInstalled(context: Context): List<TtsEngineOption> {
         val app = context.applicationContext
@@ -68,6 +69,18 @@ object TtsEngineCatalog {
         out.add(systemDefaultOption())
         val seen = HashSet<String>()
         seen.add(SYSTEM_DEFAULT_PACKAGE)
+
+        // System preferred engine (Settings → 文字转语音), even if query misses it.
+        try {
+            val secure = android.provider.Settings.Secure.getString(
+                app.contentResolver,
+                "tts_default_synth",
+            )?.trim().orEmpty()
+            if (secure.isNotEmpty() && seen.add(secure) && isPackageInstalled(app, secure)) {
+                out.add(TtsEngineOption(secure, friendlyLabel(secure, null)))
+            }
+        } catch (_: Exception) {
+        }
 
         try {
             val pm = app.packageManager
@@ -97,6 +110,43 @@ object TtsEngineCatalog {
             if (!seen.add(pkg)) continue
             if (!isPackageInstalled(app, pkg)) continue
             out.add(TtsEngineOption(pkg, friendlyLabel(pkg, null)))
+        }
+        return out
+    }
+
+    /**
+     * Merge engines reported by a live [TextToSpeech.getEngines] instance
+     * (most complete list once the engine has initialized).
+     */
+    fun mergeFromTextToSpeech(
+        existing: List<TtsEngineOption>,
+        tts: TextToSpeech,
+    ): List<TtsEngineOption> {
+        val out = ArrayList<TtsEngineOption>()
+        val seen = HashSet<String>()
+        out.add(systemDefaultOption())
+        seen.add(SYSTEM_DEFAULT_PACKAGE)
+        for (opt in existing) {
+            if (opt.packageName.isEmpty()) continue
+            if (seen.add(opt.packageName)) out.add(opt)
+        }
+        try {
+            val engines = tts.engines ?: emptyList()
+            for (info in engines) {
+                val pkg = info.name?.trim().orEmpty()
+                if (pkg.isEmpty() || !seen.add(pkg)) continue
+                out.add(TtsEngineOption(pkg, friendlyLabel(pkg, info.label)))
+            }
+            // Surface the active default engine even if not in getEngines (rare).
+            val def = try {
+                tts.defaultEngine?.trim().orEmpty()
+            } catch (_: Exception) {
+                ""
+            }
+            if (def.isNotEmpty() && seen.add(def)) {
+                out.add(TtsEngineOption(def, friendlyLabel(def, null)))
+            }
+        } catch (_: Exception) {
         }
         return out
     }

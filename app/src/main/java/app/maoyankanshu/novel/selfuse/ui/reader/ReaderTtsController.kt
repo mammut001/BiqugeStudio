@@ -38,6 +38,8 @@ class ReaderTtsController(
     context: Context,
     private val onState: (ReaderTtsState) -> Unit,
     private val onChunkStart: (offset: Int) -> Unit = {},
+    /** Fired on main when engine list is refreshed via [TextToSpeech.getEngines]. */
+    private val onEnginesDiscovered: (List<TtsEngineOption>) -> Unit = {},
 ) {
     private val app = context.applicationContext
     private val audioManager = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager

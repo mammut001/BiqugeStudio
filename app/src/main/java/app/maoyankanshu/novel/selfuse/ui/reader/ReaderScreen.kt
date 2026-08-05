@@ -639,6 +639,9 @@ fun ReaderScreen(
             context = context,
             onState = { ttsState = it },
             onChunkStart = { off -> ttsChunkJump.value(off) },
+            onEnginesDiscovered = { list ->
+                if (list.isNotEmpty()) ttsEngines = list
+            },
         )
         ttsController = ctrl
         ctrl.prepare(
@@ -652,6 +655,7 @@ fun ReaderScreen(
     }
 
     // Load installed engines (Google / 讯飞 / …) for the picker.
+    // Requires manifest <queries> for TTS_SERVICE (Android 11+ package visibility).
     LaunchedEffect(Unit) {
         ttsEngines = withContext(Dispatchers.Default) {
             TtsEngineCatalog.listInstalled(context)
