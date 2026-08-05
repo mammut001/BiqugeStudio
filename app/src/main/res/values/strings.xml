@@ -312,8 +312,8 @@
     <string name="reader_tts_stop">停止</string>
     <string name="reader_tts_cd">朗读当前页起正文</string>
     <string name="reader_tts_stop_cd">停止朗读</string>
-    <string name="reader_tts_unavailable">朗读引擎不可用。请长按喇叭选择 Google 或其它已安装引擎，或到系统 TTS 设置安装中文语音</string>
-    <string name="reader_tts_pick_engine_hint">请选择一个可用的朗读引擎</string>
+    <string name="reader_tts_unavailable">朗读引擎不可用。请长按喇叭选「系统默认」或本机已装引擎；一加等国行机通常是 ColorOS 系统语音，不一定有 Google</string>
+    <string name="reader_tts_pick_engine_hint">请选择一个可用的朗读引擎（无 Google 时选系统默认即可）</string>
     <string name="reader_tts_body_not_ready">正文仍在打开，请稍候再朗读</string>
     <string name="reader_tts_preparing_toast">朗读引擎准备中，请稍候</string>
     <string name="reader_tts_rate_title">朗读语速</string>
@@ -325,7 +325,8 @@
     <string name="reader_tts_engine_pick_title">选择朗读引擎</string>
     <string name="reader_tts_engine_open_settings">打开系统 TTS 设置</string>
     <string name="reader_tts_engine_switching">正在切换引擎…</string>
-    <string name="reader_tts_engine_empty">未检测到可用引擎，请到系统设置安装语音数据</string>
+    <string name="reader_tts_engine_empty">未检测到额外引擎。请先点「系统默认」试听；仍无声再到系统 TTS 设置检查语音数据</string>
+    <string name="reader_tts_engine_no_google">本机未安装 Google 文字转语音（一加/ColorOS 国行很常见）。下方「系统默认」或「一加/ColorOS 系统语音」就是设置里能用的那个。若一定要 Google，可到应用商店搜索安装「Google 文字转语音」后再回来选。</string>
     <string name="reader_auto_page_turn_title">自动翻页</string>
     <string name="reader_auto_page_turn_label">间隔 %1$s</string>
     <string name="reader_auto_page_turn_cd">自动翻页间隔</string>

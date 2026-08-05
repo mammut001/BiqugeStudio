@@ -19,6 +19,8 @@
         <package android:name="com.huawei.voiceservice" />
         <package android:name="com.huawei.voiceengine" />
         <package android:name="com.xiaomi.mibrain.speech" />
+        <!-- OnePlus PKG110 / ColorOS stock TTS (not Google) -->
+        <package android:name="com.oplus.ttsaccessibilityengine" />
         <package android:name="com.coloros.tts" />
         <package android:name="com.heytap.speechassist" />
         <package android:name="com.oplus.tts" />

@@ -217,6 +217,16 @@ class ReaderTtsController(
                 }
                 engineReady = true
                 postState(ReaderTtsState.Ready)
+                // Publish full engine list (getEngines is complete only after live TTS).
+                try {
+                    val merged = TtsEngineCatalog.mergeFromTextToSpeech(
+                        TtsEngineCatalog.listInstalled(app),
+                        engine,
+                    )
+                    onEnginesDiscovered(merged)
+                } catch (e: Exception) {
+                    Log.w(TAG, "engines discover failed", e)
+                }
                 Log.i(
                     TAG,
                     "TTS ready pinned=$enginePackage defaultEngine=${

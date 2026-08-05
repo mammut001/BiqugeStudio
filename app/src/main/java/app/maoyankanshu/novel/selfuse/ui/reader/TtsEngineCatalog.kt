@@ -34,8 +34,11 @@ object TtsEngineCatalog {
         if (packageName.isEmpty()) return "系统默认"
         val p = packageName.lowercase()
         val mapped = when {
-            p.contains("google") && p.contains("tts") -> "Google 文字转语音"
-            p == "com.google.android.tts" -> "Google 文字转语音"
+            p == "com.google.android.tts" ||
+                (p.contains("google") && p.contains("tts")) -> "Google 文字转语音"
+            // ColorOS / OnePlus stock engine (PKG110 ships this, not Google).
+            p == "com.oplus.ttsaccessibilityengine" ||
+                p.contains("ttsaccessibility") -> "一加/ColorOS 系统语音"
             p.contains("iflytek") || p.contains("xfyun") || p.contains("speechcloud") -> "讯飞语音"
             p.contains("samsung") || p.contains(".smt") || p.endsWith(".smt") -> "三星语音"
             p.contains("huawei") || p.contains("harmony") -> "华为语音"
@@ -57,6 +60,10 @@ object TtsEngineCatalog {
         // Last segment of package as fallback.
         return packageName.substringAfterLast('.').ifEmpty { packageName }
     }
+
+    /** True when Google TTS APK is present (many CN ColorOS devices ship without it). */
+    fun isGoogleTtsInstalled(context: Context): Boolean =
+        isPackageInstalled(context, "com.google.android.tts")
 
     /**
      * Installed engines on this device, always starting with system default.
@@ -162,7 +169,8 @@ object TtsEngineCatalog {
         "com.huawei.voiceengine",
         "com.xiaomi.mibrain.speech",
         "com.baidu.duersdk.opensdk",
-        // ColorOS / OnePlus / OPPO
+        // ColorOS / OnePlus / OPPO — stock TTS on PKG110 is ttsaccessibilityengine
+        "com.oplus.ttsaccessibilityengine",
         "com.coloros.tts",
         "com.heytap.speechassist",
         "com.oplus.tts",
@@ -174,7 +182,13 @@ object TtsEngineCatalog {
     fun isPackageInstalled(context: Context, packageName: String): Boolean {
         if (packageName.isEmpty()) return true
         return try {
-            context.packageManager.getPackageInfo(packageName, 0)
+            val pm = context.packageManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getPackageInfo(packageName, 0)
+            }
             true
         } catch (_: Exception) {
             false

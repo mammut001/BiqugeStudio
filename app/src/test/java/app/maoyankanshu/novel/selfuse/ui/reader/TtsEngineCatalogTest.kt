@@ -83,5 +83,16 @@ class TtsEngineCatalogTest {
             "OPPO/一加 语音",
             TtsEngineCatalog.friendlyLabel("com.heytap.speechassist"),
         )
+        assertEquals(
+            "一加/ColorOS 系统语音",
+            TtsEngineCatalog.friendlyLabel("com.oplus.ttsaccessibilityengine"),
+        )
+    }
+
+    @Test
+    fun knownPackages_includesOplusStockTts() {
+        assertTrue(
+            TtsEngineCatalog.knownPackages().contains("com.oplus.ttsaccessibilityengine"),
+        )
     }
 }

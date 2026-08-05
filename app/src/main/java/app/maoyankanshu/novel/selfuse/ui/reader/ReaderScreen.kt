@@ -654,9 +654,10 @@ fun ReaderScreen(
         }
     }
 
-    // Load installed engines (Google / 讯飞 / …) for the picker.
+    // Load installed engines (Oplus / Google / 讯飞 / …) for the picker.
     // Requires manifest <queries> for TTS_SERVICE (Android 11+ package visibility).
-    LaunchedEffect(Unit) {
+    // Also refresh when the engine dialog opens so the list is never stale.
+    LaunchedEffect(showTtsEngineDialog) {
         ttsEngines = withContext(Dispatchers.Default) {
             TtsEngineCatalog.listInstalled(context)
         }
@@ -1755,11 +1756,20 @@ fun ReaderScreen(
         val engines = ttsEngines.ifEmpty {
             listOf(TtsEngineCatalog.systemDefaultOption())
         }
+        val googleInstalled = TtsEngineCatalog.isGoogleTtsInstalled(context)
         AlertDialog(
             onDismissRequest = { showTtsEngineDialog = false },
             title = { Text(stringResource(R.string.reader_tts_engine_pick_title)) },
             text = {
                 Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    if (!googleInstalled) {
+                        Text(
+                            text = stringResource(R.string.reader_tts_engine_no_google),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    }
                     if (engines.size <= 1) {
                         Text(
                             text = stringResource(R.string.reader_tts_engine_empty),
