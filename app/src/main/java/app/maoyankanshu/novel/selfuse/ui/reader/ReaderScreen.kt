@@ -698,7 +698,7 @@ fun ReaderScreen(
         when (ttsState) {
             ReaderTtsState.Speaking -> ctrl?.stop()
             ReaderTtsState.Ready -> {
-                if (!textFullyLoaded && book.text.isEmpty()) {
+                if (book.text.isEmpty()) {
                     Toast.makeText(
                         context,
                         context.getString(R.string.reader_tts_body_not_ready),
@@ -706,6 +706,7 @@ fun ReaderScreen(
                     ).show()
                     return
                 }
+                // Prefer full body when loaded; progressive window still speaks what we have.
                 val started = ctrl?.start(book.text, currentReadingOffset()) == true
                 if (!started) {
                     Toast.makeText(
@@ -713,6 +714,9 @@ fun ReaderScreen(
                         context.getString(R.string.reader_tts_unavailable),
                         Toast.LENGTH_SHORT,
                     ).show()
+                } else {
+                    // Hide chrome so taps don't fight TTS; user can show again if needed.
+                    menuVisible = false
                 }
             }
             ReaderTtsState.Preparing -> {
@@ -723,10 +727,12 @@ fun ReaderScreen(
                 ).show()
             }
             ReaderTtsState.Unavailable -> {
+                // Re-prepare then ask user to tap again shortly.
+                ctrl?.prepare(TtsRate.clamp(ttsRate))
                 Toast.makeText(
                     context,
                     context.getString(R.string.reader_tts_unavailable),
-                    Toast.LENGTH_SHORT,
+                    Toast.LENGTH_LONG,
                 ).show()
             }
         }
