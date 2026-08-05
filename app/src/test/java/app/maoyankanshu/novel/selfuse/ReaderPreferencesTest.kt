@@ -176,6 +176,20 @@ class ReaderPreferencesTest {
     }
 
     @Test
+    fun autoPageTurnSec_defaultOffAndClamp() {
+        val prefs = TestSharedPreferences()
+        val readerPrefs = ReaderPreferences.get(prefs)
+
+        assertEquals(0, readerPrefs.autoPageTurnSec())
+        readerPrefs.setAutoPageTurnSec(30)
+        assertEquals(30, readerPrefs.autoPageTurnSec())
+        readerPrefs.setAutoPageTurnSec(-3)
+        assertEquals(0, readerPrefs.autoPageTurnSec())
+        readerPrefs.setAutoPageTurnSec(999)
+        assertEquals(300, readerPrefs.autoPageTurnSec())
+    }
+
+    @Test
     fun fontFamily_keepScreenOn_volumePageTurn_defaultsAndClamp() {
         val prefs = TestSharedPreferences()
         val readerPrefs = ReaderPreferences.get(prefs)

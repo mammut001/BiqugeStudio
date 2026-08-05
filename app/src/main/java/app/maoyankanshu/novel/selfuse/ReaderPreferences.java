@@ -25,6 +25,8 @@ public final class ReaderPreferences {
     private static final String AUTO_NIGHT_START = "reader_auto_night_start";
     private static final String AUTO_NIGHT_END = "reader_auto_night_end";
     private static final String CUSTOM_FONT_NAME = "reader_custom_font_name";
+    /** Auto page-turn interval in seconds; 0 = off. */
+    private static final String AUTO_PAGE_TURN_SEC = "reader_auto_page_turn_sec";
 
     // ── Themes (stable ints — never reorder existing values) ───────────────
     public static final int THEME_PAPER = 0;
@@ -134,6 +136,19 @@ public final class ReaderPreferences {
 
     public void setTtsRate(float rate) {
         prefs.edit().putFloat(TTS_RATE, Math.max(.5f, Math.min(2f, rate))).apply();
+    }
+
+    /**
+     * Seconds between automatic page turns while reading (0 = off).
+     * Replaces legacy continuous pixel auto-scroll with Kindle-style timed paging.
+     */
+    public int autoPageTurnSec() {
+        if (!prefs.contains(AUTO_PAGE_TURN_SEC)) return 0;
+        return Math.max(0, Math.min(300, prefs.getInt(AUTO_PAGE_TURN_SEC, 0)));
+    }
+
+    public void setAutoPageTurnSec(int seconds) {
+        prefs.edit().putInt(AUTO_PAGE_TURN_SEC, Math.max(0, Math.min(300, seconds))).apply();
     }
 
     /**

@@ -13,11 +13,13 @@ They do **not** assert a Google Play ship date, store listing URL, or remote CI 
 
 ### Added
 
-- Compose 阅读页内系统 TTS（`ReaderTtsController`）；喇叭短按朗读/停止。
+- Compose 阅读页内系统 TTS（`ReaderTtsController`）；喇叭短按朗读/停止；长按调语速。
+- 外观：朗读语速预设（0.75×–1.5×）；自动翻页间隔（关 / 12s–60s）。
+- 页脚显示电量（含充电标记）；正文与页脚间距、末行防裁切。
 
 ### Changed
 
-- **移除** `LegacyReaderActivity`（经典朗读 / 自动滚动兼容界面）及所有入口。
+- **移除** `LegacyReaderActivity`（经典朗读 / 自动滚动兼容界面）及所有入口；自动翻页改为按页计时。
 
 ### Fixed
 

@@ -1,5 +1,10 @@
 package app.maoyankanshu.novel.selfuse.ui.reader
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.BatteryManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -10,8 +15,10 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
@@ -115,6 +122,7 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import kotlin.math.roundToInt
 import app.maoyankanshu.novel.selfuse.Book
 import app.maoyankanshu.novel.selfuse.BookmarkStore
@@ -136,7 +144,7 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
 
-@OptIn(ExperimentalMaterial3Api::class, FlowPreview::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class, FlowPreview::class)
 @Composable
 fun ReaderScreen(
     book: Book,
@@ -181,6 +189,10 @@ fun ReaderScreen(
     // In-page system TTS (no jump to legacy UI). Same engine family as Accessibility.
     var ttsState by remember { mutableStateOf(ReaderTtsState.Preparing) }
     var ttsRate by remember { mutableFloatStateOf(TtsRate.clamp(preferences.ttsRate())) }
+    var showTtsRateDialog by remember { mutableStateOf(false) }
+    var autoPageTurnSec by remember { mutableIntStateOf(preferences.autoPageTurnSec()) }
+    var batteryPercent by remember { mutableIntStateOf(-1) }
+    var batteryCharging by remember { mutableStateOf(false) }
     var menuVisible by remember { mutableStateOf(false) }
     var showToc by remember { mutableStateOf(false) }
     var showBookmarks by remember { mutableStateOf(false) }
@@ -631,6 +643,56 @@ fun ReaderScreen(
         }
     }
 
+    // Battery for Kindle-style footer (sticky + change broadcasts).
+    DisposableEffect(Unit) {
+        fun applyBattery(intent: Intent?) {
+            if (intent == null) return
+            val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+            val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
+            batteryPercent = if (level < 0) -1 else ((level * 100f) / scale).toInt().coerceIn(0, 100)
+            val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+            batteryCharging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                status == BatteryManager.BATTERY_STATUS_FULL
+        }
+        val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+        val sticky = ContextCompat.registerReceiver(
+            context,
+            null,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+        applyBattery(sticky)
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(c: Context?, intent: Intent?) = applyBattery(intent)
+        }
+        ContextCompat.registerReceiver(
+            context,
+            receiver,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+        onDispose {
+            try {
+                context.unregisterReceiver(receiver)
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    // Timed auto page-turn (paused when chrome open or TTS is speaking).
+    LaunchedEffect(autoPageTurnSec, menuVisible, ttsState, pageCount) {
+        val delayMs = AutoPageTurn.delayMs(autoPageTurnSec)
+        if (delayMs <= 0L) return@LaunchedEffect
+        while (true) {
+            delay(delayMs)
+            if (menuVisible) continue
+            if (ttsState == ReaderTtsState.Speaking) continue
+            val next = PageIndex.stepPage(pagerState.currentPage, pageCount, 1)
+            if (next == pagerState.currentPage) break
+            animateToPage(next)
+        }
+    }
+
     fun toggleInPageTts() {
         val ctrl = ttsController
         when (ttsState) {
@@ -876,20 +938,26 @@ fun ReaderScreen(
                 val pageLocation = PageLayout.pageLocationLabel(pagerState.currentPage, pageCount)
                 val pageLocationCd = stringResource(R.string.reader_page_location_cd, pageNum, pageTotal)
                 val progressCd = stringResource(R.string.reader_progress_cd, percent)
+                val batteryText = ReaderFooterFormat.batteryLabel(batteryPercent, batteryCharging)
+                val batteryCd = ReaderFooterFormat.batteryContentDescription(
+                    batteryPercent,
+                    batteryCharging,
+                )
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 10.dp)
                         .semantics {
-                            contentDescription = "$pageLocationCd，$progressCd"
+                            contentDescription = "$pageLocationCd，$progressCd，$batteryCd"
                         },
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = clock,
+                        text = "$clock · $batteryText",
                         color = palette.muted,
                         style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
                     )
                     // Kindle-style page location + explicit percent.
                     Text(
@@ -975,10 +1043,15 @@ fun ReaderScreen(
                     ) {
                         Icon(Icons.AutoMirrored.Filled.List, contentDescription = null)
                     }
-                    IconButton(
-                        onClick = { toggleInPageTts() },
+                    // Tap: TTS start/stop. Long-press: speech rate presets.
+                    Box(
                         modifier = Modifier
                             .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                            .combinedClickable(
+                                role = Role.Button,
+                                onClick = { toggleInPageTts() },
+                                onLongClick = { showTtsRateDialog = true },
+                            )
                             .semantics {
                                 contentDescription = if (ttsState == ReaderTtsState.Speaking) {
                                     ttsStopCd
@@ -986,6 +1059,7 @@ fun ReaderScreen(
                                     ttsCd
                                 }
                             },
+                        contentAlignment = Alignment.Center,
                     ) {
                         Icon(
                             imageVector = if (ttsState == ReaderTtsState.Speaking) {
@@ -994,6 +1068,7 @@ fun ReaderScreen(
                                 Icons.AutoMirrored.Filled.VolumeUp
                             },
                             contentDescription = null,
+                            tint = palette.onBar,
                         )
                     }
                 },
@@ -1456,6 +1531,7 @@ fun ReaderScreen(
             autoNightStartHour = preferences.autoNightStartHour(),
             autoNightEndHour = preferences.autoNightEndHour(),
             ttsRate = ttsRate,
+            autoPageTurnSec = autoPageTurnSec,
             onDismiss = { showAppearance = false },
             onTheme = { value ->
                 val t = clampReaderTheme(value)
@@ -1562,6 +1638,50 @@ fun ReaderScreen(
                 ttsRate = clamped
                 preferences.setTtsRate(clamped)
                 ttsController?.setSpeechRate(clamped)
+            },
+            onAutoPageTurnSec = { sec ->
+                autoPageTurnSec = AutoPageTurn.clampSec(sec)
+                preferences.setAutoPageTurnSec(autoPageTurnSec)
+            },
+        )
+    }
+
+    if (showTtsRateDialog) {
+        AlertDialog(
+            onDismissRequest = { showTtsRateDialog = false },
+            title = { Text(stringResource(R.string.reader_tts_rate_dialog_title)) },
+            text = {
+                Column {
+                    TtsRate.PRESETS.forEach { preset ->
+                        val selected = TtsRate.isPresetSelected(ttsRate, preset)
+                        val label = TtsRate.label(preset)
+                        Text(
+                            text = if (selected) "● $label" else "○ $label",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .defaultMinSize(minHeight = 48.dp)
+                                .clickable {
+                                    val clamped = TtsRate.clamp(preset)
+                                    ttsRate = clamped
+                                    preferences.setTtsRate(clamped)
+                                    ttsController?.setSpeechRate(clamped)
+                                    showTtsRateDialog = false
+                                }
+                                .padding(vertical = 12.dp),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = if (selected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showTtsRateDialog = false }) {
+                    Text(stringResource(R.string.reader_close))
+                }
             },
         )
     }
@@ -1874,6 +1994,7 @@ private fun AppearanceDialog(
     autoNightStartHour: Int,
     autoNightEndHour: Int,
     ttsRate: Float,
+    autoPageTurnSec: Int,
     onDismiss: () -> Unit,
     onTheme: (Int) -> Unit,
     onFontSize: (Int) -> Unit,
@@ -1889,6 +2010,7 @@ private fun AppearanceDialog(
     onParagraphIndent: (Boolean) -> Unit,
     onAutoNight: (Boolean) -> Unit,
     onTtsRate: (Float) -> Unit,
+    onAutoPageTurnSec: (Int) -> Unit,
 ) {
     val selectedSuffix = stringResource(R.string.reader_selected_suffix)
     val themeLabels = mapOf(
@@ -2211,6 +2333,51 @@ private fun AppearanceDialog(
                                 .semantics {
                                     contentDescription =
                                         label + if (selected) selectedSuffix else ""
+                                },
+                        ) {
+                            Text(
+                                text = label,
+                                color = if (selected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.reader_auto_page_turn_title),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    text = stringResource(
+                        R.string.reader_auto_page_turn_label,
+                        AutoPageTurn.label(autoPageTurnSec),
+                    ),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                val autoPageTurnCdPrefix = stringResource(R.string.reader_auto_page_turn_cd)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier
+                        .padding(top = 4.dp)
+                        .horizontalScroll(rememberScrollState()),
+                ) {
+                    AutoPageTurn.PRESETS_SEC.forEach { preset ->
+                        val selected = AutoPageTurn.isPresetSelected(autoPageTurnSec, preset)
+                        val label = AutoPageTurn.label(preset)
+                        TextButton(
+                            onClick = { onAutoPageTurnSec(preset) },
+                            modifier = Modifier
+                                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                .semantics {
+                                    contentDescription =
+                                        "$autoPageTurnCdPrefix $label" +
+                                            if (selected) selectedSuffix else ""
                                 },
                         ) {
                             Text(

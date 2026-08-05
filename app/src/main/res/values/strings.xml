@@ -317,6 +317,11 @@
     <string name="reader_tts_preparing_toast">朗读引擎准备中，请稍候</string>
     <string name="reader_tts_rate_title">朗读语速</string>
     <string name="reader_tts_rate_label">当前 %1$s</string>
+    <string name="reader_tts_rate_dialog_title">朗读语速</string>
+    <string name="reader_auto_page_turn_title">自动翻页</string>
+    <string name="reader_auto_page_turn_label">间隔 %1$s</string>
+    <string name="reader_auto_page_turn_cd">自动翻页间隔</string>
+    <string name="reader_battery_cd">电量</string>
     <string name="reader_open_loading">正在打开…</string>
     <string name="reader_open_failed">无法打开本书</string>
     <string name="reader_find_loading">查找中…</string>
