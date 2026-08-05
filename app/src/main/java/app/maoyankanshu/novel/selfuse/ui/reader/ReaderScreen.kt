@@ -189,7 +189,12 @@ fun ReaderScreen(
     // In-page system TTS (no jump to legacy UI). Same engine family as Accessibility.
     var ttsState by remember { mutableStateOf(ReaderTtsState.Preparing) }
     var ttsRate by remember { mutableFloatStateOf(TtsRate.clamp(preferences.ttsRate())) }
+    var ttsEnginePackage by remember {
+        mutableStateOf(TtsEngineCatalog.normalizePackage(preferences.ttsEnginePackage()))
+    }
+    var ttsEngines by remember { mutableStateOf<List<TtsEngineOption>>(emptyList()) }
     var showTtsRateDialog by remember { mutableStateOf(false) }
+    var showTtsEngineDialog by remember { mutableStateOf(false) }
     var autoPageTurnSec by remember { mutableIntStateOf(preferences.autoPageTurnSec()) }
     var batteryPercent by remember { mutableIntStateOf(-1) }
     var batteryCharging by remember { mutableStateOf(false) }
@@ -636,10 +641,20 @@ fun ReaderScreen(
             onChunkStart = { off -> ttsChunkJump.value(off) },
         )
         ttsController = ctrl
-        ctrl.prepare(TtsRate.clamp(preferences.ttsRate()))
+        ctrl.prepare(
+            rate = TtsRate.clamp(preferences.ttsRate()),
+            enginePackage = TtsEngineCatalog.normalizePackage(preferences.ttsEnginePackage()),
+        )
         onDispose {
             ctrl.shutdown()
             ttsController = null
+        }
+    }
+
+    // Load installed engines (Google / 讯飞 / …) for the picker.
+    LaunchedEffect(Unit) {
+        ttsEngines = withContext(Dispatchers.Default) {
+            TtsEngineCatalog.listInstalled(context)
         }
     }
 
@@ -727,8 +742,8 @@ fun ReaderScreen(
                 ).show()
             }
             ReaderTtsState.Unavailable -> {
-                // Re-prepare then ask user to tap again shortly.
-                ctrl?.prepare(TtsRate.clamp(ttsRate))
+                // Re-prepare with the user's chosen engine, then ask them to tap again.
+                ctrl?.prepare(TtsRate.clamp(ttsRate), ttsEnginePackage)
                 Toast.makeText(
                     context,
                     context.getString(R.string.reader_tts_unavailable),
@@ -736,6 +751,27 @@ fun ReaderScreen(
                 ).show()
             }
         }
+    }
+
+    fun currentTtsEngineLabel(): String {
+        val match = ttsEngines.firstOrNull {
+            it.packageName == ttsEnginePackage
+        }
+        return match?.label
+            ?: TtsEngineCatalog.friendlyLabel(ttsEnginePackage)
+    }
+
+    fun applyTtsEngine(packageName: String) {
+        val pkg = TtsEngineCatalog.normalizePackage(packageName)
+        ttsEnginePackage = pkg
+        preferences.setTtsEnginePackage(pkg)
+        ttsController?.stop()
+        ttsController?.switchEngine(pkg, TtsRate.clamp(ttsRate))
+        Toast.makeText(
+            context,
+            context.getString(R.string.reader_tts_engine_switching),
+            Toast.LENGTH_SHORT,
+        ).show()
     }
 
     // Volume keys → page turn when enabled (common CN novel-reader gesture).
@@ -1049,14 +1085,14 @@ fun ReaderScreen(
                     ) {
                         Icon(Icons.AutoMirrored.Filled.List, contentDescription = null)
                     }
-                    // Tap: TTS start/stop. Long-press: speech rate presets.
+                    // Tap: TTS start/stop. Long-press: pick engine (Google / 国产) + rate.
                     Box(
                         modifier = Modifier
                             .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                             .combinedClickable(
                                 role = Role.Button,
                                 onClick = { toggleInPageTts() },
-                                onLongClick = { showTtsRateDialog = true },
+                                onLongClick = { showTtsEngineDialog = true },
                             )
                             .semantics {
                                 contentDescription = if (ttsState == ReaderTtsState.Speaking) {
@@ -1537,6 +1573,8 @@ fun ReaderScreen(
             autoNightStartHour = preferences.autoNightStartHour(),
             autoNightEndHour = preferences.autoNightEndHour(),
             ttsRate = ttsRate,
+            ttsEnginePackage = ttsEnginePackage,
+            ttsEngines = ttsEngines,
             autoPageTurnSec = autoPageTurnSec,
             onDismiss = { showAppearance = false },
             onTheme = { value ->
@@ -1645,6 +1683,18 @@ fun ReaderScreen(
                 preferences.setTtsRate(clamped)
                 ttsController?.setSpeechRate(clamped)
             },
+            onTtsEngine = { pkg -> applyTtsEngine(pkg) },
+            onOpenTtsSettings = {
+                try {
+                    context.startActivity(TtsEngineCatalog.systemTtsSettingsIntent())
+                } catch (_: Exception) {
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.reader_tts_unavailable),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            },
             onAutoPageTurnSec = { sec ->
                 autoPageTurnSec = AutoPageTurn.clampSec(sec)
                 preferences.setAutoPageTurnSec(autoPageTurnSec)
@@ -1686,6 +1736,98 @@ fun ReaderScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showTtsRateDialog = false }) {
+                    Text(stringResource(R.string.reader_close))
+                }
+            },
+        )
+    }
+
+    if (showTtsEngineDialog) {
+        val engines = ttsEngines.ifEmpty {
+            listOf(TtsEngineCatalog.systemDefaultOption())
+        }
+        AlertDialog(
+            onDismissRequest = { showTtsEngineDialog = false },
+            title = { Text(stringResource(R.string.reader_tts_engine_pick_title)) },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    if (engines.size <= 1) {
+                        Text(
+                            text = stringResource(R.string.reader_tts_engine_empty),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    engines.forEach { engine ->
+                        val selected = engine.packageName == ttsEnginePackage
+                        Text(
+                            text = if (selected) "● ${engine.label}" else "○ ${engine.label}",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .defaultMinSize(minHeight = 48.dp)
+                                .clickable {
+                                    applyTtsEngine(engine.packageName)
+                                    showTtsEngineDialog = false
+                                }
+                                .padding(vertical = 12.dp),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = if (selected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.reader_tts_rate_dialog_title),
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    TtsRate.PRESETS.forEach { preset ->
+                        val selected = TtsRate.isPresetSelected(ttsRate, preset)
+                        val label = TtsRate.label(preset)
+                        Text(
+                            text = if (selected) "● $label" else "○ $label",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .defaultMinSize(minHeight = 48.dp)
+                                .clickable {
+                                    val clamped = TtsRate.clamp(preset)
+                                    ttsRate = clamped
+                                    preferences.setTtsRate(clamped)
+                                    ttsController?.setSpeechRate(clamped)
+                                }
+                                .padding(vertical = 10.dp),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = if (selected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(
+                        onClick = {
+                            try {
+                                context.startActivity(TtsEngineCatalog.systemTtsSettingsIntent())
+                            } catch (_: Exception) {
+                                Toast.makeText(
+                                    context,
+                                    context.getString(R.string.reader_tts_unavailable),
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.reader_tts_engine_open_settings))
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showTtsEngineDialog = false }) {
                     Text(stringResource(R.string.reader_close))
                 }
             },
@@ -2000,6 +2142,8 @@ private fun AppearanceDialog(
     autoNightStartHour: Int,
     autoNightEndHour: Int,
     ttsRate: Float,
+    ttsEnginePackage: String,
+    ttsEngines: List<TtsEngineOption>,
     autoPageTurnSec: Int,
     onDismiss: () -> Unit,
     onTheme: (Int) -> Unit,
@@ -2016,6 +2160,8 @@ private fun AppearanceDialog(
     onParagraphIndent: (Boolean) -> Unit,
     onAutoNight: (Boolean) -> Unit,
     onTtsRate: (Float) -> Unit,
+    onTtsEngine: (String) -> Unit,
+    onOpenTtsSettings: () -> Unit,
     onAutoPageTurnSec: (Int) -> Unit,
 ) {
     val selectedSuffix = stringResource(R.string.reader_selected_suffix)
@@ -2310,6 +2456,51 @@ private fun AppearanceDialog(
                             )
                         }
                     }
+                }
+
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.reader_tts_engine_title),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                val engineLabel = ttsEngines.firstOrNull { it.packageName == ttsEnginePackage }?.label
+                    ?: TtsEngineCatalog.friendlyLabel(ttsEnginePackage)
+                Text(
+                    text = stringResource(R.string.reader_tts_engine_label, engineLabel),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                val enginesForUi = ttsEngines.ifEmpty {
+                    listOf(TtsEngineCatalog.systemDefaultOption())
+                }
+                enginesForUi.forEach { engine ->
+                    val selected = engine.packageName == ttsEnginePackage
+                    Text(
+                        text = if (selected) "● ${engine.label}" else "○ ${engine.label}",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp)
+                            .clickable { onTtsEngine(engine.packageName) }
+                            .padding(vertical = 10.dp)
+                            .semantics {
+                                contentDescription =
+                                    engine.label + if (selected) selectedSuffix else ""
+                            },
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = if (selected) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                    )
+                }
+                TextButton(
+                    onClick = onOpenTtsSettings,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .defaultMinSize(minHeight = 48.dp),
+                ) {
+                    Text(stringResource(R.string.reader_tts_engine_open_settings))
                 }
 
                 Spacer(Modifier.height(8.dp))

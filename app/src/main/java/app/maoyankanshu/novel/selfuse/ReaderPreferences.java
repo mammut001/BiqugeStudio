@@ -12,6 +12,8 @@ public final class ReaderPreferences {
     private static final String THEME = "reader_theme";
     private static final String BRIGHTNESS = "reader_brightness";
     private static final String TTS_RATE = "tts_rate";
+    /** TTS engine package; empty = system default. */
+    private static final String TTS_ENGINE = "tts_engine_package";
     /** Body margin step: 0 narrow / 1 standard / 2 wide. Absent key → standard. */
     private static final String MARGIN = "reader_margin";
     private static final String FONT_FAMILY = "reader_font_family";
@@ -136,6 +138,20 @@ public final class ReaderPreferences {
 
     public void setTtsRate(float rate) {
         prefs.edit().putFloat(TTS_RATE, Math.max(.5f, Math.min(2f, rate))).apply();
+    }
+
+    /**
+     * Preferred TTS engine package name.
+     * Empty string = system default (do not pin a package).
+     */
+    public String ttsEnginePackage() {
+        String raw = prefs.getString(TTS_ENGINE, "");
+        return raw == null ? "" : raw.trim();
+    }
+
+    public void setTtsEnginePackage(String packageName) {
+        String pkg = packageName == null ? "" : packageName.trim();
+        prefs.edit().putString(TTS_ENGINE, pkg).apply();
     }
 
     /**

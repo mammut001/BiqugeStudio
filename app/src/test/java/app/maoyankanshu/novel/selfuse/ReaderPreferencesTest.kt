@@ -176,6 +176,20 @@ class ReaderPreferencesTest {
     }
 
     @Test
+    fun ttsEnginePackage_defaultEmptyAndPersist() {
+        val prefs = TestSharedPreferences()
+        val readerPrefs = ReaderPreferences.get(prefs)
+
+        assertEquals("", readerPrefs.ttsEnginePackage())
+        readerPrefs.setTtsEnginePackage("com.google.android.tts")
+        assertEquals("com.google.android.tts", readerPrefs.ttsEnginePackage())
+        readerPrefs.setTtsEnginePackage(null)
+        assertEquals("", readerPrefs.ttsEnginePackage())
+        readerPrefs.setTtsEnginePackage("  com.iflytek.speechsuite  ")
+        assertEquals("com.iflytek.speechsuite", readerPrefs.ttsEnginePackage())
+    }
+
+    @Test
     fun autoPageTurnSec_defaultOffAndClamp() {
         val prefs = TestSharedPreferences()
         val readerPrefs = ReaderPreferences.get(prefs)

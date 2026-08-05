@@ -318,6 +318,13 @@
     <string name="reader_tts_rate_title">朗读语速</string>
     <string name="reader_tts_rate_label">当前 %1$s</string>
     <string name="reader_tts_rate_dialog_title">朗读语速</string>
+    <string name="reader_tts_engine_title">朗读引擎</string>
+    <string name="reader_tts_engine_label">当前：%1$s</string>
+    <string name="reader_tts_engine_system">系统默认</string>
+    <string name="reader_tts_engine_pick_title">选择朗读引擎</string>
+    <string name="reader_tts_engine_open_settings">打开系统 TTS 设置</string>
+    <string name="reader_tts_engine_switching">正在切换引擎…</string>
+    <string name="reader_tts_engine_empty">未检测到可用引擎，请到系统设置安装语音数据</string>
     <string name="reader_auto_page_turn_title">自动翻页</string>
     <string name="reader_auto_page_turn_label">间隔 %1$s</string>
     <string name="reader_auto_page_turn_cd">自动翻页间隔</string>

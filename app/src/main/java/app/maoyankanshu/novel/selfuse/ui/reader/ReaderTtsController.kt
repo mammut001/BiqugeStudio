@@ -55,11 +55,34 @@ class ReaderTtsController(
     @Volatile private var offset: Int = 0
     @Volatile private var speechRate: Float = 1f
     @Volatile private var engineReady = false
+    /** Empty = system default; otherwise pinned engine package (Google / 讯飞 / …). */
+    @Volatile private var preferredEnginePackage: String = ""
 
-    fun prepare(rate: Float) {
+    /**
+     * @param rate speech rate 0.5…2
+     * @param enginePackage empty for system default, or an installed engine package
+     */
+    fun prepare(rate: Float, enginePackage: String = "") {
         speechRate = TtsRate.clamp(rate)
+        preferredEnginePackage = TtsEngineCatalog.normalizePackage(enginePackage)
         postState(ReaderTtsState.Preparing)
         ttsHandler.post { createEngineLocked() }
+    }
+
+    /** Recreate the engine with a new package (stops speech first). */
+    fun switchEngine(enginePackage: String, rate: Float = speechRate) {
+        speaking = false
+        preferredEnginePackage = TtsEngineCatalog.normalizePackage(enginePackage)
+        speechRate = TtsRate.clamp(rate)
+        postState(ReaderTtsState.Preparing)
+        ttsHandler.post {
+            try {
+                tts?.stop()
+            } catch (_: Exception) {
+            }
+            abandonAudioFocusLocked()
+            createEngineLocked()
+        }
     }
 
     fun setSpeechRate(rate: Float) {
@@ -134,18 +157,24 @@ class ReaderTtsController(
         tts = null
         engineReady = false
 
-        val preferred = preferredEnginePackage(app)
-        // Prefer default system engine first (most reliable); then preferred package.
-        // Some OEMs break when a package is forced incorrectly.
-        val packages = ArrayList<String?>(3)
+        // User pick first (Google / 讯飞 / …), then system default, then Google as last resort.
+        val packages = ArrayList<String?>(4)
+        val userPick = preferredEnginePackage.trim()
+        if (userPick.isNotEmpty() && TtsEngineCatalog.isPackageInstalled(app, userPick)) {
+            packages.add(userPick)
+        }
         packages.add(null) // system default constructor
-        if (!preferred.isNullOrBlank()) packages.add(preferred)
-        if (preferred != "com.google.android.tts" &&
-            isPackageInstalled(app, "com.google.android.tts")
+        val discovered = preferredEnginePackage(app)
+        if (!discovered.isNullOrBlank() && discovered != userPick) {
+            packages.add(discovered)
+        }
+        if (userPick != "com.google.android.tts" &&
+            discovered != "com.google.android.tts" &&
+            TtsEngineCatalog.isPackageInstalled(app, "com.google.android.tts")
         ) {
             packages.add("com.google.android.tts")
         }
-        openEngineWithRetry(packages)
+        openEngineWithRetry(packages.distinct())
     }
 
     /**
