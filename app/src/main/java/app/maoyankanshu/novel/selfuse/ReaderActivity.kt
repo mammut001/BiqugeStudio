@@ -17,6 +17,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import app.maoyankanshu.novel.selfuse.ui.reader.ProgressiveTextOpen
@@ -125,13 +131,18 @@ class ReaderActivity : ComponentActivity() {
                 ProgressiveTextOpen.decodeFullText(bytes)
             }
             if (isFinishing || isDestroyed) return
+            // Prefer latest disk progress (debounce may have written during the window).
+            val latestPosition = withContext(Dispatchers.IO) {
+                store.recordById(bookId)?.position ?: record.position
+            }
+            if (isFinishing || isDestroyed) return
             openState = OpenState.Ready(
                 book = Book(
                     record.id,
                     record.title,
                     record.author,
                     fullText,
-                    record.position,
+                    latestPosition,
                     record.coverPath,
                 ),
                 textFullyLoaded = true,
@@ -177,6 +188,8 @@ class ReaderActivity : ComponentActivity() {
 
 @androidx.compose.runtime.Composable
 private fun LoadingShell() {
+    val context = LocalContext.current
+    val label = stringResource(R.string.reader_open_loading)
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -184,9 +197,14 @@ private fun LoadingShell() {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        CircularProgressIndicator()
+        CircularProgressIndicator(
+            modifier = Modifier.semantics {
+                contentDescription = context.getString(R.string.reader_open_loading)
+                liveRegion = LiveRegionMode.Polite
+            },
+        )
         Text(
-            text = "正在打开…",
+            text = label,
             modifier = Modifier.padding(top = 16.dp),
         )
     }

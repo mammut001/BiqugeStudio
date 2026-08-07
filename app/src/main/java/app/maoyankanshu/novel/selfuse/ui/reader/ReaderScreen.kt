@@ -65,6 +65,7 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -111,7 +112,10 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -169,6 +173,7 @@ fun ReaderScreen(
     val tocCd = stringResource(R.string.reader_toc_cd)
     val ttsCd = stringResource(R.string.reader_tts_cd)
     val ttsStopCd = stringResource(R.string.reader_tts_stop_cd)
+    val voiceManagerCd = stringResource(R.string.reader_voice_manager_cd)
     val fontSmallerCd = stringResource(R.string.reader_font_smaller_cd)
     val fontLargerCd = stringResource(R.string.reader_font_larger_cd)
     val lineHeightSmallerCd = stringResource(R.string.reader_line_height_smaller_cd)
@@ -189,12 +194,22 @@ fun ReaderScreen(
     // In-page system TTS (no jump to legacy UI). Same engine family as Accessibility.
     var ttsState by remember { mutableStateOf(ReaderTtsState.Preparing) }
     var ttsRate by remember { mutableFloatStateOf(TtsRate.clamp(preferences.ttsRate())) }
+    var ttsVoiceName by remember { mutableStateOf(preferences.ttsVoiceName()) }
     var ttsEnginePackage by remember {
-        mutableStateOf(TtsEngineCatalog.normalizePackage(preferences.ttsEnginePackage()))
+        // Drop invalid pins (e.g. 小布 com.heytap.speechassist) so TTS can init.
+        val raw = TtsEngineCatalog.normalizePackage(preferences.ttsEnginePackage())
+        val safe = if (TtsEngineCatalog.isNotATtsEngine(raw)) {
+            preferences.setTtsEnginePackage("")
+            ""
+        } else {
+            raw
+        }
+        mutableStateOf(safe)
     }
     var ttsEngines by remember { mutableStateOf<List<TtsEngineOption>>(emptyList()) }
+    var ttsVoices by remember { mutableStateOf<List<TtsVoiceOption>>(emptyList()) }
     var showTtsRateDialog by remember { mutableStateOf(false) }
-    var showTtsEngineDialog by remember { mutableStateOf(false) }
+    var showVoiceManagerSheet by remember { mutableStateOf(false) }
     var autoPageTurnSec by remember { mutableIntStateOf(preferences.autoPageTurnSec()) }
     var batteryPercent by remember { mutableIntStateOf(-1) }
     var batteryCharging by remember { mutableStateOf(false) }
@@ -421,21 +436,25 @@ fun ReaderScreen(
             approxCharsPerPage = charsPerPage
             val count = PageIndex.approximatePageCount(text.length, charsPerPage)
             val saved = ProgressMath.clampProgress(book.position)
+            // Seed held progress from library only before first layout; reflow must not
+            // overwrite commits already allowed after restore.
+            if (!layoutReady && !restoreApplied) {
+                progress = OpenProgressGate.afterRestoreApplied(saved)
+            }
             val targetPage = if (!layoutReady) {
                 // Full-book open / progressive→full swap: always from saved progress.
                 OpenProgressGate.restoreTargetPage(saved, count)
             } else {
                 // Preserve reading position across reflow (font / margin / theme).
-                val page = (anchorOffset / charsPerPage.coerceAtLeast(256))
+                (anchorOffset / charsPerPage.coerceAtLeast(256))
                     .coerceIn(0, (count - 1).coerceAtLeast(0))
-                page
             }
             val clamped = PageIndex.clampPageIndex(targetPage, count)
             if (pagerState.currentPage != clamped) {
                 pagerState.scrollToPage(clamped)
             }
-            if (!restoreApplied) {
-                // Hold library progress at book.position; do not derive from pager page.
+            // Open gate only once the pager sits on the restore target (not before measure).
+            if (textFullyLoaded && !restoreApplied && pagerState.currentPage == clamped) {
                 progress = OpenProgressGate.afterRestoreApplied(saved)
                 restoreApplied = true
             }
@@ -446,31 +465,37 @@ fun ReaderScreen(
         }
 
         // Progressive window or small book: exact TextMeasurer path (body is bounded).
+        // Measure off the main thread — up to MAX_EXACT_MEASURE_CHARS can ANR if done on UI.
         val starts = if (text.isEmpty()) {
             listOf(0)
         } else {
-            val layout = textMeasurer.measure(
-                text = text,
-                style = style,
-                constraints = Constraints(maxWidth = width),
-            )
-            val lineCount = layout.lineCount
-            if (lineCount <= 0) {
-                listOf(0)
-            } else {
-                val tops = FloatArray(lineCount)
-                val bottoms = FloatArray(lineCount)
-                val chars = IntArray(lineCount)
-                for (i in 0 until lineCount) {
-                    tops[i] = layout.getLineTop(i)
-                    bottoms[i] = layout.getLineBottom(i)
-                    chars[i] = layout.getLineStart(i)
+            withContext(Dispatchers.Default) {
+                val layout = textMeasurer.measure(
+                    text = text,
+                    style = style,
+                    constraints = Constraints(maxWidth = width),
+                )
+                val lineCount = layout.lineCount
+                if (lineCount <= 0) {
+                    listOf(0)
+                } else {
+                    val tops = FloatArray(lineCount)
+                    val bottoms = FloatArray(lineCount)
+                    val chars = IntArray(lineCount)
+                    for (i in 0 until lineCount) {
+                        tops[i] = layout.getLineTop(i)
+                        bottoms[i] = layout.getLineBottom(i)
+                        chars[i] = layout.getLineStart(i)
+                    }
+                    PageIndex.pageStartOffsets(tops, bottoms, chars, height.toFloat())
                 }
-                PageIndex.pageStartOffsets(tops, bottoms, chars, height.toFloat())
             }
         }
         pageStarts = starts
         val saved = ProgressMath.clampProgress(book.position)
+        if (!layoutReady && !OpenProgressGate.mayCommitProgressFromPageTurn(textFullyLoaded, restoreApplied)) {
+            progress = OpenProgressGate.afterRestoreApplied(saved)
+        }
         val targetPage = if (!layoutReady) {
             // Window preview: start of window (content already around progress).
             // Full small book: restore via progress.
@@ -486,26 +511,14 @@ fun ReaderScreen(
         if (pagerState.currentPage != clamped) {
             pagerState.scrollToPage(clamped)
         }
-        // Always keep held progress while the gate is closed (progressive window).
-        if (!OpenProgressGate.mayCommitProgressFromPageTurn(textFullyLoaded, restoreApplied)) {
-            progress = OpenProgressGate.afterRestoreApplied(saved)
-        }
         // Open the commit gate only once the full body is loaded and pager is restored.
-        if (textFullyLoaded && !restoreApplied) {
+        if (textFullyLoaded && !restoreApplied && pagerState.currentPage == clamped) {
+            progress = OpenProgressGate.afterRestoreApplied(saved)
             restoreApplied = true
         }
         layoutReady = true
         anchorOffset = PageIndex.offsetForPage(starts, clamped)
         currentChapter = ChapterIndex.chapterAtOffset(chapters, anchorOffset)
-    }
-
-    // Approx pager remounts with restoreTargetPage before viewport measure — open the gate
-    // so body/footer/progress agree without waiting on contentWidthPx.
-    LaunchedEffect(textFullyLoaded, useApproxPaging, book.position) {
-        if (!useApproxPaging || restoreApplied) return@LaunchedEffect
-        val saved = ProgressMath.clampProgress(book.position)
-        progress = OpenProgressGate.afterRestoreApplied(saved)
-        restoreApplied = true
     }
 
     // Page turns → progress (0…1000) + chapter + anchor.
@@ -631,33 +644,77 @@ fun ReaderScreen(
     }
 
     // In-page system TTS — stays on Compose reader (no jump to legacy chrome).
+    // Large TXT opens in two passes (window → full body). Do not bind TTS during the
+    // window pass: replacing the reader body can otherwise create two TextToSpeech
+    // clients that race while binding the same OEM engine and leave the UI Preparing.
     val ttsChunkJump = remember { mutableStateOf<(Int) -> Unit>({}) }
     ttsChunkJump.value = { jumpToOffset(it) }
+    var ttsHighlightRange by remember { mutableStateOf<IntRange?>(null) }
+    /** Body snapshot used by the active TTS session (offsets from controller.start). */
+    var ttsSpeakBody by remember { mutableStateOf("") }
     var ttsController by remember { mutableStateOf<ReaderTtsController?>(null) }
-    DisposableEffect(Unit) {
-        val ctrl = ReaderTtsController(
-            context = context,
-            onState = { ttsState = it },
-            onChunkStart = { off -> ttsChunkJump.value(off) },
-            onEnginesDiscovered = { list ->
-                if (list.isNotEmpty()) ttsEngines = list
-            },
-        )
-        ttsController = ctrl
-        ctrl.prepare(
-            rate = TtsRate.clamp(preferences.ttsRate()),
-            enginePackage = TtsEngineCatalog.normalizePackage(preferences.ttsEnginePackage()),
-        )
-        onDispose {
-            ctrl.shutdown()
-            ttsController = null
+    val ttsSpeakBodyRef = rememberUpdatedState(ttsSpeakBody)
+    if (textFullyLoaded) {
+        DisposableEffect(book.id) {
+            val ctrl = ReaderTtsController(
+                context = context,
+                onState = { ttsState = it },
+                onChunkRange = { start, _ ->
+                    ttsChunkJump.value(start)
+                    val body = ttsSpeakBodyRef.value
+                    ttsHighlightRange = if (body.isEmpty()) {
+                        null
+                    } else {
+                        TtsSpeechChunks.paragraphRangeContaining(body, start)
+                    }
+                },
+                onEnginesDiscovered = { list ->
+                    if (list.isNotEmpty()) ttsEngines = list
+                },
+                onVoicesDiscovered = { list, activeName ->
+                    ttsVoices = list
+                    if (ttsVoiceName.isNotEmpty() && list.none { it.name == ttsVoiceName }) {
+                        // Stale preference after engine switch — clear so prepare stops
+                        // retrying a missing voice name every time.
+                        ttsVoiceName = ""
+                        preferences.setTtsVoiceName("")
+                    }
+                    if (activeName.isNotEmpty() && ttsVoiceName.isEmpty()) {
+                        ttsVoiceName = activeName
+                    }
+                },
+            )
+            ttsController = ctrl
+            ctrl.prepare(
+                rate = TtsRate.clamp(preferences.ttsRate()),
+                enginePackage = TtsEngineCatalog.normalizePackage(preferences.ttsEnginePackage()),
+                voiceName = preferences.ttsVoiceName(),
+            )
+            onDispose {
+                ctrl.shutdown()
+                if (ttsController === ctrl) ttsController = null
+                ttsHighlightRange = null
+                ttsSpeakBody = ""
+                ttsState = ReaderTtsState.Ready
+            }
+        }
+    }
+
+    // Clear follow highlight when reading truly ends — keep it during Preparing
+    // engine failover so the current paragraph does not blink off mid-session.
+    LaunchedEffect(ttsState) {
+        when (ttsState) {
+            ReaderTtsState.Ready, ReaderTtsState.Unavailable -> {
+                ttsHighlightRange = null
+            }
+            else -> Unit
         }
     }
 
     // Load installed engines (Oplus / Google / 讯飞 / …) for the picker.
     // Requires manifest <queries> for TTS_SERVICE (Android 11+ package visibility).
     // Also refresh when the engine dialog opens so the list is never stale.
-    LaunchedEffect(showTtsEngineDialog) {
+    LaunchedEffect(showVoiceManagerSheet) {
         ttsEngines = withContext(Dispatchers.Default) {
             TtsEngineCatalog.listInstalled(context)
         }
@@ -713,47 +770,67 @@ fun ReaderScreen(
         }
     }
 
+    fun requestTtsStart(): Boolean {
+        if (book.text.isEmpty()) {
+            Toast.makeText(
+                context,
+                context.getString(R.string.reader_tts_body_not_ready),
+                Toast.LENGTH_SHORT,
+            ).show()
+            return false
+        }
+        // Snapshot the speaking body so paragraph lookup stays aligned with
+        // controller offsets even if book.text is replaced later under the same id.
+        ttsSpeakBody = book.text
+        val started = ttsController?.start(book.text, currentReadingOffset()) == true
+        if (started) {
+            // Hide chrome so taps don't fight TTS; user can show it again if needed.
+            menuVisible = false
+        }
+        return started
+    }
+
     fun toggleInPageTts() {
+        if (!textFullyLoaded) {
+            Toast.makeText(
+                context,
+                context.getString(R.string.reader_tts_body_not_ready),
+                Toast.LENGTH_SHORT,
+            ).show()
+            return
+        }
         val ctrl = ttsController
         when (ttsState) {
             ReaderTtsState.Speaking -> ctrl?.stop()
             ReaderTtsState.Ready -> {
-                if (book.text.isEmpty()) {
-                    Toast.makeText(
-                        context,
-                        context.getString(R.string.reader_tts_body_not_ready),
-                        Toast.LENGTH_SHORT,
-                    ).show()
-                    return
-                }
-                // Prefer full body when loaded; progressive window still speaks what we have.
-                val started = ctrl?.start(book.text, currentReadingOffset()) == true
+                val started = requestTtsStart()
                 if (!started) {
                     // Engine not ready or speak rejected — offer engine picker.
-                    showTtsEngineDialog = true
+                    showVoiceManagerSheet = true
                     Toast.makeText(
                         context,
                         context.getString(R.string.reader_tts_pick_engine_hint),
                         Toast.LENGTH_SHORT,
                     ).show()
-                } else {
-                    // Hide chrome so taps don't fight TTS; user can show again if needed.
-                    menuVisible = false
                 }
             }
             ReaderTtsState.Preparing -> {
+                // Queue the request. Slow OEM engines may take several seconds to bind;
+                // ReaderTtsController starts automatically from its Ready callback.
+                val queued = requestTtsStart()
+                if (queued) return
                 Toast.makeText(
                     context,
                     context.getString(R.string.reader_tts_preparing_toast),
                     Toast.LENGTH_SHORT,
                 ).show()
-                // Let user pick Google / 国产 while init finishes.
-                showTtsEngineDialog = true
             }
             ReaderTtsState.Unavailable -> {
                 // Re-prepare and open engine picker (Google / 国产) so user can switch.
-                ctrl?.prepare(TtsRate.clamp(ttsRate), ttsEnginePackage)
-                showTtsEngineDialog = true
+                ctrl?.prepare(TtsRate.clamp(ttsRate), ttsEnginePackage, ttsVoiceName)
+                // Queue the current request so a successful re-init speaks automatically.
+                requestTtsStart()
+                showVoiceManagerSheet = true
                 Toast.makeText(
                     context,
                     context.getString(R.string.reader_tts_unavailable),
@@ -773,10 +850,33 @@ fun ReaderScreen(
 
     fun applyTtsEngine(packageName: String) {
         val pkg = TtsEngineCatalog.normalizePackage(packageName)
+        if (pkg.isNotEmpty() && TtsEngineCatalog.isNotATtsEngine(pkg)) {
+            Toast.makeText(
+                context,
+                context.getString(R.string.reader_tts_engine_invalid),
+                Toast.LENGTH_SHORT,
+            ).show()
+            return
+        }
         ttsEnginePackage = pkg
         preferences.setTtsEnginePackage(pkg)
-        ttsController?.stop()
-        ttsController?.switchEngine(pkg, TtsRate.clamp(ttsRate))
+        // Voice names are engine-specific; let the newly selected engine expose its own default.
+        ttsVoiceName = ""
+        preferences.setTtsVoiceName("")
+        // switchEngine already stops playback; avoid double stop/race.
+        ttsController?.switchEngine(pkg, TtsRate.clamp(ttsRate), voiceName = "")
+        Toast.makeText(
+            context,
+            context.getString(R.string.reader_tts_engine_switching),
+            Toast.LENGTH_SHORT,
+        ).show()
+    }
+
+    fun applyTtsVoice(voiceName: String) {
+        val name = voiceName.trim()
+        ttsVoiceName = name
+        preferences.setTtsVoiceName(name)
+        ttsController?.switchVoice(name, TtsRate.clamp(ttsRate))
         Toast.makeText(
             context,
             context.getString(R.string.reader_tts_engine_switching),
@@ -855,33 +955,31 @@ fun ReaderScreen(
                     userScrollEnabled = true,
                     beyondViewportPageCount = 1,
                 ) { page ->
+                    // Before restore, map the *current* pager slot through the gate so a
+                    // stale index 0 never paints page-0 body (or indent) at mid-book progress.
+                    val bodyPage = if (useApproxPaging && page == pagerState.currentPage) {
+                        OpenProgressGate.displayPageForApprox(
+                            restoreApplied = restoreApplied,
+                            pagerPage = page,
+                            savedProgress = book.position,
+                            pageCount = PageIndex.approximatePageCount(
+                                book.text.length,
+                                approxCharsPerPage,
+                            ),
+                        )
+                    } else {
+                        page
+                    }
                     val pageBody = remember(
                         book.text,
                         pageStarts,
-                        page,
+                        bodyPage,
                         useApproxPaging,
                         approxCharsPerPage,
-                        restoreApplied,
-                        book.position,
                         pageCount,
                     ) {
                         when {
                             useApproxPaging -> {
-                                // Before restore, map the *current* pager slot through the gate
-                                // so a stale index 0 never paints page-0 body at mid-book progress.
-                                val bodyPage = if (page == pagerState.currentPage) {
-                                    OpenProgressGate.displayPageForApprox(
-                                        restoreApplied = restoreApplied,
-                                        pagerPage = page,
-                                        savedProgress = book.position,
-                                        pageCount = PageIndex.approximatePageCount(
-                                            book.text.length,
-                                            approxCharsPerPage,
-                                        ),
-                                    )
-                                } else {
-                                    page
-                                }
                                 PageIndex.approximatePageText(
                                     book.text,
                                     approxCharsPerPage,
@@ -895,12 +993,12 @@ fun ReaderScreen(
                                 PageIndex.approximatePageText(
                                     book.text,
                                     PageIndex.DEFAULT_APPROX_CHARS_PER_PAGE,
-                                    page,
+                                    bodyPage,
                                 )
                             }
                             // Empty index + empty body → ""; incomplete index never yields
                             // the entire book as a single Compose page (ANR guard).
-                            else -> PageIndex.safePageText(book.text, pageStarts, page)
+                            else -> PageIndex.safePageText(book.text, pageStarts, bodyPage)
                         }
                     }
                     // Left/right book-style turn: 3D tilt about the vertical edge while the
@@ -911,13 +1009,14 @@ fun ReaderScreen(
                     // Page-local indent: only true paragraph starts (offset 0 or after \n).
                     // Applying firstLineIndent on every page re-wraps mid-paragraph lines and
                     // clips the last line — the longstanding half-line bug.
+                    // Use bodyPage so indent matches the gated approx body before restore.
                     val pageStartOffset = when {
                         useApproxPaging -> PageIndex.approximateOffsetForPage(
-                            page,
+                            bodyPage,
                             approxCharsPerPage,
                             book.text.length,
                         )
-                        pageStarts.isNotEmpty() -> PageIndex.offsetForPage(pageStarts, page)
+                        pageStarts.isNotEmpty() -> PageIndex.offsetForPage(pageStarts, bodyPage)
                         else -> 0
                     }
                     val pageTextStyle = remember(
@@ -968,8 +1067,22 @@ fun ReaderScreen(
                                 .fillMaxWidth()
                                 .padding(horizontal = padH, vertical = padV),
                         ) {
+                            val highlightColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
+                            val annotatedBody = remember(
+                                pageBody,
+                                pageStartOffset,
+                                ttsHighlightRange,
+                                highlightColor,
+                            ) {
+                                ttsFollowHighlightAnnotated(
+                                    pageBody = pageBody,
+                                    pageStartOffset = pageStartOffset,
+                                    highlight = ttsHighlightRange,
+                                    highlightColor = highlightColor,
+                                )
+                            }
                             Text(
-                                text = pageBody,
+                                text = annotatedBody,
                                 modifier = Modifier.fillMaxWidth(),
                                 style = pageTextStyle,
                                 // Clip within the padded body; footer gap + line safety prevent cut-off.
@@ -1102,14 +1215,15 @@ fun ReaderScreen(
                             .combinedClickable(
                                 role = Role.Button,
                                 onClick = { toggleInPageTts() },
-                                onLongClick = { showTtsEngineDialog = true },
+                                onLongClick = { showVoiceManagerSheet = true },
                             )
                             .semantics {
-                                contentDescription = if (ttsState == ReaderTtsState.Speaking) {
+                                val actionLabel = if (ttsState == ReaderTtsState.Speaking) {
                                     ttsStopCd
                                 } else {
                                     ttsCd
                                 }
+                                contentDescription = "$actionLabel，长按打开$voiceManagerCd"
                             },
                         contentAlignment = Alignment.Center,
                     ) {
@@ -1752,106 +1866,48 @@ fun ReaderScreen(
         )
     }
 
-    if (showTtsEngineDialog) {
-        val engines = ttsEngines.ifEmpty {
-            listOf(TtsEngineCatalog.systemDefaultOption())
-        }
-        val googleInstalled = TtsEngineCatalog.isGoogleTtsInstalled(context)
-        AlertDialog(
-            onDismissRequest = { showTtsEngineDialog = false },
-            title = { Text(stringResource(R.string.reader_tts_engine_pick_title)) },
-            text = {
-                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                    if (!googleInstalled) {
-                        Text(
-                            text = stringResource(R.string.reader_tts_engine_no_google),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(Modifier.height(8.dp))
-                    }
-                    if (engines.size <= 1) {
-                        Text(
-                            text = stringResource(R.string.reader_tts_engine_empty),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(Modifier.height(8.dp))
-                    }
-                    engines.forEach { engine ->
-                        val selected = engine.packageName == ttsEnginePackage
-                        Text(
-                            text = if (selected) "● ${engine.label}" else "○ ${engine.label}",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .defaultMinSize(minHeight = 48.dp)
-                                .clickable {
-                                    applyTtsEngine(engine.packageName)
-                                    showTtsEngineDialog = false
-                                }
-                                .padding(vertical = 12.dp),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = if (selected) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            },
-                        )
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = stringResource(R.string.reader_tts_rate_dialog_title),
-                        style = MaterialTheme.typography.titleSmall,
-                    )
-                    TtsRate.PRESETS.forEach { preset ->
-                        val selected = TtsRate.isPresetSelected(ttsRate, preset)
-                        val label = TtsRate.label(preset)
-                        Text(
-                            text = if (selected) "● $label" else "○ $label",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .defaultMinSize(minHeight = 48.dp)
-                                .clickable {
-                                    val clamped = TtsRate.clamp(preset)
-                                    ttsRate = clamped
-                                    preferences.setTtsRate(clamped)
-                                    ttsController?.setSpeechRate(clamped)
-                                }
-                                .padding(vertical = 10.dp),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = if (selected) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            },
-                        )
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    TextButton(
-                        onClick = {
-                            try {
-                                context.startActivity(TtsEngineCatalog.systemTtsSettingsIntent())
-                            } catch (_: Exception) {
-                                Toast.makeText(
-                                    context,
-                                    context.getString(R.string.reader_tts_unavailable),
-                                    Toast.LENGTH_SHORT,
-                                ).show()
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(stringResource(R.string.reader_tts_engine_open_settings))
-                    }
+    if (showVoiceManagerSheet) {
+        VoiceManagerSheet(
+            ttsState = ttsState,
+            ttsRate = ttsRate,
+            ttsEnginePackage = ttsEnginePackage,
+            ttsEngines = ttsEngines,
+            ttsVoiceName = ttsVoiceName,
+            ttsVoices = ttsVoices,
+            currentEngineLabel = currentTtsEngineLabel(),
+            onDismiss = { showVoiceManagerSheet = false },
+            onTtsEngine = { pkg -> applyTtsEngine(pkg) },
+            onTtsVoice = { name -> applyTtsVoice(name) },
+            onTtsRate = { rate ->
+                val clamped = TtsRate.clamp(rate)
+                ttsRate = clamped
+                preferences.setTtsRate(clamped)
+                ttsController?.setSpeechRate(clamped)
+            },
+            onPreview = {
+                val started = ttsController?.preview() == true
+                if (!started) {
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.reader_voice_preview_queued),
+                        Toast.LENGTH_SHORT,
+                    ).show()
                 }
             },
-            confirmButton = {
-                TextButton(onClick = { showTtsEngineDialog = false }) {
-                    Text(stringResource(R.string.reader_close))
+            onOpenTtsSettings = {
+                try {
+                    context.startActivity(TtsEngineCatalog.systemTtsSettingsIntent())
+                } catch (_: Exception) {
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.reader_tts_unavailable),
+                        Toast.LENGTH_SHORT,
+                    ).show()
                 }
             },
         )
     }
+
 }
 
 
@@ -2143,6 +2199,270 @@ private fun FindDialog(
 }
 
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun VoiceManagerSheet(
+    ttsState: ReaderTtsState,
+    ttsRate: Float,
+    ttsEnginePackage: String,
+    ttsEngines: List<TtsEngineOption>,
+    ttsVoiceName: String,
+    ttsVoices: List<TtsVoiceOption>,
+    currentEngineLabel: String,
+    onDismiss: () -> Unit,
+    onTtsEngine: (String) -> Unit,
+    onTtsVoice: (String) -> Unit,
+    onTtsRate: (Float) -> Unit,
+    onPreview: () -> Unit,
+    onOpenTtsSettings: () -> Unit,
+) {
+    val scrollState = rememberScrollState()
+    var voiceQuery by remember { mutableStateOf("") }
+    var voiceFilter by remember { mutableStateOf(TtsVoiceFilter.ALL) }
+    val selectedSuffix = stringResource(R.string.reader_selected_suffix)
+    val stateLabel = when (ttsState) {
+        ReaderTtsState.Preparing -> stringResource(R.string.reader_voice_state_preparing)
+        ReaderTtsState.Ready -> stringResource(R.string.reader_voice_state_ready)
+        ReaderTtsState.Speaking -> stringResource(R.string.reader_voice_state_speaking)
+        ReaderTtsState.Unavailable -> stringResource(R.string.reader_voice_state_unavailable)
+    }
+    val engines = ttsEngines.ifEmpty { listOf(TtsEngineCatalog.systemDefaultOption()) }
+    val visibleVoices = TtsVoiceCatalog.filter(ttsVoices, voiceQuery, voiceFilter)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 720.dp)
+                .verticalScroll(scrollState)
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .padding(horizontal = 20.dp, vertical = 8.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.reader_voice_manager_title),
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.semantics { heading() },
+            )
+            Text(
+                text = stringResource(R.string.reader_voice_manager_status, stateLabel),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+
+            Spacer(Modifier.height(16.dp))
+            Text(
+                text = stringResource(R.string.reader_voice_engine_section),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = currentEngineLabel,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+            engines.forEach { engine ->
+                val selected = engine.packageName == ttsEnginePackage
+                Text(
+                    text = if (selected) "● ${engine.label}" else "○ ${engine.label}",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .defaultMinSize(minHeight = 48.dp)
+                        .clickable { onTtsEngine(engine.packageName) }
+                        .padding(vertical = 12.dp)
+                        .semantics {
+                            contentDescription = engine.label + if (selected) selectedSuffix else ""
+                            role = Role.Button
+                        },
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (selected) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                )
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            Text(
+                text = stringResource(R.string.reader_voice_section),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = if (ttsVoiceName.isEmpty()) {
+                    stringResource(R.string.reader_voice_default)
+                } else {
+                    ttsVoices.firstOrNull { it.name == ttsVoiceName }?.label ?: ttsVoiceName
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+            Text(
+                text = if (ttsVoiceName.isEmpty()) {
+                    "● ${stringResource(R.string.reader_voice_default)}"
+                } else {
+                    "○ ${stringResource(R.string.reader_voice_default)}"
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 48.dp)
+                    .clickable { onTtsVoice("") }
+                    .padding(vertical = 12.dp),
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (ttsVoiceName.isEmpty()) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+            )
+            OutlinedTextField(
+                value = voiceQuery,
+                onValueChange = { voiceQuery = it },
+                singleLine = true,
+                label = { Text(stringResource(R.string.reader_voice_search_hint)) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilterChip(
+                    selected = voiceFilter == TtsVoiceFilter.ALL,
+                    onClick = { voiceFilter = TtsVoiceFilter.ALL },
+                    label = { Text(stringResource(R.string.reader_voice_filter_all)) },
+                    modifier = Modifier.heightIn(min = 48.dp),
+                )
+                FilterChip(
+                    selected = voiceFilter == TtsVoiceFilter.LOCAL,
+                    onClick = { voiceFilter = TtsVoiceFilter.LOCAL },
+                    label = { Text(stringResource(R.string.reader_voice_filter_local)) },
+                    modifier = Modifier.heightIn(min = 48.dp),
+                )
+                FilterChip(
+                    selected = voiceFilter == TtsVoiceFilter.NETWORK,
+                    onClick = { voiceFilter = TtsVoiceFilter.NETWORK },
+                    label = { Text(stringResource(R.string.reader_voice_filter_network)) },
+                    modifier = Modifier.heightIn(min = 48.dp),
+                )
+            }
+            Text(
+                text = stringResource(
+                    R.string.reader_voice_result_count,
+                    visibleVoices.size,
+                ),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+            if (ttsVoices.isEmpty()) {
+                Text(
+                    text = stringResource(R.string.reader_voice_empty),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 8.dp),
+                )
+            } else {
+                visibleVoices.forEach { voice ->
+                    val selected = voice.name == ttsVoiceName
+                    Text(
+                        text = if (selected) "● ${voice.label}" else "○ ${voice.label}",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp)
+                            .clickable { onTtsVoice(voice.name) }
+                            .padding(vertical = 10.dp)
+                            .semantics {
+                                contentDescription = voice.label + if (selected) selectedSuffix else ""
+                                role = Role.Button
+                            },
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = if (selected) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (visibleVoices.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.reader_voice_search_empty),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 10.dp),
+                    )
+                }
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            Text(
+                text = stringResource(R.string.reader_tts_rate_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = stringResource(R.string.reader_tts_rate_label, TtsRate.label(ttsRate)),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Slider(
+                value = ttsRate,
+                onValueChange = onTtsRate,
+                valueRange = 0.5f..2f,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                TtsRate.PRESETS.forEach { preset ->
+                    val selected = TtsRate.isPresetSelected(ttsRate, preset)
+                    TextButton(
+                        onClick = { onTtsRate(preset) },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(
+                            text = TtsRate.label(preset),
+                            color = if (selected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+            TextButton(
+                onClick = onPreview,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 48.dp),
+            ) {
+                Text(stringResource(R.string.reader_voice_preview))
+            }
+            TextButton(
+                onClick = onOpenTtsSettings,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 48.dp),
+            ) {
+                Text(stringResource(R.string.reader_tts_engine_open_settings))
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+    }
+}
 
 @Composable
 private fun AppearanceDialog(
@@ -2749,6 +3069,31 @@ private fun AppearanceToggleRow(
 
 private fun formatTime(): String =
     SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+
+/**
+ * Overlaps a book-absolute TTS highlight range with the current page slice and
+ * paints a soft background behind the spoken paragraph.
+ */
+private fun ttsFollowHighlightAnnotated(
+    pageBody: String,
+    pageStartOffset: Int,
+    highlight: IntRange?,
+    highlightColor: Color,
+): AnnotatedString {
+    val local = TtsFollowHighlight.overlapInPage(
+        pageStartOffset = pageStartOffset,
+        pageLength = pageBody.length,
+        highlight = highlight,
+    ) ?: return AnnotatedString(pageBody)
+    return buildAnnotatedString {
+        append(pageBody)
+        addStyle(
+            SpanStyle(background = highlightColor),
+            local.first,
+            local.last + 1,
+        )
+    }
+}
 
 private fun applyBrightness(activity: ComponentActivity, brightness: Float) {
     val attrs = activity.window.attributes

@@ -24,6 +24,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -45,11 +46,13 @@ import app.maoyankanshu.novel.selfuse.Book
 import app.maoyankanshu.novel.selfuse.LibraryStore
 import app.maoyankanshu.novel.selfuse.R
 import app.maoyankanshu.novel.selfuse.ui.navigation.MainTab
+import app.maoyankanshu.novel.selfuse.ui.reader.ReaderLeaveSave
 import app.maoyankanshu.novel.selfuse.ui.screens.DiscoverScreen
 import app.maoyankanshu.novel.selfuse.ui.screens.ProfileScreen
 import app.maoyankanshu.novel.selfuse.ui.screens.ShelfScreen
 import app.maoyankanshu.novel.selfuse.ui.screens.StoreScreen
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -59,6 +62,7 @@ fun BiqugeApp(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val scope = rememberCoroutineScope()
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentTab = MainTab.fromRoute(navBackStackEntry?.destination?.route)
@@ -90,11 +94,21 @@ fun BiqugeApp(
     }
 
     // Refresh shelf/history when returning from Java Activities (import, reader, detail).
+    // Skip the first ON_RESUME (cold start already loads via LaunchedEffect).
+    // Await leave-save IO so progress/stats from the just-closed reader are visible.
     DisposableEffect(lifecycleOwner) {
+        var skipFirstResume = true
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                libraryVersion++
-                historyVersion++
+                if (skipFirstResume) {
+                    skipFirstResume = false
+                    return@LifecycleEventObserver
+                }
+                scope.launch {
+                    ReaderLeaveSave.awaitIdle()
+                    libraryVersion++
+                    historyVersion++
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -232,6 +246,8 @@ fun BiqugeApp(
                     isLoading = isLoading,
                     onLibraryChanged = { libraryVersion++ },
                     contentPadding = innerPadding,
+                    historyVersion = historyVersion,
+                    onHistoryChanged = { historyVersion++ },
                 )
             }
             composable(MainTab.Store.route) {

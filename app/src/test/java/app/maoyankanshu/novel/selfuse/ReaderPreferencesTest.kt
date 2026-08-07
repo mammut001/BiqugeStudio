@@ -190,6 +190,20 @@ class ReaderPreferencesTest {
     }
 
     @Test
+    fun ttsVoiceName_defaultEmptyAndPersist() {
+        val prefs = TestSharedPreferences()
+        val readerPrefs = ReaderPreferences.get(prefs)
+
+        assertEquals("", readerPrefs.ttsVoiceName())
+        readerPrefs.setTtsVoiceName("cmn-cn-x-test")
+        assertEquals("cmn-cn-x-test", readerPrefs.ttsVoiceName())
+        readerPrefs.setTtsVoiceName("  ")
+        assertEquals("", readerPrefs.ttsVoiceName())
+        readerPrefs.setTtsVoiceName(null)
+        assertEquals("", readerPrefs.ttsVoiceName())
+    }
+
+    @Test
     fun autoPageTurnSec_defaultOffAndClamp() {
         val prefs = TestSharedPreferences()
         val readerPrefs = ReaderPreferences.get(prefs)

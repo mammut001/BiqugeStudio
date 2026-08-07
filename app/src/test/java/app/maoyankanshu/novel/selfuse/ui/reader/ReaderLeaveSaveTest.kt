@@ -39,4 +39,10 @@ class ReaderLeaveSaveTest {
         assertEquals(ProgressMath.PROGRESS_MIN, ProgressMath.clampProgress(Int.MIN_VALUE))
         assertEquals(ProgressMath.PROGRESS_MAX, ProgressMath.clampProgress(Int.MAX_VALUE))
     }
+
+    @Test
+    fun hasPendingWrites_idleByDefault() {
+        // Unit tests never call persistAsync; the process-lifetime counter starts at 0.
+        assertFalse(ReaderLeaveSave.hasPendingWrites())
+    }
 }

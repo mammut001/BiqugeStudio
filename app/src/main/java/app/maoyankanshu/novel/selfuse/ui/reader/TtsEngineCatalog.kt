@@ -83,7 +83,11 @@ object TtsEngineCatalog {
                 app.contentResolver,
                 "tts_default_synth",
             )?.trim().orEmpty()
-            if (secure.isNotEmpty() && seen.add(secure) && isPackageInstalled(app, secure)) {
+            if (secure.isNotEmpty() &&
+                seen.add(secure) &&
+                !isNotATtsEngine(secure) &&
+                isPackageInstalled(app, secure)
+            ) {
                 out.add(TtsEngineOption(secure, friendlyLabel(secure, null)))
             }
         } catch (_: Exception) {
@@ -101,6 +105,7 @@ object TtsEngineCatalog {
             for (info in services) {
                 val pkg = info.serviceInfo?.packageName?.trim().orEmpty()
                 if (pkg.isEmpty() || !seen.add(pkg)) continue
+                if (isNotATtsEngine(pkg)) continue
                 val raw = try {
                     info.loadLabel(pm)?.toString()
                 } catch (_: Exception) {
@@ -113,8 +118,13 @@ object TtsEngineCatalog {
         }
 
         // Ensure common engines appear if installed but not returned by the intent query.
+        // Some ColorOS/OnePlus builds hide the stock engine's TTS_SERVICE from third-party
+        // queries even though TextToSpeech(packageName) can bind it. The constructor is the
+        // source of truth here, so keep curated installed packages as candidates and let the
+        // controller try/fail over in order.
         for (pkg in knownPackages()) {
             if (!seen.add(pkg)) continue
+            if (isNotATtsEngine(pkg)) continue
             if (!isPackageInstalled(app, pkg)) continue
             out.add(TtsEngineOption(pkg, friendlyLabel(pkg, null)))
         }
@@ -169,15 +179,54 @@ object TtsEngineCatalog {
         "com.huawei.voiceengine",
         "com.xiaomi.mibrain.speech",
         "com.baidu.duersdk.opensdk",
-        // ColorOS / OnePlus / OPPO — stock TTS on PKG110 is ttsaccessibilityengine
+        // ColorOS / OnePlus / OPPO — stock TTS on PKG110 is ttsaccessibilityengine.
+        // Do NOT list com.heytap.speechassist: that is 小布助手, not a TTS engine;
+        // pinning it makes TextToSpeech init/speak fail silently.
         "com.oplus.ttsaccessibilityengine",
         "com.coloros.tts",
-        "com.heytap.speechassist",
         "com.oplus.tts",
         "com.oppo.tts",
         "com.oneplus.speech",
         "com.github.olga_yakovleva.rhvoice.android",
     )
+
+    /**
+     * Packages that look like TTS-related but must never be bound as engines
+     * (voice assistants, not TextToSpeech services).
+     */
+    fun isNotATtsEngine(packageName: String): Boolean {
+        val p = packageName.lowercase().trim()
+        if (p.isEmpty()) return false
+        // 小布 / HeyTap Speech Assist — not android.intent.action.TTS_SERVICE
+        return p == "com.heytap.speechassist" || p.contains("speechassist")
+    }
+
+    /** True if this package is safe to pass to [TextToSpeech] engine constructor. */
+    fun isBindableEngine(context: Context, packageName: String): Boolean {
+        val pkg = packageName.trim()
+        if (pkg.isEmpty()) return true
+        if (isNotATtsEngine(pkg)) return false
+        if (!isPackageInstalled(context, pkg)) return false
+        // Prefer packages that actually export TTS_SERVICE.
+        return providesTtsService(context, pkg) || knownPackages().contains(pkg)
+    }
+
+    fun providesTtsService(context: Context, packageName: String): Boolean {
+        if (packageName.isEmpty()) return false
+        return try {
+            val pm = context.packageManager
+            val intent = Intent(TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE).setPackage(packageName)
+            val services = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.queryIntentServices(intent, PackageManager.ResolveInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.queryIntentServices(intent, 0)
+            }
+            services.any { it.serviceInfo?.packageName == packageName }
+        } catch (_: Exception) {
+            false
+        }
+    }
 
     fun isPackageInstalled(context: Context, packageName: String): Boolean {
         if (packageName.isEmpty()) return true

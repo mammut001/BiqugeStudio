@@ -14,6 +14,8 @@ public final class ReaderPreferences {
     private static final String TTS_RATE = "tts_rate";
     /** TTS engine package; empty = system default. */
     private static final String TTS_ENGINE = "tts_engine_package";
+    /** TTS voice name; empty = engine-selected voice. */
+    private static final String TTS_VOICE = "tts_voice_name";
     /** Body margin step: 0 narrow / 1 standard / 2 wide. Absent key → standard. */
     private static final String MARGIN = "reader_margin";
     private static final String FONT_FAMILY = "reader_font_family";
@@ -152,6 +154,17 @@ public final class ReaderPreferences {
     public void setTtsEnginePackage(String packageName) {
         String pkg = packageName == null ? "" : packageName.trim();
         prefs.edit().putString(TTS_ENGINE, pkg).apply();
+    }
+
+    /** Preferred Android TTS Voice.name; empty lets the engine choose. */
+    public String ttsVoiceName() {
+        String raw = prefs.getString(TTS_VOICE, "");
+        return raw == null ? "" : raw.trim();
+    }
+
+    public void setTtsVoiceName(String voiceName) {
+        String name = voiceName == null ? "" : voiceName.trim();
+        prefs.edit().putString(TTS_VOICE, name).apply();
     }
 
     /**

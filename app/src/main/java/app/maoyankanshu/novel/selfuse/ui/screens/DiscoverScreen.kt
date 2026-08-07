@@ -71,6 +71,9 @@ fun DiscoverScreen(
     val inProgress = remember(books) { LibraryListModels.inProgressBooks(books) }
     val booksById = remember(books) { books.associateBy { it.id } }
     val history = remember(historyVersion) { ReadingHistory.get(context).list() }
+    val visibleHistory = remember(history, booksById) {
+        history.filter { booksById.containsKey(it.bookId) }
+    }
     val timeFormat = remember {
         DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
     }
@@ -253,7 +256,7 @@ fun DiscoverScreen(
             }
         }
 
-        if (history.isNotEmpty()) {
+        if (visibleHistory.isNotEmpty()) {
             item {
                 Text(
                     text = stringResource(R.string.discover_history_heading),
@@ -265,7 +268,7 @@ fun DiscoverScreen(
                 )
             }
 
-            items(history, key = { "history-${it.bookId}-${it.at}" }) { entry ->
+            items(visibleHistory, key = { "history-${it.bookId}-${it.at}" }) { entry ->
                 val book = booksById[entry.bookId] ?: return@items
                 BookCard(
                     book = book,

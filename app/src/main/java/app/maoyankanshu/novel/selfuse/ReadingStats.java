@@ -26,13 +26,18 @@ public final class ReadingStats {
         }
     }
 
+    private static final Object LOCK = new Object();
+
     private ReadingStats() { }
 
     public static void add(Context context, long millis) {
         if (millis <= 0) return;
-        SharedPreferences prefs = prefs(context);
-        String key = dayKey();
-        prefs.edit().putLong(key, prefs.getLong(key, 0L) + millis).apply();
+        synchronized (LOCK) {
+            SharedPreferences prefs = prefs(context);
+            String key = dayKey();
+            // commit() so concurrent leave-saves in-process cannot drop an in-flight RMW.
+            prefs.edit().putLong(key, prefs.getLong(key, 0L) + millis).commit();
+        }
     }
 
     public static long today(Context context) {

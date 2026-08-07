@@ -14,6 +14,7 @@ enum class ShelfProgressFilter {
 enum class ShelfSortOrder {
     DEFAULT,
     TITLE,
+    RECENT,
     PROGRESS_DESC,
     PROGRESS_ASC,
 }
@@ -45,10 +46,12 @@ object ShelfFilters {
     fun continueReading(
         books: List<Book>,
         order: ShelfSortOrder = ShelfSortOrder.DEFAULT,
+        recentReadAt: Map<String, Long> = emptyMap(),
     ): List<Book> =
         sorted(
             books.filter { it.position > 0 && it.position < 1000 },
             order,
+            recentReadAt,
         )
 
     fun matchesFilter(book: Book, filter: ShelfProgressFilter): Boolean = when (filter) {
@@ -61,15 +64,26 @@ object ShelfFilters {
     fun filtered(books: List<Book>, filter: ShelfProgressFilter): List<Book> =
         books.filter { matchesFilter(it, filter) }
 
-    fun sorted(books: List<Book>, order: ShelfSortOrder): List<Book> = when (order) {
+    fun sorted(
+        books: List<Book>,
+        order: ShelfSortOrder,
+        recentReadAt: Map<String, Long> = emptyMap(),
+    ): List<Book> = when (order) {
         ShelfSortOrder.DEFAULT -> books
         ShelfSortOrder.TITLE -> books.sortedBy { it.title.lowercase() }
+        // Kotlin's stable sort preserves shelf order for books with the same timestamp;
+        // books never opened are kept after known history in their original order.
+        ShelfSortOrder.RECENT -> books.sortedByDescending { recentReadAt[it.id] ?: Long.MIN_VALUE }
         ShelfSortOrder.PROGRESS_DESC -> books.sortedByDescending { it.position }
         ShelfSortOrder.PROGRESS_ASC -> books.sortedBy { it.position }
     }
 
-    fun sectionAll(books: List<Book>, filter: ShelfProgressFilter, order: ShelfSortOrder): List<Book> =
-        sorted(filtered(books, filter), order)
+    fun sectionAll(
+        books: List<Book>,
+        filter: ShelfProgressFilter,
+        order: ShelfSortOrder,
+        recentReadAt: Map<String, Long> = emptyMap(),
+    ): List<Book> = sorted(filtered(books, filter), order, recentReadAt)
 
     /**
      * Group an already-filtered/sorted list by author for display.

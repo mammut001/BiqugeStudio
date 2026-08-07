@@ -7,6 +7,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Leave-path persistence for Compose [ReaderScreen].
@@ -21,6 +23,7 @@ import kotlinx.coroutines.launch
  */
 object ReaderLeaveSave {
     private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val pendingWrites = AtomicInteger(0)
 
     /**
      * Elapsed reading time from [android.os.SystemClock.elapsedRealtime] samples.
@@ -33,6 +36,22 @@ object ReaderLeaveSave {
 
     /** Matches [ReadingStats.add] guard: non-positive durations are ignored. */
     fun shouldRecordStats(durationMs: Long): Boolean = durationMs > 0L
+
+    /** True while at least one [persistAsync] write is still in flight. */
+    fun hasPendingWrites(): Boolean = pendingWrites.get() > 0
+
+    /**
+     * Suspend until in-flight leave-saves finish, or [timeoutMs] elapses.
+     * Used by the main shell so ON_RESUME list refresh sees the latest progress/stats.
+     */
+    suspend fun awaitIdle(timeoutMs: Long = 1_500L) {
+        if (!hasPendingWrites()) return
+        withTimeoutOrNull(timeoutMs) {
+            while (hasPendingWrites()) {
+                kotlinx.coroutines.delay(16L)
+            }
+        }
+    }
 
     /**
      * Schedule daily stats + position write off the main thread.
@@ -47,11 +66,16 @@ object ReaderLeaveSave {
         val app = context.applicationContext
         val clamped = ProgressMath.clampProgress(progress)
         val duration = if (shouldRecordStats(durationMs)) durationMs else 0L
+        pendingWrites.incrementAndGet()
         ioScope.launch {
-            if (duration > 0L) {
-                ReadingStats.add(app, duration)
+            try {
+                if (duration > 0L) {
+                    ReadingStats.add(app, duration)
+                }
+                LibraryStore.getForReading(app).savePosition(bookId, clamped)
+            } finally {
+                pendingWrites.decrementAndGet()
             }
-            LibraryStore.getForReading(app).savePosition(bookId, clamped)
         }
     }
 }

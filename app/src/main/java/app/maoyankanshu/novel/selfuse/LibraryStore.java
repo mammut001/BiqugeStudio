@@ -370,12 +370,26 @@ public final class LibraryStore {
         }
         save(all);
     }
-    /** Keeps the shelf order meaningful: a pinned book is shown first. */
+    /** Keeps the shelf order meaningful: a pinned book is shown first. Prefs-only — no TXT decode. */
     public void moveToTop(String id) {
-        List<Book> all = books();
-        for (int i = 0; i < all.size(); i++) if (all.get(i).id.equals(id)) { Book book = all.remove(i); all.add(0, book); break; }
-        save(all);
+        if (id == null || id.isEmpty()) return;
+        String raw = prefs.getString(KEY, "");
+        if (raw == null || raw.isEmpty()) return;
+        String pinned = null;
+        StringBuilder rest = new StringBuilder(raw.length());
+        for (String row : raw.split("\\n", -1)) {
+            if (row.trim().isEmpty()) continue;
+            String[] values = row.split("\\|", 4);
+            if (values.length == 4 && id.equals(values[0])) {
+                pinned = row;
+            } else {
+                rest.append(row).append('\n');
+            }
+        }
+        if (pinned == null) return;
+        prefs.edit().putString(KEY, pinned + '\n' + rest).apply();
     }
+
     /** Updates only the metadata row; never rereads or rewrites imported book text. */
     public void savePosition(String id, int progress) {
         if (id == null || id.isEmpty()) return;
@@ -395,17 +409,24 @@ public final class LibraryStore {
         }
         prefs.edit().putString(KEY, output.toString()).apply();
     }
+
+    /** Deletes one book. Prefs + files only — never full-library TXT decode. */
     public void remove(String id) {
-        List<Book> all = books();
-        Iterator<Book> iterator = all.iterator();
-        while (iterator.hasNext()) {
-            if (iterator.next().id.equals(id)) iterator.remove();
+        if (id == null || id.isEmpty()) return;
+        String raw = prefs.getString(KEY, "");
+        if (raw == null) raw = "";
+        StringBuilder output = new StringBuilder(raw.length());
+        for (String row : raw.split("\\n", -1)) {
+            if (row.trim().isEmpty()) continue;
+            String[] values = row.split("\\|", 4);
+            if (values.length == 4 && id.equals(values[0])) continue;
+            output.append(row).append('\n');
         }
         File file = new File(bookDir(), id + ".txt");
         if (file.exists()) file.delete();
         deleteCharCount(id);
         deleteCover(id);
-        save(all);
+        prefs.edit().putString(KEY, output.toString()).apply();
     }
 
     /** Exports all local books, progress, and covers into a portable ZIP backup. */

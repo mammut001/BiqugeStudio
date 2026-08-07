@@ -22,9 +22,24 @@ public final class ReadingHistory {
         }
         entries.add(0, new Entry(bookId, System.currentTimeMillis()));
         while (entries.size() > 30) entries.remove(entries.size() - 1);
-        StringBuilder raw = new StringBuilder(); for (Entry entry : entries) raw.append(entry.bookId).append('|').append(entry.at).append('\n');
-        prefs.edit().putString(KEY, raw.toString()).apply();
+        persist(entries);
     }
+
+    /** Drops a book from recent history (e.g. after delete) without clearing the rest. */
+    public void remove(String bookId) {
+        if (bookId == null || bookId.isEmpty()) return;
+        List<Entry> entries = list();
+        boolean changed = false;
+        Iterator<Entry> iterator = entries.iterator();
+        while (iterator.hasNext()) {
+            if (iterator.next().bookId.equals(bookId)) {
+                iterator.remove();
+                changed = true;
+            }
+        }
+        if (changed) persist(entries);
+    }
+
     public List<Entry> list() {
         List<Entry> entries = new ArrayList<>();
         for (String row : prefs.getString(KEY, "").split("\\n", -1)) {
@@ -34,5 +49,14 @@ public final class ReadingHistory {
         return entries;
     }
     public void clear() { prefs.edit().remove(KEY).apply(); }
+
+    private void persist(List<Entry> entries) {
+        StringBuilder raw = new StringBuilder();
+        for (Entry entry : entries) {
+            raw.append(entry.bookId).append('|').append(entry.at).append('\n');
+        }
+        prefs.edit().putString(KEY, raw.toString()).apply();
+    }
+
     public static final class Entry { public final String bookId; public final long at; Entry(String bookId, long at) { this.bookId = bookId; this.at = at; } }
 }

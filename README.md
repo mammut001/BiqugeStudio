@@ -76,21 +76,21 @@ GPL 的出发点是：
 
 模拟器实机截图（Debug 构建）：
 
-| 书架 | 书库 |
+| 书架 | 导入书籍 |
 |:---:|:---:|
-| ![书架](docs/screenshots/01-shelf.png) | ![书库](docs/screenshots/02-store.png) |
+| ![书架](docs/screenshots/01-shelf.png) | ![导入书籍](docs/screenshots/02-store.png) |
 
-| 发现 | 我的 |
+| 我的（阅读概览） | 设置与偏好 |
 |:---:|:---:|
-| ![发现](docs/screenshots/03-discover.png) | ![我的](docs/screenshots/04-profile.png) |
+| ![我的阅读概览](docs/screenshots/03-discover.png) | ![设置与偏好](docs/screenshots/04-profile.png) |
 
 | 阅读正文 | 阅读菜单 |
 |:---:|:---:|
 | ![阅读正文](docs/screenshots/05-reader.png) | ![阅读菜单](docs/screenshots/06-reader-chrome.png) |
 
-| 阅读外观（纸张 / 字体） |
-|:---:|
-| ![阅读外观](docs/screenshots/07-appearance.png) |
+| 阅读外观（纸张 / 字体） | 语音管理（TTS） |
+|:---:|:---:|
+| ![阅读外观](docs/screenshots/07-appearance.png) | ![语音管理](docs/screenshots/09-tts-voice.png) |
 
 ---
 
@@ -98,9 +98,10 @@ GPL 的出发点是：
 
 - 本地 **TXT / EPUB** 导入（EPUB 可读书名、作者与可选封面）
 - **浏览器下载后**：系统「分享 / 用其他应用打开」→ **导入到阅笺**（不必在 Download 目录里硬找）
-- 书架：筛选、排序、作者分组、继续阅读与阅读历史
+- 书架：筛选、按默认/书名/最近阅读/进度排序、作者分组、继续阅读与阅读历史
 - Compose 阅读器：分页、目录、书签、书内查找；纸张主题、字号、行高、亮度、字体、段首缩进等
-- 系统 TTS 连续朗读（阅读页内喇叭，`TextToSpeech`）
+- 系统 TTS 连续朗读：阅读页喇叭短按开/停、长按打开**语音管理**（引擎 / 声音语言 / 语速 / 试听）；朗读时段落跟读高亮
+- 「我的」阅读概览：今日 / 近7天 / 近30天时长与柱图
 - HTTPS 直链、授权网页、维基文库公版文本导入
 - 本地书库 ZIP 备份/恢复，单书 TXT 导出
 - TalkBack 与基础无障碍标签
@@ -110,7 +111,7 @@ GPL 的出发点是：
 ## 当前状态
 
 - 主界面、搜索/导入、书籍详情、书架与 Compose 阅读器已在本工程内可用。
-- TTS 已在 Compose 阅读页内完成（`ReaderTtsController`）；旧版 `LegacyReaderActivity` 已移除。
+- TTS 已在 Compose 阅读页内完成（`ReaderTtsController` + 语音管理 Sheet）；旧版 `LegacyReaderActivity` 已移除。
 - 下载队列、更丰富编码探测、完整在线书城等**尚未**作为产品目标实现。
 - 本仓库已采用 **GPL-3.0** 开源；欢迎在同样许可下使用与贡献。
 

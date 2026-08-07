@@ -91,6 +91,26 @@ class ShelfFiltersTest {
     }
 
     @Test
+    fun sort_by_recent_puts_unread_books_last_and_preserves_ties() {
+        val books = listOf(
+            book("first", "First", 100),
+            book("never", "Never", 0),
+            book("same", "Same", 200),
+            book("latest", "Latest", 300),
+        )
+        val recent = mapOf(
+            "first" to 100L,
+            "same" to 100L,
+            "latest" to 200L,
+        )
+
+        assertEquals(
+            listOf("latest", "first", "same", "never"),
+            ShelfFilters.sorted(books, ShelfSortOrder.RECENT, recent).map { it.id },
+        )
+    }
+
+    @Test
     fun sectionAll_combines_filter_and_sort() {
         val books = listOf(
             book("1", "Zebra", 0),

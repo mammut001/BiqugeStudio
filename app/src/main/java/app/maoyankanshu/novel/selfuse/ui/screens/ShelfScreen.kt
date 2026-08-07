@@ -23,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -35,6 +36,7 @@ import app.maoyankanshu.novel.selfuse.AppIntents
 import app.maoyankanshu.novel.selfuse.Book
 import app.maoyankanshu.novel.selfuse.LibraryStore
 import app.maoyankanshu.novel.selfuse.R
+import app.maoyankanshu.novel.selfuse.ReadingHistory
 import app.maoyankanshu.novel.selfuse.ui.components.BookCard
 import app.maoyankanshu.novel.selfuse.ui.components.EmptyState
 
@@ -49,24 +51,37 @@ fun ShelfScreen(
     isLoading: Boolean = false,
     onLibraryChanged: () -> Unit,
     contentPadding: PaddingValues,
+    historyVersion: Int = 0,
+    onHistoryChanged: () -> Unit = {},
 ) {
     val context = LocalContext.current
     var menuBook by remember { mutableStateOf<Book?>(null) }
     var pendingDelete by remember { mutableStateOf<Book?>(null) }
-    var progressFilter by remember { mutableStateOf(ShelfProgressFilter.ALL) }
-    var sortOrder by remember { mutableStateOf(ShelfSortOrder.DEFAULT) }
-    var groupMode by remember { mutableStateOf(ShelfGroupMode.NONE) }
+    // Keep shelf controls through rotation/process recreation. Save the enum name instead of
+    // relying on an enum saver so older saved state remains resilient to enum additions.
+    var progressFilterName by rememberSaveable { mutableStateOf(ShelfProgressFilter.ALL.name) }
+    var sortOrderName by rememberSaveable { mutableStateOf(ShelfSortOrder.DEFAULT.name) }
+    var groupModeName by rememberSaveable { mutableStateOf(ShelfGroupMode.NONE.name) }
+    val progressFilter = ShelfProgressFilter.entries.firstOrNull { it.name == progressFilterName }
+        ?: ShelfProgressFilter.ALL
+    val sortOrder = ShelfSortOrder.entries.firstOrNull { it.name == sortOrderName }
+        ?: ShelfSortOrder.DEFAULT
+    val groupMode = ShelfGroupMode.entries.firstOrNull { it.name == groupModeName }
+        ?: ShelfGroupMode.NONE
     var sortMenuExpanded by remember { mutableStateOf(false) }
     var groupMenuExpanded by remember { mutableStateOf(false) }
     val unknownAuthorLabel = stringResource(R.string.shelf_author_unknown)
+    val recentReadAt = remember(books, historyVersion) {
+        ReadingHistory.get(context).list().associate { it.bookId to it.at }
+    }
 
     // 继续阅读 shares sortOrder with 全部书籍; progressFilter applies only to sectionAll.
     // groupMode only affects rendering of the all-books section (not continue-reading).
-    val continueReading = remember(books, sortOrder) {
-        ShelfFilters.continueReading(books, sortOrder)
+    val continueReading = remember(books, sortOrder, recentReadAt) {
+        ShelfFilters.continueReading(books, sortOrder, recentReadAt)
     }
-    val allBooks = remember(books, progressFilter, sortOrder) {
-        ShelfFilters.sectionAll(books, progressFilter, sortOrder)
+    val allBooks = remember(books, progressFilter, sortOrder, recentReadAt) {
+        ShelfFilters.sectionAll(books, progressFilter, sortOrder, recentReadAt)
     }
     val authorGroups = remember(allBooks, groupMode, unknownAuthorLabel) {
         if (groupMode == ShelfGroupMode.BY_AUTHOR) {
@@ -156,19 +171,19 @@ fun ShelfScreen(
                 item {
                     ShelfToolbar(
                         progressFilter = progressFilter,
-                        onFilterChange = { progressFilter = it },
+                        onFilterChange = { progressFilterName = it.name },
                         sortOrder = sortOrder,
                         sortMenuExpanded = sortMenuExpanded,
                         onSortMenuExpandedChange = { sortMenuExpanded = it },
                         onSortOrderChange = {
-                            sortOrder = it
+                            sortOrderName = it.name
                             sortMenuExpanded = false
                         },
                         groupMode = groupMode,
                         groupMenuExpanded = groupMenuExpanded,
                         onGroupMenuExpandedChange = { groupMenuExpanded = it },
                         onGroupModeChange = {
-                            groupMode = it
+                            groupModeName = it.name
                             groupMenuExpanded = false
                         },
                     )
@@ -260,8 +275,10 @@ fun ShelfScreen(
                 TextButton(
                     onClick = {
                         LibraryStore.get(context).remove(book.id)
+                        ReadingHistory.get(context).remove(book.id)
                         pendingDelete = null
                         onLibraryChanged()
+                        onHistoryChanged()
                     },
                     modifier = Modifier.heightIn(min = 48.dp),
                 ) {
@@ -404,6 +421,7 @@ private fun ShelfToolbar(
 private fun sortLabelRes(order: ShelfSortOrder): Int = when (order) {
     ShelfSortOrder.DEFAULT -> R.string.shelf_sort_default
     ShelfSortOrder.TITLE -> R.string.shelf_sort_title
+    ShelfSortOrder.RECENT -> R.string.shelf_sort_recent
     ShelfSortOrder.PROGRESS_DESC -> R.string.shelf_sort_progress_desc
     ShelfSortOrder.PROGRESS_ASC -> R.string.shelf_sort_progress_asc
 }
