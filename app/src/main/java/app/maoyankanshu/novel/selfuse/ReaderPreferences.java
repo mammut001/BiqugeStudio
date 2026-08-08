@@ -129,19 +129,27 @@ public final class ReaderPreferences {
 
     /** -1 uses the system default; otherwise Android expects a value in 0..1. */
     public float brightness() {
-        return prefs.getFloat(BRIGHTNESS, -1f);
+        float value = prefs.getFloat(BRIGHTNESS, -1f);
+        if (!Float.isFinite(value)) return -1f;
+        return value < 0 ? -1f : Math.max(.08f, Math.min(1f, value));
     }
 
     public void setBrightness(float value) {
-        prefs.edit().putFloat(BRIGHTNESS, value < 0 ? -1f : Math.max(.08f, Math.min(1f, value))).apply();
+        float safe = !Float.isFinite(value) || value < 0
+                ? -1f
+                : Math.max(.08f, Math.min(1f, value));
+        prefs.edit().putFloat(BRIGHTNESS, safe).apply();
     }
 
     public float ttsRate() {
-        return Math.max(.5f, Math.min(2f, prefs.getFloat(TTS_RATE, 1f)));
+        float rate = prefs.getFloat(TTS_RATE, 1f);
+        if (!Float.isFinite(rate)) return 1f;
+        return Math.max(.5f, Math.min(2f, rate));
     }
 
     public void setTtsRate(float rate) {
-        prefs.edit().putFloat(TTS_RATE, Math.max(.5f, Math.min(2f, rate))).apply();
+        float safe = Float.isFinite(rate) ? Math.max(.5f, Math.min(2f, rate)) : 1f;
+        prefs.edit().putFloat(TTS_RATE, safe).apply();
     }
 
     /**
