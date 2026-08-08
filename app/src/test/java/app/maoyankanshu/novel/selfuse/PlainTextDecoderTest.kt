@@ -30,6 +30,14 @@ class PlainTextDecoderTest {
     }
 
     @Test
+    fun utf8_literalReplacementCharacter_isStillValidUtf8() {
+        // U+FFFD can be intentional content. Its valid UTF-8 bytes must not be used as a
+        // heuristic that flips the entire document to GB18030.
+        val body = "原文允许包含替换符号 � 并继续保持 UTF-8"
+        assertEquals(body, PlainTextDecoder.decode(body.toByteArray(StandardCharsets.UTF_8)))
+    }
+
+    @Test
     fun utf16LeAndBe_withBom() {
         val body = "十六位"
         val leBom = byteArrayOf(0xFF.toByte(), 0xFE.toByte())
@@ -95,7 +103,7 @@ class PlainTextDecoderTest {
     }
 
     @Test
-    fun gb18030_whenUtf8WouldReplace() {
+    fun gb18030_whenUtf8IsActuallyMalformed() {
         val body = "这是 GB18030 简体中文"
         val bytes = body.toByteArray(Charset.forName("GB18030"))
         assertEquals(body, PlainTextDecoder.decode(bytes))
@@ -107,7 +115,7 @@ class PlainTextDecoderTest {
         val junk = byteArrayOf(0xFF.toByte(), 0xFE.toByte()) // bare UTF-16LE BOM, empty body
         assertEquals("", PlainTextDecoder.decode(junk))
         val single = byteArrayOf(0xFF.toByte())
-        // Single 0xFF is invalid UTF-8 → U+FFFD path may use GB18030; just ensure no throw.
+        // Single 0xFF is invalid UTF-8; fallback may still produce replacement text, just no throw.
         PlainTextDecoder.decode(single)
         PlainTextDecoder.decode(byteArrayOf(0x00, 0x00))
     }
