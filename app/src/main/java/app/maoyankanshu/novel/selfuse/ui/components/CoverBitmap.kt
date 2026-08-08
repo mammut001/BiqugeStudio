@@ -2,12 +2,26 @@ package app.maoyankanshu.novel.selfuse.ui.components
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.util.LruCache
+import java.io.File
 
 /**
  * Offline cover decode helpers for BookCard tiles.
  * No network; pure sample-size math is unit-testable on the JVM.
  */
 object CoverBitmap {
+    private const val CACHE_KB = 8 * 1024
+
+    /**
+     * Small process-local thumbnail cache. BookCard only requests shelf-sized images, so keeping
+     * a bounded set avoids repeated disk/bounds/decode work while scrolling without retaining
+     * full-size covers. Eviction never recycles bitmaps because an on-screen Compose Image may
+     * still hold a reference to one.
+     */
+    private val cache = object : LruCache<String, Bitmap>(CACHE_KB) {
+        override fun sizeOf(key: String, value: Bitmap): Int =
+            (value.allocationByteCount / 1024).coerceAtLeast(1)
+    }
 
     /**
      * Power-of-two [BitmapFactory.Options.inSampleSize] so decoded pixels stay at least
@@ -42,9 +56,22 @@ object CoverBitmap {
      * Missing/malformed/unreadable files → null (caller shows gradient fallback).
      */
     fun decodeFile(path: String, reqWidthPx: Int, reqHeightPx: Int): Bitmap? {
-        return try {
+        val file = File(path)
+        if (!file.isFile) return null
+        val key = coverCacheKey(
+            path = file.absolutePath,
+            lastModified = file.lastModified(),
+            fileLength = file.length(),
+            reqWidthPx = reqWidthPx,
+            reqHeightPx = reqHeightPx,
+        )
+        synchronized(cache) {
+            cache.get(key)?.takeUnless(Bitmap::isRecycled)?.let { return it }
+        }
+
+        val decoded = try {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(path, bounds)
+            BitmapFactory.decodeFile(file.absolutePath, bounds)
             if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
                 return null
             }
@@ -57,11 +84,36 @@ object CoverBitmap {
                     reqHeightPx,
                 )
             }
-            BitmapFactory.decodeFile(path, opts)
+            BitmapFactory.decodeFile(file.absolutePath, opts)
         } catch (_: Exception) {
             null
         } catch (_: OutOfMemoryError) {
             null
         }
+
+        if (decoded != null) {
+            synchronized(cache) {
+                cache.put(key, decoded)
+            }
+        }
+        return decoded
+    }
+
+    internal fun coverCacheKey(
+        path: String,
+        lastModified: Long,
+        fileLength: Long,
+        reqWidthPx: Int,
+        reqHeightPx: Int,
+    ): String = buildString {
+        append(path)
+        append('|')
+        append(lastModified)
+        append('|')
+        append(fileLength)
+        append('|')
+        append(reqWidthPx.coerceAtLeast(1))
+        append('x')
+        append(reqHeightPx.coerceAtLeast(1))
     }
 }
