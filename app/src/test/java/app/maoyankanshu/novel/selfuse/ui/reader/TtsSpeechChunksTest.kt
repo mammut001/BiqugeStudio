@@ -1,6 +1,7 @@
 package app.maoyankanshu.novel.selfuse.ui.reader
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -38,6 +39,27 @@ class TtsSpeechChunksTest {
         val text = "字".repeat(2000)
         val end = TtsSpeechChunks.nextChunkEnd(text, 0)
         assertEquals(TtsSpeechChunks.MAX_CHUNK_CHARS, end)
+    }
+
+    @Test
+    fun hardCut_neverSplitsUnicodeSurrogatePair() {
+        val prefix = "字".repeat(TtsSpeechChunks.MAX_CHUNK_CHARS - 1)
+        val text = prefix + "😀" + "尾".repeat(20)
+        val end = TtsSpeechChunks.nextChunkEnd(text, 0)
+        assertEquals(prefix.length, end)
+        assertFalse(text[end - 1].isHighSurrogate())
+        assertTrue(text[end].isHighSurrogate())
+        assertTrue(text[end + 1].isLowSurrogate())
+    }
+
+    @Test
+    fun hardCut_neverSplitsCrLfPair() {
+        val prefix = "字".repeat(TtsSpeechChunks.MAX_CHUNK_CHARS - 1)
+        val text = prefix + "\r\n" + "下一段"
+        val end = TtsSpeechChunks.nextChunkEnd(text, 0)
+        assertEquals(prefix.length, end)
+        assertEquals('\r', text[end])
+        assertEquals('\n', text[end + 1])
     }
 
     @Test
