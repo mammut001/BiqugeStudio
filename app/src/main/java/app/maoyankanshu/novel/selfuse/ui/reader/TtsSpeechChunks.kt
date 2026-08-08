@@ -30,14 +30,15 @@ object TtsSpeechChunks {
         if (text.isEmpty()) return 0
         val start = offset.coerceIn(0, text.length)
         if (start >= text.length) return text.length
-        val hardEnd = (start + MAX_CHUNK_CHARS).coerceAtMost(text.length)
+        val rawHardEnd = (start + MAX_CHUNK_CHARS).coerceAtMost(text.length)
+        val hardEnd = safeChunkBoundary(text, start, rawHardEnd)
 
         // Prefer the first paragraph end within the window (may be shorter than MIN_BREAK),
         // including when the remaining text is shorter than MAX_CHUNK_CHARS.
         for (i in start until hardEnd) {
             if (text[i] == '\n') return i + 1
         }
-        if (hardEnd >= text.length) return text.length
+        if (rawHardEnd >= text.length) return text.length
 
         val minBreak = (start + MIN_BREAK_CHARS).coerceAtMost(hardEnd)
         var breakAt = -1
@@ -60,6 +61,23 @@ object TtsSpeechChunks {
             }
         }
         return if (breakAt > start) breakAt else hardEnd
+    }
+
+    /**
+     * Keeps hard chunk cuts from splitting one Unicode code point or a CRLF pair.
+     * Broken surrogate pairs can make some OEM TTS engines skip, mispronounce, or reject
+     * the synthesized chunk entirely.
+     */
+    private fun safeChunkBoundary(text: String, start: Int, endExclusive: Int): Int {
+        if (endExclusive <= start || endExclusive >= text.length) return endExclusive
+        var end = endExclusive
+        if (text[end - 1].isHighSurrogate() && text[end].isLowSurrogate()) {
+            end--
+        }
+        if (end > start && end < text.length && text[end - 1] == '\r' && text[end] == '\n') {
+            end--
+        }
+        return if (end > start) end else endExclusive
     }
 
     /**
