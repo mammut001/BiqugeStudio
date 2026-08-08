@@ -71,7 +71,7 @@ object CoverBitmap {
             reqHeightPx = reqHeightPx,
         )
         synchronized(cache) {
-            cache.get(key)?.takeUnless(Bitmap::isRecycled)?.let { return it }
+            cache.get(key)?.takeUnless { it.isRecycled }?.let { return it }
         }
 
         val decoded = try {
