@@ -15,12 +15,17 @@ object CoverBitmap {
     /**
      * Small process-local thumbnail cache. BookCard only requests shelf-sized images, so keeping
      * a bounded set avoids repeated disk/bounds/decode work while scrolling without retaining
-     * full-size covers. Eviction never recycles bitmaps because an on-screen Compose Image may
-     * still hold a reference to one.
+     * full-size covers. Lazy creation keeps the pure math helpers usable in local JVM tests
+     * without initializing Android framework cache classes.
+     *
+     * Eviction never recycles bitmaps because an on-screen Compose Image may still hold a
+     * reference to one.
      */
-    private val cache = object : LruCache<String, Bitmap>(CACHE_KB) {
-        override fun sizeOf(key: String, value: Bitmap): Int =
-            (value.allocationByteCount / 1024).coerceAtLeast(1)
+    private val cache: LruCache<String, Bitmap> by lazy {
+        object : LruCache<String, Bitmap>(CACHE_KB) {
+            override fun sizeOf(key: String, value: Bitmap): Int =
+                (value.allocationByteCount / 1024).coerceAtLeast(1)
+        }
     }
 
     /**
