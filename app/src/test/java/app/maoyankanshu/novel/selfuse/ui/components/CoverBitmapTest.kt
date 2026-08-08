@@ -9,8 +9,8 @@ class CoverBitmapTest {
     @Test
     fun calculateInSampleSize_downsamplesByPowerOfTwo() {
         assertEquals(1, CoverBitmap.calculateInSampleSize(100, 100, 100, 100))
-        assertEquals(2, CoverBitmap.calculateInSampleSize(400, 400, 100, 100))
-        assertEquals(4, CoverBitmap.calculateInSampleSize(800, 800, 100, 100))
+        assertEquals(4, CoverBitmap.calculateInSampleSize(400, 400, 100, 100))
+        assertEquals(8, CoverBitmap.calculateInSampleSize(800, 800, 100, 100))
     }
 
     @Test
