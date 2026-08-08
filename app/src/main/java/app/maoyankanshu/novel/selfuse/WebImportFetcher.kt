@@ -82,6 +82,10 @@ object WebImportFetcher {
             if (!"https".equals(finalProtocol, ignoreCase = true)) {
                 throw IllegalArgumentException("HTTPS protocol required")
             }
+            // Capture the post-redirect address after verifying it is still HTTPS. The imported
+            // source footer should describe the page we actually downloaded, not a stale short/
+            // redirect URL the user happened to paste.
+            val finalUrl = connection.url.toString()
             // Fail fast on declared Content-Length before reading the body (API 23-safe).
             HttpsBodyLimits.rejectIfDeclaredTooLarge(
                 HttpsBodyLimits.contentLengthOf(connection),
@@ -94,7 +98,7 @@ object WebImportFetcher {
             var name = preferredTitle.trim()
             if (name.isEmpty()) name = pageTitle(html)
             if (name.isEmpty()) name = defaultTitle
-            return Result(title = name, body = body, sourceUrl = cleanUrl)
+            return Result(title = name, body = body, sourceUrl = finalUrl)
         } finally {
             connection.disconnect()
         }
