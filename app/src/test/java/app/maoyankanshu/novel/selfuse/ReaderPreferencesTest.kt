@@ -179,6 +179,17 @@ class ReaderPreferencesTest {
 
         readerPrefs.setTtsRate(1.25f)
         assertEquals(1.25f, readerPrefs.ttsRate(), 0.01f)
+
+        readerPrefs.setTtsRate(Float.NaN)
+        assertEquals(1f, readerPrefs.ttsRate(), 0.01f)
+        readerPrefs.setTtsRate(Float.POSITIVE_INFINITY)
+        assertEquals(1f, readerPrefs.ttsRate(), 0.01f)
+
+        // Corrupt legacy values must be sanitized even when they bypass the setter.
+        prefs.edit().putFloat("tts_rate", Float.NaN).apply()
+        assertEquals(1f, readerPrefs.ttsRate(), 0.01f)
+        prefs.edit().putFloat("tts_rate", Float.NEGATIVE_INFINITY).apply()
+        assertEquals(1f, readerPrefs.ttsRate(), 0.01f)
     }
 
     @Test
@@ -279,6 +290,18 @@ class ReaderPreferencesTest {
         assertEquals(1f, readerPrefs.brightness(), 0.001f)
         readerPrefs.setBrightness(-1f)
         assertEquals(-1f, readerPrefs.brightness(), 0.001f)
+
+        readerPrefs.setBrightness(Float.NaN)
+        assertEquals(-1f, readerPrefs.brightness(), 0.001f)
+        readerPrefs.setBrightness(Float.POSITIVE_INFINITY)
+        assertEquals(-1f, readerPrefs.brightness(), 0.001f)
+
+        prefs.edit().putFloat("reader_brightness", Float.NaN).apply()
+        assertEquals(-1f, readerPrefs.brightness(), 0.001f)
+        prefs.edit().putFloat("reader_brightness", 5f).apply()
+        assertEquals(1f, readerPrefs.brightness(), 0.001f)
+        prefs.edit().putFloat("reader_brightness", 0.001f).apply()
+        assertEquals(0.08f, readerPrefs.brightness(), 0.001f)
     }
 
     @Test
