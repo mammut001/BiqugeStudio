@@ -156,12 +156,18 @@ private fun RemoteImportScreen(
                 }
                 ensureActive()
                 if (!activity.canAcceptUi()) return@launch
-                LibraryStore.get(context).add(
-                    result.title,
-                    result.author,
-                    result.text,
-                    result.coverBytes,
-                )
+                // Persisting a downloaded multi-MB TXT/EPUB can involve file writes and JSON/
+                // preference updates. Keep that work off the Compose/main thread too.
+                withContext(Dispatchers.IO) {
+                    LibraryStore.get(context).add(
+                        result.title,
+                        result.author,
+                        result.text,
+                        result.coverBytes,
+                    )
+                }
+                ensureActive()
+                if (!activity.canAcceptUi()) return@launch
                 Toast.makeText(
                     context,
                     context.getString(R.string.remote_import_ok, result.title),
