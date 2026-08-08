@@ -98,6 +98,19 @@ object TtsSpeechChunks {
     }
 
     /**
+     * Paragraph start suitable for a user-initiated TTS seek. Leading whitespace is skipped;
+     * whitespace-only paragraphs return null so a tap never starts an empty utterance.
+     */
+    fun paragraphSpeechStart(text: String, offset: Int): Int? {
+        val range = paragraphRangeContaining(text, offset)
+        if (range.isEmpty()) return null
+        var start = range.first
+        val endExclusive = range.last + 1
+        while (start < endExclusive && text[start].isWhitespace()) start++
+        return start.takeIf { it < endExclusive }
+    }
+
+    /**
      * Trims whitespace from both ends of `[start, endExclusive)` inside [text],
      * returning the audible span. Empty when the slice is only whitespace.
      */
@@ -107,6 +120,31 @@ object TtsSpeechChunks {
         while (s < e && text[s].isWhitespace()) s++
         while (e > s && text[e - 1].isWhitespace()) e--
         return if (e > s) s until e else IntRange.EMPTY
+    }
+}
+
+/**
+ * Watchdog timing for app-owned synthesized playback.
+ *
+ * When the actual WAV/player duration is known, use it instead of guessing from character
+ * count. The old short character budget could expire before a slow Chinese utterance ended,
+ * stopping the current sentence and advancing to the next chunk.
+ */
+object TtsPlaybackWatchdog {
+    private const val MIN_TIMEOUT_MS = 8_000L
+    private const val COMPLETION_GRACE_MS = 5_000L
+    private const val FALLBACK_BASE_MS = 15_000L
+    private const val FALLBACK_PER_CHAR_MS = 750L
+    private const val MAX_TIMEOUT_MS = 8 * 60_000L
+
+    fun timeoutMs(knownDurationMs: Long?, chars: Int): Long {
+        val duration = knownDurationMs?.takeIf { it > 0L }
+        val raw = if (duration != null) {
+            duration + COMPLETION_GRACE_MS
+        } else {
+            FALLBACK_BASE_MS + chars.coerceAtLeast(1) * FALLBACK_PER_CHAR_MS
+        }
+        return raw.coerceIn(MIN_TIMEOUT_MS, MAX_TIMEOUT_MS)
     }
 }
 
