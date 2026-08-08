@@ -88,9 +88,7 @@ public final class LibraryStore {
                 context.getString(R.string.welcome_book_title));
     }
 
-    /**
-     * Package-visible for tests: same as production seed-author migration without Context strings.
-     */
+    /** Package-visible for tests: production seed-author migration without Context strings. */
     void migrateLegacySeedAuthor(String appName, String seedTitle) {
         if (appName == null || seedTitle == null) return;
         if (LEGACY_SEED_AUTHOR.equals(appName)) return;
@@ -139,9 +137,7 @@ public final class LibraryStore {
         migrateWelcomeSeedBody(appName, seedTitle, newBody);
     }
 
-    /**
-     * Package-visible for tests: seed-body migration without Android string resources.
-     */
+    /** Package-visible for tests: seed-body migration without Android string resources. */
     void migrateWelcomeSeedBody(String appName, String seedTitle, String newBody) {
         if (appName == null || seedTitle == null || newBody == null) return;
         String raw = prefs.getString(KEY, "");
@@ -169,14 +165,12 @@ public final class LibraryStore {
                     output.append(row).append('\n');
                     continue;
                 }
-                // Only the seed book body is read (welcome text is small; not user multi‑MB imports).
                 String text = readText(id);
                 if (text == null) {
                     output.append(row).append('\n');
                     continue;
                 }
                 if (text.contains(WELCOME_BODY_MARKER)) {
-                    // Author may still need upgrade without rewriting body.
                     if (!appName.equals(author)) {
                         output.append(id).append('|').append(values[1]).append('|')
                                 .append(encode(appName)).append('|').append(values[3]).append('\n');
@@ -201,18 +195,12 @@ public final class LibraryStore {
 
     public static LibraryStore get(Context context) { return new LibraryStore(context); }
 
-    /**
-     * Opens the store without seed migrations. Use on the reader path, where migrations would
-     * otherwise reread every imported TXT before the first page can be shown.
-     */
+    /** Opens the store without seed migrations for reader/progress hot paths. */
     public static LibraryStore getForReading(Context context) {
         return new LibraryStore(context, false);
     }
 
-    /**
-     * Main-shell / shelf listing entry. Same migrations as [get], but migrations never
-     * materialize multi‑MB user bodies (prefs-only author fix; seed body load is seed-only).
-     */
+    /** Main-shell / shelf listing entry; migrations never materialize user multi‑MB bodies. */
     public static LibraryStore getForListing(Context context) {
         return new LibraryStore(context, true);
     }
@@ -223,8 +211,6 @@ public final class LibraryStore {
         if (raw == null || raw.isEmpty()) return books;
         for (String row : raw.split("\\n", -1)) {
             if (row.trim().isEmpty()) continue;
-            // Backward-compatible: still exactly 4 fields (id|title|author|position).
-            // Covers are optional side files, not a 5th column.
             String[] values = row.split("\\|", 4);
             if (values.length != 4) continue;
             try {
@@ -240,11 +226,7 @@ public final class LibraryStore {
         return books;
     }
 
-    /**
-     * Shelf / store / discover list rows: title, author, progress, cover path, and
-     * character count — without decoding multi‑MB TXT bodies into [Book.text].
-     * [Book.text] is empty; use [Book.bodyLength] for overview stats.
-     */
+    /** Shelf/list metadata without decoding multi‑MB TXT bodies into Book.text. */
     public List<Book> booksForListing() {
         List<Book> books = new ArrayList<>();
         String raw = prefs.getString(KEY, "");
@@ -273,10 +255,7 @@ public final class LibraryStore {
         return books;
     }
 
-    /**
-     * Metadata only (no TXT body). Used on the progressive open path so the reader can
-     * paint chrome / progress before a multi‑MB decode finishes.
-     */
+    /** Metadata only (no TXT body). */
     public BookRecord recordById(String id) {
         if (id == null || id.isEmpty()) return null;
         String raw = prefs.getString(KEY, "");
@@ -300,10 +279,7 @@ public final class LibraryStore {
         return null;
     }
 
-    /**
-     * Raw UTF-8 bytes for one book file, or null if missing. Progressive open decodes a
-     * window first, then the full string, without re-reading the shelf.
-     */
+    /** Raw UTF-8 bytes for one book file, or null if missing. */
     public byte[] readBookBytes(String id) {
         if (id == null || id.isEmpty()) return null;
         return readTextBytes(id);
@@ -345,10 +321,7 @@ public final class LibraryStore {
         add(title, author, text, null);
     }
 
-    /**
-     * Optional [coverBytes] (JPEG/PNG/…) stored under covers/{id}.cover when within size limit.
-     * Adds only the new body + metadata row; existing multi‑MB books are never decoded/re-written.
-     */
+    /** Adds only the new body + metadata row; existing books are never decoded/re-written. */
     public void add(String title, String author, String text, byte[] coverBytes) {
         String id = UUID.randomUUID().toString();
         writeText(id, text);
@@ -392,7 +365,7 @@ public final class LibraryStore {
         if (changed) prefs.edit().putString(KEY, output.toString()).apply();
     }
 
-    /** Keeps the shelf order meaningful: a pinned book is shown first. Prefs-only — no TXT decode. */
+    /** Keeps the shelf order meaningful: a pinned book is shown first. Prefs-only. */
     public void moveToTop(String id) {
         if (id == null || id.isEmpty()) return;
         String raw = prefs.getString(KEY, "");
@@ -444,7 +417,7 @@ public final class LibraryStore {
             if (values.length == 4 && id.equals(values[0])) continue;
             output.append(row).append('\n');
         }
-        File file = new File(bookDir(), id + ".txt");
+        File file = bookFile(id);
         if (file.exists()) file.delete();
         deleteCharCount(id);
         deleteCover(id);
@@ -453,7 +426,8 @@ public final class LibraryStore {
 
     /**
      * Exports all local books, progress, and covers into a portable ZIP backup.
-     * Bodies are streamed as stored UTF-8 bytes one book at a time; no full-library String list.
+     * TXT/cover files stream directly into the ZIP with a fixed buffer; backup output errors
+     * propagate to the caller instead of being mistaken for a corrupt metadata row.
      */
     public void exportTo(OutputStream output) throws IOException {
         String raw = prefs.getString(KEY, "");
@@ -464,29 +438,33 @@ public final class LibraryStore {
                 if (row.trim().isEmpty()) continue;
                 String[] values = row.split("\\|", 4);
                 if (values.length != 4) continue;
+
+                String id;
+                int position;
                 try {
-                    String id = values[0];
-                    // Validate metadata the same way books() did, without touching body text.
+                    id = values[0];
+                    // Validate base64 + position just like books(), but keep I/O outside this catch.
                     decode(values[1]);
                     decode(values[2]);
-                    int position = Math.max(0, Math.min(Integer.parseInt(values[3]), 1000));
-                    byte[] body = readTextBytes(id);
-                    if (body == null) continue;
+                    position = Math.max(0, Math.min(Integer.parseInt(values[3]), 1000));
+                } catch (RuntimeException malformedMetadata) {
+                    continue;
+                }
 
-                    manifest.append(id).append('|').append(values[1]).append('|')
-                            .append(values[2]).append('|').append(position).append('\n');
-                    zip.putNextEntry(new ZipEntry("books/" + id + ".txt"));
-                    zip.write(body);
+                File bodyFile = bookFile(id);
+                if (!isValidBookFile(bodyFile)) continue;
+                manifest.append(id).append('|').append(values[1]).append('|')
+                        .append(values[2]).append('|').append(position).append('\n');
+
+                zip.putNextEntry(new ZipEntry("books/" + id + ".txt"));
+                copyFile(bodyFile, zip);
+                zip.closeEntry();
+
+                File cover = coverFile(id);
+                if (cover.isFile() && cover.length() > 0 && cover.length() <= MAX_COVER_BYTES) {
+                    zip.putNextEntry(new ZipEntry("covers/" + id + ".cover"));
+                    copyFile(cover, zip);
                     zip.closeEntry();
-
-                    byte[] cover = readCoverBytes(id);
-                    if (cover != null && cover.length > 0) {
-                        zip.putNextEntry(new ZipEntry("covers/" + id + ".cover"));
-                        zip.write(cover);
-                        zip.closeEntry();
-                    }
-                } catch (Exception ignored) {
-                    // Corrupt rows/files are skipped just like books().
                 }
             }
             zip.putNextEntry(new ZipEntry("library.txt"));
@@ -495,12 +473,12 @@ public final class LibraryStore {
         }
     }
 
-    /** Writes one book as its already-stored UTF-8 TXT bytes; no String round-trip. */
+    /** Writes one book as its already-stored UTF-8 TXT bytes; no String/byte[] round-trip. */
     public void exportBook(String id, OutputStream output) throws IOException {
         if (recordById(id) == null) throw new IOException("Book not found");
-        byte[] body = readTextBytes(id);
-        if (body == null) throw new IOException("Book not found");
-        output.write(body);
+        File file = bookFile(id);
+        if (!isValidBookFile(file)) throw new IOException("Book not found");
+        copyFile(file, output);
         output.flush();
     }
 
@@ -557,8 +535,6 @@ public final class LibraryStore {
                 String author = decode(values[2]);
                 int position = Math.max(0, Math.min(Integer.parseInt(values[3]), 1000));
                 String newId = UUID.randomUUID().toString();
-                // Preserve historical behavior: backup text is normalized through UTF-8 String
-                // before being stored, but only the imported body is decoded — never existing books.
                 writeText(newId, new String(sourceText, StandardCharsets.UTF_8));
                 writeCover(newId, covers.get(values[0]));
                 appendMetadataRow(output, newId, title, author, position);
@@ -571,15 +547,11 @@ public final class LibraryStore {
         return imported;
     }
 
-    /**
-     * Legacy full-save helper retained for migrations/tests that intentionally own full bodies.
-     * Hot mutations (add/edit/import/export) avoid it so large libraries are not rewritten.
-     */
+    /** Legacy full-save helper retained for migrations/tests that intentionally own full bodies. */
     private void save(List<Book> books) {
         StringBuilder output = new StringBuilder();
         for (Book book : books) {
             writeText(book.id, book.text);
-            // 4-field rows only — covers stay as side files (old clients ignore them).
             appendMetadataRow(output, book.id, book.title, book.author, book.position);
         }
         prefs.edit().putString(KEY, output.toString()).apply();
@@ -614,6 +586,14 @@ public final class LibraryStore {
         return dir;
     }
 
+    private File bookFile(String id) {
+        return new File(bookDir(), id + ".txt");
+    }
+
+    private boolean isValidBookFile(File file) {
+        return file != null && file.isFile() && file.length() >= 0 && file.length() <= MAX_SINGLE_ENTRY_BYTES;
+    }
+
     private File coverDir() {
         File dir = new File(filesDir, "covers");
         if (!dir.exists()) dir.mkdirs();
@@ -631,10 +611,7 @@ public final class LibraryStore {
         return file.getAbsolutePath();
     }
 
-    /**
-     * Persist cover bytes; returns absolute path or null if skipped/failed.
-     * Oversized or empty payloads are ignored (graceful no-cover).
-     */
+    /** Persist cover bytes; oversized/empty payloads are ignored gracefully. */
     private String writeCover(String id, byte[] coverBytes) {
         if (coverBytes == null || coverBytes.length == 0 || coverBytes.length > MAX_COVER_BYTES) {
             return null;
@@ -674,7 +651,7 @@ public final class LibraryStore {
     }
 
     private byte[] readTextBytes(String id) {
-        File file = new File(bookDir(), id + ".txt");
+        File file = bookFile(id);
         if (!file.exists()) return null;
         try (FileInputStream input = new FileInputStream(file)) {
             long length = file.length();
@@ -696,10 +673,18 @@ public final class LibraryStore {
         }
     }
 
-    /**
-     * Full-body decode counter for JVM tests of list/hot mutation paths (package-visible).
-     * Production code does not read this field.
-     */
+    /** Copy one private file with bounded memory; caller owns [output]. */
+    private static void copyFile(File file, OutputStream output) throws IOException {
+        try (FileInputStream input = new FileInputStream(file)) {
+            byte[] buffer = new byte[8192];
+            int count;
+            while ((count = input.read(buffer)) != -1) {
+                output.write(buffer, 0, count);
+            }
+        }
+    }
+
+    /** Full-body decode counter for JVM tests of list/hot mutation paths. */
     int fullBodyDecodeCount = 0;
 
     private String readText(String id) {
@@ -707,22 +692,20 @@ public final class LibraryStore {
         if (data == null) return null;
         fullBodyDecodeCount++;
         String text = data.length == 0 ? "" : new String(data, StandardCharsets.UTF_8);
-        // Keep list length cache warm after full reads.
         writeCharCount(id, text.length());
         return text;
     }
 
     private void writeText(String id, String text) {
         String safeText = text == null ? "" : text;
-        try (FileOutputStream output = new FileOutputStream(new File(bookDir(), id + ".txt"))) {
+        try (FileOutputStream output = new FileOutputStream(bookFile(id))) {
             output.write(safeText.getBytes(StandardCharsets.UTF_8));
             writeCharCount(id, safeText.length());
         } catch (IOException ignored) { }
     }
 
     private boolean bookFileExists(String id) {
-        File file = new File(bookDir(), id + ".txt");
-        return file.exists();
+        return bookFile(id).exists();
     }
 
     private File charCountFile(String id) {
@@ -740,10 +723,7 @@ public final class LibraryStore {
         if (file.exists()) file.delete();
     }
 
-    /**
-     * Character count for list/overview UI. Prefers a side cache written on save;
-     * otherwise counts UTF‑8 chars with a bounded buffer (no multi‑MB String).
-     */
+    /** Character count for list/overview UI with a small side cache. */
     private int textCharCount(String id) {
         File cache = charCountFile(id);
         if (cache.exists() && cache.length() > 0 && cache.length() < 32) {
@@ -755,7 +735,7 @@ public final class LibraryStore {
                 }
             } catch (Exception ignored) { }
         }
-        File file = new File(bookDir(), id + ".txt");
+        File file = bookFile(id);
         if (!file.exists()) return 0;
         int count = countUtf8Chars(file);
         writeCharCount(id, count);
@@ -786,7 +766,6 @@ public final class LibraryStore {
     }
 
     private static String encode(String value) {
-        // TextBase64: API-23-safe, JVM-unit-testable; same wire format as android.util.Base64.NO_WRAP
         return TextBase64.encode(value.getBytes(StandardCharsets.UTF_8));
     }
 
