@@ -9,6 +9,7 @@ import org.junit.rules.TemporaryFolder
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
+import java.util.zip.ZipInputStream
 
 /** Regression coverage for library operations that must not materialize every saved book body. */
 class LibraryStoreHotPathTest {
@@ -123,7 +124,23 @@ class LibraryStoreHotPathTest {
         val backup = ByteArrayOutputStream()
         store.exportTo(backup)
         assertEquals(0, store.fullBodyDecodeCount)
-        assertTrue(backup.size() > single.size())
+
+        // ZIP compression may legitimately make a repetitive text backup smaller than the raw
+        // TXT. Validate the archived payload itself instead of comparing compressed byte sizes.
+        val archivedBody = ZipInputStream(ByteArrayInputStream(backup.toByteArray())).use { zip ->
+            var entry = zip.nextEntry
+            var extracted: String? = null
+            while (entry != null) {
+                if (entry.name == "books/$id.txt") {
+                    extracted = zip.readBytes().toString(StandardCharsets.UTF_8)
+                    break
+                }
+                zip.closeEntry()
+                entry = zip.nextEntry
+            }
+            extracted
+        }
+        assertEquals(body, archivedBody)
     }
 
     @Test
