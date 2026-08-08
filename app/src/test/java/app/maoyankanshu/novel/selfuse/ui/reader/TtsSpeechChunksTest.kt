@@ -90,6 +90,17 @@ class TtsSpeechChunksTest {
     }
 
     @Test
+    fun paragraphRange_trimsAsciiAndFullWidthIndentWhitespace() {
+        val text = "　　第一段内容。   \n  第二段内容。"
+        val first = TtsSpeechChunks.paragraphRangeContaining(text, 0)
+        assertEquals("第一段内容。", text.substring(first.first, first.last + 1))
+
+        val secondStart = text.indexOf("第二段")
+        val second = TtsSpeechChunks.paragraphRangeContaining(text, secondStart - 1)
+        assertEquals("第二段内容。", text.substring(second.first, second.last + 1))
+    }
+
+    @Test
     fun paragraphRange_stripsCarriageReturn() {
         val text = "一行\r\n二行"
         val first = TtsSpeechChunks.paragraphRangeContaining(text, 0)
