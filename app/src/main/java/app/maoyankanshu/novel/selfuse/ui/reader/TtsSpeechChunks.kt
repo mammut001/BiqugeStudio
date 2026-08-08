@@ -63,9 +63,12 @@ object TtsSpeechChunks {
     }
 
     /**
-     * Inclusive [IntRange] of the paragraph that contains [offset]
-     * (from after the previous `\n` through the char before the next `\n`,
-     * stripping a trailing `\r` from `\r\n` line endings).
+     * Inclusive [IntRange] of the visible paragraph that contains [offset].
+     *
+     * Paragraph-leading/trailing whitespace is excluded intentionally. Imported novels often
+     * contain two ASCII/full-width spaces before every paragraph while the reader also renders
+     * a first-line indent. Including those invisible characters in a background span makes the
+     * active TTS paragraph look like a solid rectangular block starting at the left edge.
      */
     fun paragraphRangeContaining(text: String, offset: Int): IntRange {
         if (text.isEmpty()) return IntRange.EMPTY
@@ -86,15 +89,11 @@ object TtsSpeechChunks {
         while (endExclusive < text.length && text[endExclusive] != '\n') {
             endExclusive++
         }
-        // Drop CR from Windows `\r\n` so highlight does not paint a control char.
-        if (endExclusive > start && text[endExclusive - 1] == '\r') {
-            endExclusive--
-        }
-        if (endExclusive <= start) {
-            val end = (start + 1).coerceAtMost(text.length)
-            return if (end > start) start until end else IntRange.EMPTY
-        }
-        return start until endExclusive
+
+        // Keep indentation in layout/text, but never paint it as part of the TTS highlight.
+        while (start < endExclusive && text[start].isWhitespace()) start++
+        while (endExclusive > start && text[endExclusive - 1].isWhitespace()) endExclusive--
+        return if (endExclusive > start) start until endExclusive else IntRange.EMPTY
     }
 
     /**
@@ -104,10 +103,7 @@ object TtsSpeechChunks {
     fun paragraphSpeechStart(text: String, offset: Int): Int? {
         val range = paragraphRangeContaining(text, offset)
         if (range.isEmpty()) return null
-        var start = range.first
-        val endExclusive = range.last + 1
-        while (start < endExclusive && text[start].isWhitespace()) start++
-        return start.takeIf { it < endExclusive }
+        return range.first
     }
 
     /**
