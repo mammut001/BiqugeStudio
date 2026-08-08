@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -29,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,7 +68,11 @@ fun DiscoverScreen(
 ) {
     val context = LocalContext.current
     var showClearDialog by remember { mutableStateOf(false) }
-    var timeRange by remember { mutableStateOf(ReadingTimeRange.TODAY) }
+    // Preserve the selected range through rotation/process recreation so returning to “我的”
+    // does not unexpectedly snap a 7/30-day view back to Today.
+    var timeRangeName by rememberSaveable { mutableStateOf(ReadingTimeRange.TODAY.name) }
+    val timeRange = ReadingTimeRange.entries.firstOrNull { it.name == timeRangeName }
+        ?: ReadingTimeRange.TODAY
     val characters = remember(books) { LibraryListModels.totalCharacters(books) }
     val started = remember(books) { LibraryListModels.startedCount(books) }
     val inProgress = remember(books) { LibraryListModels.inProgressBooks(books) }
@@ -174,7 +181,7 @@ fun DiscoverScreen(
                     Spacer(Modifier.height(12.dp))
                     ReadingTimeRangeChips(
                         selected = timeRange,
-                        onSelected = { timeRange = it },
+                        onSelected = { timeRangeName = it.name },
                         todayCd = rangeTodayCd,
                         last7Cd = range7Cd,
                         last30Cd = range30Cd,
@@ -297,6 +304,7 @@ fun DiscoverScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ReadingTimeRangeChips(
     selected: ReadingTimeRange,
@@ -305,9 +313,12 @@ private fun ReadingTimeRangeChips(
     last7Cd: String,
     last30Cd: String,
 ) {
-    Row(
+    // Flow instead of a fixed Row: three localized labels still remain tappable at large font
+    // scale or on narrow devices instead of being squeezed/clipped off-screen.
+    FlowRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         FilterChip(
             selected = selected == ReadingTimeRange.TODAY,
