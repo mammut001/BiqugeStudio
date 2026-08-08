@@ -83,7 +83,15 @@ fun DiscoverScreen(
     val started = remember(books) { LibraryListModels.startedCount(books) }
     val inProgress = remember(books) { LibraryListModels.inProgressBooks(books) }
     val booksById = remember(books) { books.associateBy { it.id } }
-    val history = remember(historyVersion) { ReadingHistory.get(context).list() }
+
+    // Recent-reading persistence is small but still storage/parsing work. Keep it outside
+    // composition/main just like the shelf's Recent sort so a long history never delays a frame.
+    var history by remember { mutableStateOf<List<ReadingHistory.Entry>>(emptyList()) }
+    LaunchedEffect(historyVersion) {
+        history = withContext(Dispatchers.IO) {
+            ReadingHistory.get(context).list()
+        }
+    }
     val visibleHistory = remember(history, booksById) {
         history.filter { booksById.containsKey(it.bookId) }
     }
