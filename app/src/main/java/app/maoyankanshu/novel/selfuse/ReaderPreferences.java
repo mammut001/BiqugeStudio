@@ -81,7 +81,9 @@ public final class ReaderPreferences {
     }
 
     public int fontSize() {
-        return prefs.getInt(FONT, 18);
+        // Clamp on read as well as write so stale/legacy/corrupt preferences never feed the
+        // Compose reader an unsupported value before the user touches the controls again.
+        return Math.max(14, Math.min(30, prefs.getInt(FONT, 18)));
     }
 
     public void setFontSize(int size) {
