@@ -10,9 +10,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
@@ -20,11 +22,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -39,10 +44,9 @@ import app.maoyankanshu.novel.selfuse.R
 import app.maoyankanshu.novel.selfuse.ReadingHistory
 import app.maoyankanshu.novel.selfuse.ui.components.BookCard
 import app.maoyankanshu.novel.selfuse.ui.components.EmptyState
-
-import androidx.compose.foundation.layout.size
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.ui.Alignment
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -55,6 +59,7 @@ fun ShelfScreen(
     onHistoryChanged: () -> Unit = {},
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var menuBook by remember { mutableStateOf<Book?>(null) }
     var pendingDelete by remember { mutableStateOf<Book?>(null) }
     // Keep shelf controls through rotation/process recreation. Save the enum name instead of
@@ -71,8 +76,14 @@ fun ShelfScreen(
     var sortMenuExpanded by remember { mutableStateOf(false) }
     var groupMenuExpanded by remember { mutableStateOf(false) }
     val unknownAuthorLabel = stringResource(R.string.shelf_author_unknown)
-    val recentReadAt = remember(books, historyVersion) {
-        ReadingHistory.get(context).list().associate { it.bookId to it.at }
+
+    // Reading history may be backed by local persistence. Do not parse/read it during Compose
+    // on the main thread, especially when a large history list is used for Recent sorting.
+    var recentReadAt by remember { mutableStateOf<Map<String, Long>>(emptyMap()) }
+    LaunchedEffect(books, historyVersion) {
+        recentReadAt = withContext(Dispatchers.IO) {
+            ReadingHistory.get(context).list().associate { it.bookId to it.at }
+        }
     }
 
     // 继续阅读 shares sortOrder with 全部书籍; progressFilter applies only to sectionAll.
@@ -249,9 +260,13 @@ fun ShelfScreen(
                 menuBook = null
             },
             onPin = {
-                LibraryStore.get(context).moveToTop(book.id)
                 menuBook = null
-                onLibraryChanged()
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        LibraryStore.get(context).moveToTop(book.id)
+                    }
+                    onLibraryChanged()
+                }
             },
             onEdit = {
                 context.startActivity(AppIntents.bookDetailEdit(context, book.id))
@@ -274,11 +289,16 @@ fun ShelfScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        LibraryStore.get(context).remove(book.id)
-                        ReadingHistory.get(context).remove(book.id)
+                        // Close confirmation immediately; storage deletion happens off-main.
                         pendingDelete = null
-                        onLibraryChanged()
-                        onHistoryChanged()
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                LibraryStore.get(context).remove(book.id)
+                                ReadingHistory.get(context).remove(book.id)
+                            }
+                            onLibraryChanged()
+                            onHistoryChanged()
+                        }
                     },
                     modifier = Modifier.heightIn(min = 48.dp),
                 ) {
