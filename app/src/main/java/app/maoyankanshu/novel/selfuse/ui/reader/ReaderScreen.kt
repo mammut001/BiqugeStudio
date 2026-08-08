@@ -790,6 +790,17 @@ fun ReaderScreen(
         return started
     }
 
+    fun requestTtsStartAtParagraph(absoluteOffset: Int): Boolean {
+        if (!textFullyLoaded || book.text.isEmpty()) return false
+        val start = TtsSpeechChunks.paragraphSpeechStart(book.text, absoluteOffset) ?: return false
+        val range = TtsSpeechChunks.paragraphRangeContaining(book.text, start)
+        ttsSpeakBody = book.text
+        ttsHighlightRange = range.takeUnless { it.isEmpty() }
+        val started = ttsController?.start(book.text, start) == true
+        if (started) menuVisible = false
+        return started
+    }
+
     fun toggleInPageTts() {
         if (!textFullyLoaded) {
             Toast.makeText(
@@ -1081,10 +1092,26 @@ fun ReaderScreen(
                                     highlightColor = highlightColor,
                                 )
                             }
+                            var pageTextLayout by remember(pageBody, pageTextStyle) {
+                                mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null)
+                            }
                             Text(
                                 text = annotatedBody,
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .pointerInput(ttsState, pageStartOffset, pageBody) {
+                                        if (ttsState == ReaderTtsState.Speaking && pageBody.isNotEmpty()) {
+                                            detectTapGestures { position ->
+                                                val layout = pageTextLayout ?: return@detectTapGestures
+                                                val localOffset = layout
+                                                    .getOffsetForPosition(position)
+                                                    .coerceIn(0, pageBody.lastIndex)
+                                                requestTtsStartAtParagraph(pageStartOffset + localOffset)
+                                            }
+                                        }
+                                    },
                                 style = pageTextStyle,
+                                onTextLayout = { pageTextLayout = it },
                                 // Clip within the padded body; footer gap + line safety prevent cut-off.
                                 overflow = TextOverflow.Clip,
                                 softWrap = true,
