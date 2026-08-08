@@ -112,12 +112,29 @@ class TtsSpeechChunksTest {
     }
 
     @Test
+    fun paragraphSpeechStart_skipsLeadingWhitespaceAndRejectsBlankParagraph() {
+        val text = "第一段\n   第二段内容\n   \n第三段"
+        val secondTap = text.indexOf("第二段") + 2
+        assertEquals(text.indexOf("第二段"), TtsSpeechChunks.paragraphSpeechStart(text, secondTap))
+
+        val blankLineStart = text.indexOf("   \n第三段")
+        assertNull(TtsSpeechChunks.paragraphSpeechStart(text, blankLineStart + 1))
+    }
+
+    @Test
     fun trimmedChunkRange_skipsWhitespace() {
         val text = "  \n你好。\n  "
         // indices: 0-1 spaces, 2 \n, 3-5 你好。, 6 \n, 7-8 spaces
         val range = TtsSpeechChunks.trimmedChunkRange(text, 0, 6)
         assertEquals("你好。", text.substring(range.first, range.last + 1))
         assertTrue(TtsSpeechChunks.trimmedChunkRange(text, 0, 3).isEmpty())
+    }
+
+    @Test
+    fun playbackWatchdog_prefersActualDurationAndKeepsGenerousFallback() {
+        assertEquals(35_000L, TtsPlaybackWatchdog.timeoutMs(30_000L, 100))
+        assertEquals(90_000L, TtsPlaybackWatchdog.timeoutMs(null, 100))
+        assertTrue(TtsPlaybackWatchdog.timeoutMs(70_000L, 10) > 70_000L)
     }
 
     @Test
