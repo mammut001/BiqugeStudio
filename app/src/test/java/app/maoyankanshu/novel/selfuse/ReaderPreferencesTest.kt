@@ -84,6 +84,12 @@ class ReaderPreferencesTest {
         readerPrefs.setFontSize(40)
         assertEquals(30, readerPrefs.fontSize())
 
+        // Reading must also clamp stale/legacy/corrupt values that bypassed the setter.
+        prefs.edit().putInt("font_size", 3).apply()
+        assertEquals(14, readerPrefs.fontSize())
+        prefs.edit().putInt("font_size", 99).apply()
+        assertEquals(30, readerPrefs.fontSize())
+
         readerPrefs.setFontSize(22)
         assertEquals(22, readerPrefs.fontSize())
     }
