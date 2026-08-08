@@ -55,7 +55,6 @@ import androidx.compose.ui.unit.sp
 import app.maoyankanshu.novel.selfuse.Book
 import app.maoyankanshu.novel.selfuse.R
 import app.maoyankanshu.novel.selfuse.ui.reader.ProgressMath
-import kotlin.math.abs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -159,10 +158,7 @@ fun BookCard(
                         .clip(RoundedCornerShape(8.dp))
                         .then(
                             if (coverBitmap == null) Modifier.background(coverBrush) else Modifier,
-                        )
-                        .semantics {
-                            contentDescription = "封面，$initial"
-                        },
+                        ),
                     contentAlignment = Alignment.Center,
                 ) {
                     if (coverBitmap != null) {
@@ -271,7 +267,6 @@ fun BookCard(
 
 /** Deterministic warm gradient from book id/title — offline only, no remote art. */
 private fun coverGradient(seed: String): Brush {
-    val h = abs(seed.hashCode())
     val palette = listOf(
         Color(0xFF8D6E63) to Color(0xFF5D4037),
         Color(0xFF6D4C41) to Color(0xFF3E2723),
@@ -282,6 +277,12 @@ private fun coverGradient(seed: String): Brush {
         Color(0xFFEF6C00) to Color(0xFFE65100),
         Color(0xFF546E7A) to Color(0xFF37474F),
     )
-    val (start, end) = palette[h % palette.size]
+    val (start, end) = palette[coverPaletteIndex(seed, palette.size)]
     return Brush.linearGradient(listOf(start, end))
+}
+
+/** Stable non-negative palette index even when [String.hashCode] is [Int.MIN_VALUE]. */
+internal fun coverPaletteIndex(seed: String, paletteSize: Int): Int {
+    require(paletteSize > 0) { "paletteSize must be positive" }
+    return Math.floorMod(seed.hashCode(), paletteSize)
 }
