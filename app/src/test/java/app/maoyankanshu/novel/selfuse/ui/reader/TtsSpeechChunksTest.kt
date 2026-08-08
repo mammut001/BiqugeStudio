@@ -94,10 +94,12 @@ class TtsSpeechChunksTest {
         val text = "　　第一段内容。   \n  第二段内容。"
         val first = TtsSpeechChunks.paragraphRangeContaining(text, 0)
         assertEquals("第一段内容。", text.substring(first.first, first.last + 1))
+        assertTrue(first.first >= 2) // two full-width indent characters stay outside highlight
 
         val secondStart = text.indexOf("第二段")
         val second = TtsSpeechChunks.paragraphRangeContaining(text, secondStart - 1)
         assertEquals("第二段内容。", text.substring(second.first, second.last + 1))
+        assertEquals(secondStart, second.first)
     }
 
     @Test
