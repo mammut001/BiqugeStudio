@@ -28,9 +28,11 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -51,6 +53,9 @@ import app.maoyankanshu.novel.selfuse.ui.components.BookCard
 import app.maoyankanshu.novel.selfuse.ui.components.EmptyState
 import java.text.DateFormat
 import java.util.Date
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private enum class ReadingTimeRange(val dayCount: Int) {
     TODAY(1),
@@ -67,6 +72,7 @@ fun DiscoverScreen(
     contentPadding: PaddingValues,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var showClearDialog by remember { mutableStateOf(false) }
     // Preserve the selected range through rotation/process recreation so returning to “我的”
     // does not unexpectedly snap a 7/30-day view back to Today.
@@ -84,10 +90,16 @@ fun DiscoverScreen(
     val timeFormat = remember {
         DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
     }
-    val dayEntries = remember(historyVersion, timeRange) {
-        ReadingStats.days(context, timeRange.dayCount)
+
+    // ReadingStats may read several day buckets from local persistence. Keep that work out of
+    // composition/main; the lightweight Long list is all the chart actually needs.
+    var dayMillis by remember { mutableStateOf<List<Long>>(emptyList()) }
+    LaunchedEffect(historyVersion, timeRange) {
+        dayMillis = withContext(Dispatchers.IO) {
+            ReadingStats.days(context, timeRange.dayCount).map { it.millis }
+        }
     }
-    val rangeMillis = remember(dayEntries) { dayEntries.sumOf { it.millis } }
+    val rangeMillis = remember(dayMillis) { dayMillis.sum() }
     val rangeLabel = ReadingStats.formatDuration(rangeMillis)
     val rangeStatLabel = when (timeRange) {
         ReadingTimeRange.TODAY -> stringResource(R.string.discover_stat_today)
@@ -130,8 +142,12 @@ fun DiscoverScreen(
                 TextButton(
                     onClick = {
                         showClearDialog = false
-                        ReadingHistory.get(context).clear()
-                        onHistoryCleared()
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                ReadingHistory.get(context).clear()
+                            }
+                            onHistoryCleared()
+                        }
                     },
                     modifier = Modifier
                         .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
@@ -204,7 +220,7 @@ fun DiscoverScreen(
                     }
                     Spacer(Modifier.height(12.dp))
                     ReadingDurationBars(
-                        dayMillis = dayEntries.map { it.millis },
+                        dayMillis = dayMillis,
                         contentDescription = chartCd,
                     )
                     Spacer(Modifier.height(12.dp))
