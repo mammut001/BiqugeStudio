@@ -651,9 +651,8 @@ fun ReaderScreen(
     ttsChunkJump.value = { jumpToOffset(it) }
     var ttsHighlightRange by remember { mutableStateOf<IntRange?>(null) }
     /** Body snapshot used by the active TTS session (offsets from controller.start). */
-    var ttsSpeakBody by remember { mutableStateOf("") }
+    val ttsSpeakBodyRef = remember { mutableStateOf("") }
     var ttsController by remember { mutableStateOf<ReaderTtsController?>(null) }
-    val ttsSpeakBodyRef = rememberUpdatedState(ttsSpeakBody)
     if (textFullyLoaded) {
         DisposableEffect(book.id) {
             val ctrl = ReaderTtsController(
@@ -694,7 +693,7 @@ fun ReaderScreen(
                 ctrl.shutdown()
                 if (ttsController === ctrl) ttsController = null
                 ttsHighlightRange = null
-                ttsSpeakBody = ""
+                ttsSpeakBodyRef.value = ""
                 ttsState = ReaderTtsState.Ready
             }
         }
@@ -781,8 +780,11 @@ fun ReaderScreen(
         }
         // Snapshot the speaking body so paragraph lookup stays aligned with
         // controller offsets even if book.text is replaced later under the same id.
-        ttsSpeakBody = book.text
-        val started = ttsController?.start(book.text, currentReadingOffset()) == true
+        val start = currentReadingOffset()
+        ttsSpeakBodyRef.value = book.text
+        ttsHighlightRange = TtsSpeechChunks.paragraphRangeContaining(book.text, start)
+            .takeUnless { it.isEmpty() }
+        val started = ttsController?.start(book.text, start) == true
         if (started) {
             // Hide chrome so taps don't fight TTS; user can show it again if needed.
             menuVisible = false
@@ -794,7 +796,7 @@ fun ReaderScreen(
         if (!textFullyLoaded || book.text.isEmpty()) return false
         val start = TtsSpeechChunks.paragraphSpeechStart(book.text, absoluteOffset) ?: return false
         val range = TtsSpeechChunks.paragraphRangeContaining(book.text, start)
-        ttsSpeakBody = book.text
+        ttsSpeakBodyRef.value = book.text
         ttsHighlightRange = range.takeUnless { it.isEmpty() }
         val started = ttsController?.start(book.text, start) == true
         if (started) menuVisible = false
@@ -1072,50 +1074,62 @@ fun ReaderScreen(
                                 }
                             },
                     ) {
-                        SelectionContainer(
-                            modifier = Modifier
-                                .align(Alignment.TopStart)
-                                .fillMaxWidth()
-                                .padding(horizontal = padH, vertical = padV),
+                        val highlightColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
+                        val annotatedBody = remember(
+                            pageBody,
+                            pageStartOffset,
+                            ttsHighlightRange,
+                            highlightColor,
                         ) {
-                            val highlightColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
-                            val annotatedBody = remember(
-                                pageBody,
-                                pageStartOffset,
-                                ttsHighlightRange,
-                                highlightColor,
-                            ) {
-                                ttsFollowHighlightAnnotated(
-                                    pageBody = pageBody,
-                                    pageStartOffset = pageStartOffset,
-                                    highlight = ttsHighlightRange,
-                                    highlightColor = highlightColor,
-                                )
+                            ttsFollowHighlightAnnotated(
+                                pageBody = pageBody,
+                                pageStartOffset = pageStartOffset,
+                                highlight = ttsHighlightRange,
+                                highlightColor = highlightColor,
+                            )
+                        }
+                        var pageTextLayout by remember(pageBody, pageTextStyle) {
+                            mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null)
+                        }
+                        val bodyModifier = Modifier
+                            .align(Alignment.TopStart)
+                            .fillMaxWidth()
+                            .padding(horizontal = padH, vertical = padV)
+                        val textModifier = Modifier
+                            .fillMaxWidth()
+                            .pointerInput(ttsState, pageStartOffset, pageBody) {
+                                if (ttsState == ReaderTtsState.Speaking && pageBody.isNotEmpty()) {
+                                    detectTapGestures { position ->
+                                        val layout = pageTextLayout ?: return@detectTapGestures
+                                        val localOffset = layout
+                                            .getOffsetForPosition(position)
+                                            .coerceIn(0, pageBody.lastIndex)
+                                        requestTtsStartAtParagraph(pageStartOffset + localOffset)
+                                    }
+                                }
                             }
-                            var pageTextLayout by remember(pageBody, pageTextStyle) {
-                                mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null)
-                            }
+                        if (ttsHighlightRange != null) {
                             Text(
                                 text = annotatedBody,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .pointerInput(ttsState, pageStartOffset, pageBody) {
-                                        if (ttsState == ReaderTtsState.Speaking && pageBody.isNotEmpty()) {
-                                            detectTapGestures { position ->
-                                                val layout = pageTextLayout ?: return@detectTapGestures
-                                                val localOffset = layout
-                                                    .getOffsetForPosition(position)
-                                                    .coerceIn(0, pageBody.lastIndex)
-                                                requestTtsStartAtParagraph(pageStartOffset + localOffset)
-                                            }
-                                        }
-                                    },
+                                modifier = bodyModifier.then(textModifier),
                                 style = pageTextStyle,
                                 onTextLayout = { pageTextLayout = it },
                                 // Clip within the padded body; footer gap + line safety prevent cut-off.
                                 overflow = TextOverflow.Clip,
                                 softWrap = true,
                             )
+                        } else {
+                            SelectionContainer(modifier = bodyModifier) {
+                                Text(
+                                    text = annotatedBody,
+                                    modifier = textModifier,
+                                    style = pageTextStyle,
+                                    onTextLayout = { pageTextLayout = it },
+                                    // Clip within the padded body; footer gap + line safety prevent cut-off.
+                                    overflow = TextOverflow.Clip,
+                                    softWrap = true,
+                                )
+                            }
                         }
                     }
                 }

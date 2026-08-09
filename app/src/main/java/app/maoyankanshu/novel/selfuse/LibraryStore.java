@@ -535,10 +535,12 @@ public final class LibraryStore {
                 String author = decode(values[2]);
                 int position = Math.max(0, Math.min(Integer.parseInt(values[3]), 1000));
                 String newId = UUID.randomUUID().toString();
-                writeText(newId, new String(sourceText, StandardCharsets.UTF_8));
+                writeTextStrict(newId, sourceText);
                 writeCover(newId, covers.get(values[0]));
                 appendMetadataRow(output, newId, title, author, position);
                 imported++;
+            } catch (IOException writeFailure) {
+                throw writeFailure;
             } catch (Exception ignored) { }
         }
         if (imported > 0) {
@@ -702,6 +704,20 @@ public final class LibraryStore {
             output.write(safeText.getBytes(StandardCharsets.UTF_8));
             writeCharCount(id, safeText.length());
         } catch (IOException ignored) { }
+    }
+
+    /** Restore path: never report a successful import when the book body could not be persisted. */
+    private void writeTextStrict(String id, byte[] textBytes) throws IOException {
+        byte[] safeBytes = textBytes == null ? new byte[0] : textBytes;
+        File file = bookFile(id);
+        try (FileOutputStream output = new FileOutputStream(file)) {
+            output.write(safeBytes);
+        } catch (IOException failure) {
+            if (file.exists()) file.delete();
+            deleteCharCount(id);
+            throw failure;
+        }
+        writeCharCount(id, new String(safeBytes, StandardCharsets.UTF_8).length());
     }
 
     private boolean bookFileExists(String id) {

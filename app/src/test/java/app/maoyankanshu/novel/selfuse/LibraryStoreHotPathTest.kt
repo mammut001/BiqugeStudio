@@ -2,12 +2,15 @@ package app.maoyankanshu.novel.selfuse
 
 import android.content.SharedPreferences
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.util.zip.ZipInputStream
 
@@ -158,5 +161,26 @@ class LibraryStoreHotPathTest {
         assertTrue(imported >= 1)
         assertEquals(0, target.fullBodyDecodeCount)
         assertTrue(target.booksForListing().any { it.title == "From backup" })
+    }
+
+    @Test
+    fun restore_propagatesBookWriteFailure() {
+        val source = createStore()
+        source.add("From backup", "Remote author", "backup body")
+        val backup = ByteArrayOutputStream().also(source::exportTo).toByteArray()
+
+        val blockedFilesDir = tempFolder.newFolder()
+        assertTrue(File(blockedFilesDir, "books").createNewFile())
+        val target = LibraryStore(
+            TestSharedPreferences(),
+            blockedFilesDir,
+            "App",
+            "Welcome",
+            "Welcome body",
+        )
+
+        assertThrows(IOException::class.java) {
+            target.importFrom(ByteArrayInputStream(backup))
+        }
     }
 }
