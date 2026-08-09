@@ -11,6 +11,8 @@ They do **not** assert a Google Play ship date, store listing URL, or remote CI 
 
 ## [Unreleased]
 
+## [1.0.2] — versionCode 3 — 2026-08-08
+
 ### Added
 
 - Compose 阅读页内系统 TTS（`ReaderTtsController`）；喇叭短按朗读/停止；长按调语速。
@@ -29,6 +31,13 @@ They do **not** assert a Google Play ship date, store listing URL, or remote CI 
 - README 截图更新为三 Tab 文案，并新增语音管理 Sheet 截图。
 
 ### Fixed
+
+- TTS 播放 watchdog 改用合成音频真实时长，慢速中文朗读不再被人为超时截断；当前段落高亮与点按跳段稳定生效。
+- 本地书库新增、改名、单书导出、全量备份与恢复改为按需读取/流式写入，不再解码或改写无关书籍正文。
+- TXT/Web 导入使用严格 UTF-8 校验，正文中合法的替换字符 `�` 不会被误判为 GB18030；重定向后保留最终 HTTPS 来源。
+- 大书详情、章节扫描、阅读统计、最近阅读与备份写入移出主线程；删除书籍同步移除最近阅读记录。
+- 封面缩略图使用有界缓存并按文件变更失效，减少书架滚动中的重复解码与错误复用。
+- 损坏的字号、亮度与 TTS 语速偏好值会被安全钳制；窄屏/大字号下统计范围选项可换行。
 
 - 大 TXT 渐进打开与全文切换时不再重复绑定 TTS；避免旧控制器与新控制器竞争 OEM 引擎导致朗读一直停在准备中。
 - TTS 引擎准备期间点击朗读会自动排队，初始化完成后无需再次点击。
