@@ -288,7 +288,8 @@ fun ProfileScreen(
                                             preferences.setFontSize(fontSize - 1)
                                             fontSize = preferences.fontSize()
                                         },
-                                        enabled = !isLoading && fontSize > 12,
+                                        // ReaderPreferences clamps persisted reader size to 14..30.
+                                        enabled = !isLoading && fontSize > 14,
                                         modifier = Modifier
                                             .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                                             .semantics { contentDescription = smallerCd },
@@ -300,7 +301,7 @@ fun ProfileScreen(
                                             preferences.setFontSize(fontSize + 1)
                                             fontSize = preferences.fontSize()
                                         },
-                                        enabled = !isLoading && fontSize < 36,
+                                        enabled = !isLoading && fontSize < 30,
                                         modifier = Modifier
                                             .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                                             .semantics { contentDescription = largerCd },

@@ -84,6 +84,12 @@ class ReaderPreferencesTest {
         readerPrefs.setFontSize(40)
         assertEquals(30, readerPrefs.fontSize())
 
+        // Reading must also clamp stale/legacy/corrupt values that bypassed the setter.
+        prefs.edit().putInt("font_size", 3).apply()
+        assertEquals(14, readerPrefs.fontSize())
+        prefs.edit().putInt("font_size", 99).apply()
+        assertEquals(30, readerPrefs.fontSize())
+
         readerPrefs.setFontSize(22)
         assertEquals(22, readerPrefs.fontSize())
     }
@@ -173,6 +179,17 @@ class ReaderPreferencesTest {
 
         readerPrefs.setTtsRate(1.25f)
         assertEquals(1.25f, readerPrefs.ttsRate(), 0.01f)
+
+        readerPrefs.setTtsRate(Float.NaN)
+        assertEquals(1f, readerPrefs.ttsRate(), 0.01f)
+        readerPrefs.setTtsRate(Float.POSITIVE_INFINITY)
+        assertEquals(1f, readerPrefs.ttsRate(), 0.01f)
+
+        // Corrupt legacy values must be sanitized even when they bypass the setter.
+        prefs.edit().putFloat("tts_rate", Float.NaN).apply()
+        assertEquals(1f, readerPrefs.ttsRate(), 0.01f)
+        prefs.edit().putFloat("tts_rate", Float.NEGATIVE_INFINITY).apply()
+        assertEquals(1f, readerPrefs.ttsRate(), 0.01f)
     }
 
     @Test
@@ -273,6 +290,18 @@ class ReaderPreferencesTest {
         assertEquals(1f, readerPrefs.brightness(), 0.001f)
         readerPrefs.setBrightness(-1f)
         assertEquals(-1f, readerPrefs.brightness(), 0.001f)
+
+        readerPrefs.setBrightness(Float.NaN)
+        assertEquals(-1f, readerPrefs.brightness(), 0.001f)
+        readerPrefs.setBrightness(Float.POSITIVE_INFINITY)
+        assertEquals(-1f, readerPrefs.brightness(), 0.001f)
+
+        prefs.edit().putFloat("reader_brightness", Float.NaN).apply()
+        assertEquals(-1f, readerPrefs.brightness(), 0.001f)
+        prefs.edit().putFloat("reader_brightness", 5f).apply()
+        assertEquals(1f, readerPrefs.brightness(), 0.001f)
+        prefs.edit().putFloat("reader_brightness", 0.001f).apply()
+        assertEquals(0.08f, readerPrefs.brightness(), 0.001f)
     }
 
     @Test

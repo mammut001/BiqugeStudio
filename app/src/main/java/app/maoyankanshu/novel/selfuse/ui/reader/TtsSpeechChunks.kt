@@ -30,14 +30,15 @@ object TtsSpeechChunks {
         if (text.isEmpty()) return 0
         val start = offset.coerceIn(0, text.length)
         if (start >= text.length) return text.length
-        val hardEnd = (start + MAX_CHUNK_CHARS).coerceAtMost(text.length)
+        val rawHardEnd = (start + MAX_CHUNK_CHARS).coerceAtMost(text.length)
+        val hardEnd = safeChunkBoundary(text, start, rawHardEnd)
 
         // Prefer the first paragraph end within the window (may be shorter than MIN_BREAK),
         // including when the remaining text is shorter than MAX_CHUNK_CHARS.
         for (i in start until hardEnd) {
             if (text[i] == '\n') return i + 1
         }
-        if (hardEnd >= text.length) return text.length
+        if (rawHardEnd >= text.length) return text.length
 
         val minBreak = (start + MIN_BREAK_CHARS).coerceAtMost(hardEnd)
         var breakAt = -1
@@ -63,9 +64,29 @@ object TtsSpeechChunks {
     }
 
     /**
-     * Inclusive [IntRange] of the paragraph that contains [offset]
-     * (from after the previous `\n` through the char before the next `\n`,
-     * stripping a trailing `\r` from `\r\n` line endings).
+     * Keeps hard chunk cuts from splitting one Unicode code point or a CRLF pair.
+     * Broken surrogate pairs can make some OEM TTS engines skip, mispronounce, or reject
+     * the synthesized chunk entirely.
+     */
+    private fun safeChunkBoundary(text: String, start: Int, endExclusive: Int): Int {
+        if (endExclusive <= start || endExclusive >= text.length) return endExclusive
+        var end = endExclusive
+        if (text[end - 1].isHighSurrogate() && text[end].isLowSurrogate()) {
+            end--
+        }
+        if (end > start && end < text.length && text[end - 1] == '\r' && text[end] == '\n') {
+            end--
+        }
+        return if (end > start) end else endExclusive
+    }
+
+    /**
+     * Inclusive [IntRange] of the visible paragraph that contains [offset].
+     *
+     * Paragraph-leading/trailing whitespace is excluded intentionally. Imported novels often
+     * contain two ASCII/full-width spaces before every paragraph while the reader also renders
+     * a first-line indent. Including those invisible characters in a background span makes the
+     * active TTS paragraph look like a solid rectangular block starting at the left edge.
      */
     fun paragraphRangeContaining(text: String, offset: Int): IntRange {
         if (text.isEmpty()) return IntRange.EMPTY
@@ -86,15 +107,21 @@ object TtsSpeechChunks {
         while (endExclusive < text.length && text[endExclusive] != '\n') {
             endExclusive++
         }
-        // Drop CR from Windows `\r\n` so highlight does not paint a control char.
-        if (endExclusive > start && text[endExclusive - 1] == '\r') {
-            endExclusive--
-        }
-        if (endExclusive <= start) {
-            val end = (start + 1).coerceAtMost(text.length)
-            return if (end > start) start until end else IntRange.EMPTY
-        }
-        return start until endExclusive
+
+        // Keep indentation in layout/text, but never paint it as part of the TTS highlight.
+        while (start < endExclusive && text[start].isWhitespace()) start++
+        while (endExclusive > start && text[endExclusive - 1].isWhitespace()) endExclusive--
+        return if (endExclusive > start) start until endExclusive else IntRange.EMPTY
+    }
+
+    /**
+     * Paragraph start suitable for a user-initiated TTS seek. Leading whitespace is skipped;
+     * whitespace-only paragraphs return null so a tap never starts an empty utterance.
+     */
+    fun paragraphSpeechStart(text: String, offset: Int): Int? {
+        val range = paragraphRangeContaining(text, offset)
+        if (range.isEmpty()) return null
+        return range.first
     }
 
     /**
@@ -107,6 +134,31 @@ object TtsSpeechChunks {
         while (s < e && text[s].isWhitespace()) s++
         while (e > s && text[e - 1].isWhitespace()) e--
         return if (e > s) s until e else IntRange.EMPTY
+    }
+}
+
+/**
+ * Watchdog timing for app-owned synthesized playback.
+ *
+ * When the actual WAV/player duration is known, use it instead of guessing from character
+ * count. The old short character budget could expire before a slow Chinese utterance ended,
+ * stopping the current sentence and advancing to the next chunk.
+ */
+object TtsPlaybackWatchdog {
+    private const val MIN_TIMEOUT_MS = 8_000L
+    private const val COMPLETION_GRACE_MS = 5_000L
+    private const val FALLBACK_BASE_MS = 15_000L
+    private const val FALLBACK_PER_CHAR_MS = 750L
+    private const val MAX_TIMEOUT_MS = 8 * 60_000L
+
+    fun timeoutMs(knownDurationMs: Long?, chars: Int): Long {
+        val duration = knownDurationMs?.takeIf { it > 0L }
+        val raw = if (duration != null) {
+            duration + COMPLETION_GRACE_MS
+        } else {
+            FALLBACK_BASE_MS + chars.coerceAtLeast(1) * FALLBACK_PER_CHAR_MS
+        }
+        return raw.coerceIn(MIN_TIMEOUT_MS, MAX_TIMEOUT_MS)
     }
 }
 

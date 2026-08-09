@@ -606,14 +606,21 @@ class ReaderTtsController(
                 true
             }
             mp.prepare()
+            val knownDurationMs = mp.duration.toLong().takeIf { it > 0L }
             mp.start()
             mediaPlayer = mp
-            // Cap stuck playback: ~2s/char budget for OEM stalls, with a floor/ceiling.
-            val playTimeoutMs = (chunkCharBudgetMs(pendingChunkEnd - pendingChunkStart))
-                .coerceIn(8_000L, PLAYBACK_TIMEOUT_MAX_MS)
+            // Watchdog must never race ahead of audible playback. Prefer the actual synthesized
+            // media duration; only fall back to a deliberately generous character estimate.
+            val playTimeoutMs = TtsPlaybackWatchdog.timeoutMs(
+                knownDurationMs = knownDurationMs,
+                chars = pendingChunkEnd - pendingChunkStart,
+            )
             schedulePlaybackTimeout(gen, playTimeoutMs)
             emitChunkRangePlaying(gen)
-            Log.i(TAG, "MediaPlayer started size=${file.length()}")
+            Log.i(
+                TAG,
+                "MediaPlayer started size=${file.length()} durationMs=${knownDurationMs ?: -1} watchdogMs=$playTimeoutMs",
+            )
         } catch (e: Exception) {
             Log.w(TAG, "MediaPlayer play failed", e)
             try {
@@ -873,15 +880,17 @@ class ReaderTtsController(
                     track.release()
                     return false
                 }
-                val durationMs = ((frameCount * 1000L) / wav.sampleRate.coerceAtLeast(1)) + 3_000L
-                schedulePlaybackTimeout(
-                    gen,
-                    durationMs.coerceIn(8_000L, PLAYBACK_TIMEOUT_MAX_MS),
+                val knownDurationMs =
+                    (frameCount * 1000L) / wav.sampleRate.coerceAtLeast(1)
+                val playTimeoutMs = TtsPlaybackWatchdog.timeoutMs(
+                    knownDurationMs = knownDurationMs,
+                    chars = pendingChunkEnd - pendingChunkStart,
                 )
+                schedulePlaybackTimeout(gen, playTimeoutMs)
                 emitChunkRangePlaying(gen)
                 Log.i(
                     TAG,
-                    "AudioTrack started size=${file.length()} rate=${wav.sampleRate} channels=${wav.channels}",
+                    "AudioTrack started size=${file.length()} rate=${wav.sampleRate} channels=${wav.channels} durationMs=$knownDurationMs watchdogMs=$playTimeoutMs",
                 )
                 true
             }
@@ -1045,7 +1054,7 @@ class ReaderTtsController(
         clearPlaybackTimeout()
         playbackTimeout = Runnable {
             if (!speaking || destroyed.get() || gen != speakGeneration.get()) return@Runnable
-            Log.w(TAG, "playback timeout gen=$gen; advancing")
+            Log.w(TAG, "playback timeout gen=$gen after=${timeoutMs}ms; advancing")
             stopMediaPlayerOnly()
             stopAudioTrackOnly()
             speakNext()
@@ -1056,10 +1065,6 @@ class ReaderTtsController(
         playbackTimeout?.let(main::removeCallbacks)
         playbackTimeout = null
     }
-
-    private fun chunkCharBudgetMs(chars: Int): Long =
-        (chars.coerceAtLeast(1) * 80L) + 5_000L
-
 
     private fun requestAudioFocus() {
         if (hasAudioFocus) return
@@ -1165,7 +1170,6 @@ class ReaderTtsController(
         private const val TAG = "YueJianReaderTts"
         private const val PREVIEW_TEXT = "这是一段朗读测试。如果你能听到这句话，说明当前语音引擎和应用音频输出正常。"
         private const val SYNTH_TIMEOUT_MS = 12_000L
-        private const val PLAYBACK_TIMEOUT_MAX_MS = 90_000L
         private const val MAX_WAV_BYTES = 16L * 1024L * 1024L
         private const val MAX_PCM_BYTES = 15 * 1024 * 1024
 

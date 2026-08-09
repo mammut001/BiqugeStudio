@@ -5,9 +5,9 @@ import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -42,7 +42,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -84,15 +86,14 @@ class BookDetailActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val bookId = intent.getStringExtra(EXTRA_ID)
         val openEdit = intent.getBooleanExtra(EXTRA_EDIT, false)
-        val initial = bookId?.let { LibraryStore.get(this).byId(it) }
-        if (initial == null) {
+        if (bookId.isNullOrEmpty()) {
             finish()
             return
         }
         setContent {
             BiqugeTheme(darkTheme = ReaderPreferences.get(this).nightMode()) {
-                BookDetailScreen(
-                    initialBook = initial,
+                BookDetailRoute(
+                    bookId = bookId,
                     openEditOnStart = openEdit,
                     onClose = { finish() },
                 )
@@ -104,6 +105,51 @@ class BookDetailActivity : ComponentActivity() {
         const val EXTRA_ID: String = "book_id"
         const val EXTRA_EDIT: String = "edit_book"
     }
+}
+
+/**
+ * Load the requested multi-MB body away from Activity.onCreate/main before composing the detail.
+ * Detail needs the full body for preview/chapter count, but it does not need to block first frame.
+ */
+@Composable
+private fun BookDetailRoute(
+    bookId: String,
+    openEditOnStart: Boolean,
+    onClose: () -> Unit,
+) {
+    val context = LocalContext.current
+    var initialBook by remember(bookId) { mutableStateOf<Book?>(null) }
+    var loadFinished by remember(bookId) { mutableStateOf(false) }
+
+    LaunchedEffect(bookId) {
+        initialBook = withContext(Dispatchers.IO) {
+            LibraryStore.getForReading(context).byId(bookId)
+        }
+        loadFinished = true
+    }
+
+    val loaded = initialBook
+    if (loaded == null) {
+        if (loadFinished) {
+            LaunchedEffect(bookId, loadFinished) { onClose() }
+        } else {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(
+                    modifier = Modifier.semantics {
+                        contentDescription = context.getString(R.string.reader_open_loading)
+                        liveRegion = LiveRegionMode.Polite
+                    },
+                )
+            }
+        }
+        return
+    }
+
+    BookDetailScreen(
+        initialBook = loaded,
+        openEditOnStart = openEditOnStart,
+        onClose = onClose,
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -124,12 +170,16 @@ private fun BookDetailScreen(
     var isExporting by remember { mutableStateOf(false) }
     var exportJob by remember { mutableStateOf<Job?>(null) }
 
-    val chapters = remember(book.id, book.text) {
-        ChapterIndex.findChapters(book.text).size.coerceAtLeast(1)
+    // Chapter scanning is linear over the full book. Keep it off Compose/main for large TXT.
+    var chapters by remember(book.id) { mutableIntStateOf(1) }
+    LaunchedEffect(book.id, book.text) {
+        chapters = withContext(Dispatchers.Default) {
+            ChapterIndex.findChapters(book.text).size.coerceAtLeast(1)
+        }
     }
+    // Preview only needs a tiny prefix; avoid trim() over the entire multi-MB body.
     val preview = remember(book.text) {
-        val flat = book.text.trim()
-        if (flat.length > 180) flat.take(180) + "…" else flat
+        detailPreview(book.text)
     }
     val readLabel = if (book.position > 0) {
         stringResource(R.string.detail_continue_reading)
@@ -427,9 +477,18 @@ private fun BookDetailScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        LibraryStore.get(context).updateMetadata(book.id, cleanTitle, cleanAuthor)
-                        book = LibraryStore.get(context).byId(book.id) ?: book
                         showEdit = false
+                        val bookId = book.id
+                        scope.launch {
+                            val updated = withContext(Dispatchers.IO) {
+                                val store = LibraryStore.get(context)
+                                store.updateMetadata(bookId, cleanTitle, cleanAuthor)
+                                store.byId(bookId)
+                            }
+                            if (updated != null && activity.canAcceptUi()) {
+                                book = updated
+                            }
+                        }
                     },
                     enabled = cleanTitle.isNotEmpty() && cleanAuthor.isNotEmpty(),
                     modifier = Modifier
@@ -471,9 +530,15 @@ private fun BookDetailScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        LibraryStore.get(context).remove(book.id)
                         showDelete = false
-                        onClose()
+                        val bookId = book.id
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                LibraryStore.get(context).remove(bookId)
+                                ReadingHistory.get(context).remove(bookId)
+                            }
+                            if (activity.canAcceptUi()) onClose()
+                        }
                     },
                     modifier = Modifier
                         .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
@@ -494,4 +559,15 @@ private fun BookDetailScreen(
             },
         )
     }
+}
+
+/** Small bounded detail preview; never scans/copies the whole body just to trim it. */
+private fun detailPreview(text: String): String {
+    if (text.isEmpty()) return ""
+    var start = 0
+    while (start < text.length && text[start].isWhitespace()) start++
+    if (start >= text.length) return ""
+    val end = (start + 180).coerceAtMost(text.length)
+    val snippet = text.substring(start, end).trimEnd()
+    return if (end < text.length) "$snippet…" else snippet
 }

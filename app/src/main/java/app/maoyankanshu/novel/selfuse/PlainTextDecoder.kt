@@ -1,14 +1,18 @@
 package app.maoyankanshu.novel.selfuse
 
+import java.nio.ByteBuffer
+import java.nio.charset.CharacterCodingException
 import java.nio.charset.Charset
+import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 
 /**
  * Plain TXT body decoding with BOM detection (shared by local and remote import).
  *
  * Order: UTF-32 LE/BE BOM (before UTF-16, since UTF-32LE starts with FF FE) →
- * UTF-16 LE/BE BOM → UTF-8 BOM strip → UTF-8, or GB18030 if U+FFFD appears.
- * UTF-32 uses guarded [Charset.forName] for minSdk 23 / host JVM variance.
+ * UTF-16 LE/BE BOM → UTF-8 BOM strip → strict UTF-8, or GB18030 when the byte stream is
+ * actually malformed as UTF-8. UTF-32 uses guarded [Charset.forName] for minSdk 23 / host JVM
+ * variance.
  */
 object PlainTextDecoder {
 
@@ -78,11 +82,14 @@ object PlainTextDecoder {
 
     private fun decodeUtf8OrGb(data: ByteArray, offset: Int): String {
         if (offset >= data.size) return ""
-        val utf8 = String(data, offset, data.size - offset, StandardCharsets.UTF_8)
-        return if (utf8.indexOf('\uFFFD') >= 0) {
+        val utf8 = StandardCharsets.UTF_8
+            .newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+        return try {
+            utf8.decode(ByteBuffer.wrap(data, offset, data.size - offset)).toString()
+        } catch (_: CharacterCodingException) {
             String(data, offset, data.size - offset, Charset.forName("GB18030"))
-        } else {
-            utf8
         }
     }
 

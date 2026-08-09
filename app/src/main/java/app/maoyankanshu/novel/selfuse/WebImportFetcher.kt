@@ -2,8 +2,6 @@ package app.maoyankanshu.novel.selfuse
 
 import java.net.HttpURLConnection
 import java.net.URL
-import java.nio.charset.Charset
-import java.nio.charset.StandardCharsets
 import java.util.regex.Pattern
 
 /**
@@ -82,30 +80,26 @@ object WebImportFetcher {
             if (!"https".equals(finalProtocol, ignoreCase = true)) {
                 throw IllegalArgumentException("HTTPS protocol required")
             }
-            // Fail fast on declared Content-Length before reading the body (API 23-safe).
+            // Capture the post-redirect address after verifying it is still HTTPS. The imported
+            // source footer should describe the page we actually downloaded, not a stale short/
+            // redirect URL the user happened to paste.
+            val finalUrl = connection.url.toString()
             HttpsBodyLimits.rejectIfDeclaredTooLarge(
                 HttpsBodyLimits.contentLengthOf(connection),
                 MAX_BYTES,
             )
             val data = connection.inputStream.use { HttpsBodyLimits.readAll(it, MAX_BYTES) }
-            val html = decode(data)
+            // Share TXT's strict UTF-8 validation instead of treating a legitimate U+FFFD
+            // character as proof that the whole page must be GB18030.
+            val html = PlainTextDecoder.decode(data)
             val body = htmlToPlainText(html)
             if (body.length < 20) throw IllegalStateException("empty")
             var name = preferredTitle.trim()
             if (name.isEmpty()) name = pageTitle(html)
             if (name.isEmpty()) name = defaultTitle
-            return Result(title = name, body = body, sourceUrl = cleanUrl)
+            return Result(title = name, body = body, sourceUrl = finalUrl)
         } finally {
             connection.disconnect()
-        }
-    }
-
-    private fun decode(data: ByteArray): String {
-        val utf8 = String(data, StandardCharsets.UTF_8)
-        return if (utf8.indexOf('\uFFFD') >= 0) {
-            String(data, Charset.forName("GB18030"))
-        } else {
-            utf8
         }
     }
 
@@ -151,7 +145,6 @@ object WebImportFetcher {
 
     private fun codePointToString(code: Int): String {
         if (code < 0 || code > 0x10FFFF || code in 0xD800..0xDFFF) return ""
-        // Match named &nbsp;/&ensp;/&emsp; → regular space for plain-text reading.
         when (code) {
             0xA0, 0x2002, 0x2003, 0x2009, 0x202F, 0xFEFF -> return " "
         }
@@ -163,7 +156,6 @@ object WebImportFetcher {
     }
 
     private fun normalizeWhitespace(value: String): String {
-        // Collapse blank lines from adjacent block tags (</p><br> → single \n).
         return value
             .replace(Regex("[ \\t]*\\n[ \\t]*"), "\n")
             .replace(Regex("\\n{2,}"), "\n")

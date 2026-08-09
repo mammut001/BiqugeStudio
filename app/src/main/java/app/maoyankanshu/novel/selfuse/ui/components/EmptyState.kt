@@ -2,6 +2,7 @@ package app.maoyankanshu.novel.selfuse.ui.components
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -35,29 +36,35 @@ fun EmptyState(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .semantics(mergeDescendants = true) {
-                this.contentDescription = contentDescription
-            }
             .padding(vertical = 8.dp),
     ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.semantics { heading() },
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = body,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        // Merge only the descriptive copy. Keeping the action buttons outside this merged
+        // semantics node makes each CTA independently focusable/clickable in TalkBack.
+        Column(
+            modifier = Modifier.semantics(mergeDescendants = true) {
+                this.contentDescription = contentDescription
+            },
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.semantics { heading() },
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = body,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         if (onPrimary != null && primaryLabel != null) {
             Spacer(Modifier.height(14.dp))
             Button(
                 onClick = onPrimary,
                 modifier = Modifier
                     .fillMaxWidth()
+                    .defaultMinSize(minHeight = 48.dp)
                     .semantics {
                         this.contentDescription = primaryDescription ?: primaryLabel
                     },
@@ -71,6 +78,7 @@ fun EmptyState(
                 onClick = onSecondary,
                 modifier = Modifier
                     .fillMaxWidth()
+                    .defaultMinSize(minHeight = 48.dp)
                     .semantics {
                         this.contentDescription = secondaryDescription ?: secondaryLabel
                     },

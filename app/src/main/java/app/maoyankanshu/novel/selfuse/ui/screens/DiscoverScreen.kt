@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -26,9 +28,12 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,6 +53,9 @@ import app.maoyankanshu.novel.selfuse.ui.components.BookCard
 import app.maoyankanshu.novel.selfuse.ui.components.EmptyState
 import java.text.DateFormat
 import java.util.Date
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private enum class ReadingTimeRange(val dayCount: Int) {
     TODAY(1),
@@ -64,23 +72,42 @@ fun DiscoverScreen(
     contentPadding: PaddingValues,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var showClearDialog by remember { mutableStateOf(false) }
-    var timeRange by remember { mutableStateOf(ReadingTimeRange.TODAY) }
+    // Preserve the selected range through rotation/process recreation so returning to “我的”
+    // does not unexpectedly snap a 7/30-day view back to Today.
+    var timeRangeName by rememberSaveable { mutableStateOf(ReadingTimeRange.TODAY.name) }
+    val timeRange = ReadingTimeRange.entries.firstOrNull { it.name == timeRangeName }
+        ?: ReadingTimeRange.TODAY
     val characters = remember(books) { LibraryListModels.totalCharacters(books) }
     val started = remember(books) { LibraryListModels.startedCount(books) }
     val inProgress = remember(books) { LibraryListModels.inProgressBooks(books) }
     val booksById = remember(books) { books.associateBy { it.id } }
-    val history = remember(historyVersion) { ReadingHistory.get(context).list() }
+
+    // Recent-reading persistence is small but still storage/parsing work. Keep it outside
+    // composition/main just like the shelf's Recent sort so a long history never delays a frame.
+    var history by remember { mutableStateOf<List<ReadingHistory.Entry>>(emptyList()) }
+    LaunchedEffect(historyVersion) {
+        history = withContext(Dispatchers.IO) {
+            ReadingHistory.get(context).list()
+        }
+    }
     val visibleHistory = remember(history, booksById) {
         history.filter { booksById.containsKey(it.bookId) }
     }
     val timeFormat = remember {
         DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
     }
-    val dayEntries = remember(historyVersion, timeRange) {
-        ReadingStats.days(context, timeRange.dayCount)
+
+    // ReadingStats may read several day buckets from local persistence. Keep that work out of
+    // composition/main; the lightweight Long list is all the chart actually needs.
+    var dayMillis by remember { mutableStateOf<List<Long>>(emptyList()) }
+    LaunchedEffect(historyVersion, timeRange) {
+        dayMillis = withContext(Dispatchers.IO) {
+            ReadingStats.days(context, timeRange.dayCount).map { it.millis }
+        }
     }
-    val rangeMillis = remember(dayEntries) { dayEntries.sumOf { it.millis } }
+    val rangeMillis = remember(dayMillis) { dayMillis.sum() }
     val rangeLabel = ReadingStats.formatDuration(rangeMillis)
     val rangeStatLabel = when (timeRange) {
         ReadingTimeRange.TODAY -> stringResource(R.string.discover_stat_today)
@@ -123,8 +150,12 @@ fun DiscoverScreen(
                 TextButton(
                     onClick = {
                         showClearDialog = false
-                        ReadingHistory.get(context).clear()
-                        onHistoryCleared()
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                ReadingHistory.get(context).clear()
+                            }
+                            onHistoryCleared()
+                        }
                     },
                     modifier = Modifier
                         .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
@@ -174,7 +205,7 @@ fun DiscoverScreen(
                     Spacer(Modifier.height(12.dp))
                     ReadingTimeRangeChips(
                         selected = timeRange,
-                        onSelected = { timeRange = it },
+                        onSelected = { timeRangeName = it.name },
                         todayCd = rangeTodayCd,
                         last7Cd = range7Cd,
                         last30Cd = range30Cd,
@@ -197,7 +228,7 @@ fun DiscoverScreen(
                     }
                     Spacer(Modifier.height(12.dp))
                     ReadingDurationBars(
-                        dayMillis = dayEntries.map { it.millis },
+                        dayMillis = dayMillis,
                         contentDescription = chartCd,
                     )
                     Spacer(Modifier.height(12.dp))
@@ -297,6 +328,7 @@ fun DiscoverScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ReadingTimeRangeChips(
     selected: ReadingTimeRange,
@@ -305,9 +337,12 @@ private fun ReadingTimeRangeChips(
     last7Cd: String,
     last30Cd: String,
 ) {
-    Row(
+    // Flow instead of a fixed Row: three localized labels still remain tappable at large font
+    // scale or on narrow devices instead of being squeezed/clipped off-screen.
+    FlowRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         FilterChip(
             selected = selected == ReadingTimeRange.TODAY,

@@ -140,8 +140,19 @@ private fun WebImportScreen(
                 ensureActive()
                 if (!activity.canAcceptUi()) return@launch
                 val author = "$authorPrefix\n${result.sourceUrl}"
-                val text = result.body + context.getString(R.string.web_source_footer, result.sourceUrl)
-                LibraryStore.get(context).add(result.title, author, text)
+                val footer = context.getString(R.string.web_source_footer, result.sourceUrl)
+                // Large article concatenation and library persistence are storage/allocation work;
+                // keep both away from Compose/main so a successful download does not end in a
+                // noticeable UI freeze while the book is being saved.
+                withContext(Dispatchers.IO) {
+                    LibraryStore.get(context).add(
+                        result.title,
+                        author,
+                        result.body + footer,
+                    )
+                }
+                ensureActive()
+                if (!activity.canAcceptUi()) return@launch
                 Toast.makeText(
                     context,
                     context.getString(R.string.web_import_ok, result.title),
