@@ -120,6 +120,10 @@ fun DiscoverScreen(
         ReadingTimeRange.LAST_7_DAYS -> stringResource(R.string.discover_stat_last_7_days)
         ReadingTimeRange.LAST_30_DAYS -> stringResource(R.string.discover_stat_last_30_days)
     }
+    val dailyAverageStatLabel = stringResource(R.string.discover_stat_daily_average)
+    val activeDaysStatLabel = stringResource(R.string.discover_stat_active_days)
+    val activeDaysLabel = stringResource(R.string.discover_stat_days, activeDays)
+    val bestDayStatLabel = stringResource(R.string.discover_stat_best_day)
 
     val overviewCd = stringResource(
         R.string.discover_overview_cd,
@@ -130,14 +134,8 @@ fun DiscoverScreen(
         characters,
     )
     val clearHistory = stringResource(R.string.discover_clear_history)
-    val chartCd = stringResource(
-        R.string.discover_duration_chart_cd,
-        rangeStatLabel,
-        rangeLabel,
-        dailyAverageLabel,
-        activeDays,
-        bestDayLabel,
-    )
+    val chartCd = "$rangeStatLabel，$rangeLabel；$dailyAverageStatLabel $dailyAverageLabel；" +
+        "$activeDaysStatLabel $activeDaysLabel；$bestDayStatLabel $bestDayLabel"
     val rangeTodayCd = stringResource(R.string.discover_range_today_cd)
     val range7Cd = stringResource(R.string.discover_range_last_7_days_cd)
     val range30Cd = stringResource(R.string.discover_range_last_30_days_cd)
@@ -234,7 +232,7 @@ fun DiscoverScreen(
                             modifier = Modifier.weight(1f),
                         )
                         OverviewStatTile(
-                            label = stringResource(R.string.discover_stat_daily_average),
+                            label = dailyAverageStatLabel,
                             value = dailyAverageLabel,
                             modifier = Modifier.weight(1f),
                         )
@@ -250,12 +248,12 @@ fun DiscoverScreen(
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
                         OverviewStatTile(
-                            label = stringResource(R.string.discover_stat_active_days),
-                            value = stringResource(R.string.discover_stat_days, activeDays),
+                            label = activeDaysStatLabel,
+                            value = activeDaysLabel,
                             modifier = Modifier.weight(1f),
                         )
                         OverviewStatTile(
-                            label = stringResource(R.string.discover_stat_best_day),
+                            label = bestDayStatLabel,
                             value = bestDayLabel,
                             modifier = Modifier.weight(1f),
                         )
