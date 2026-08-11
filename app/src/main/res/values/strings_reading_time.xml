@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="discover_stat_daily_average">日均</string>
+    <string name="discover_stat_active_days">活跃天数</string>
+    <string name="discover_stat_best_day">最高单日</string>
+    <string name="discover_stat_days">%1$d 天</string>
+    <string name="discover_chart_today">今天</string>
+</resources>
