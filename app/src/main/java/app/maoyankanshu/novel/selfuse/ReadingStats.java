@@ -10,6 +10,7 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.TimeZone;
 
 /** Device-only daily reading duration tracker. */
 public final class ReadingStats {
@@ -30,13 +31,39 @@ public final class ReadingStats {
 
     private ReadingStats() { }
 
+    /** Adds a duration to the current local calendar day. Kept for legacy callers. */
     public static void add(Context context, long millis) {
         if (millis <= 0) return;
         synchronized (LOCK) {
             SharedPreferences prefs = prefs(context);
             String key = dayKey();
-            // commit() so concurrent leave-saves in-process cannot drop an in-flight RMW.
+            // commit() so concurrent in-process RMW writes cannot drop an update.
             prefs.edit().putLong(key, prefs.getLong(key, 0L) + millis).commit();
+        }
+    }
+
+    /**
+     * Adds one active reading interval and splits it at local-midnight boundaries.
+     *
+     * The interval length should come from a monotonic clock (elapsedRealtime), while
+     * {@code startedWallTimeMillis} is only used to decide which local calendar day owns each
+     * slice. This keeps duration stable even if wall-clock time changes while reading.
+     */
+    public static void addInterval(Context context, long startedWallTimeMillis, long durationMillis) {
+        if (durationMillis <= 0L) return;
+        List<DayEntry> slices = splitInterval(
+                startedWallTimeMillis,
+                durationMillis,
+                TimeZone.getDefault());
+        if (slices.isEmpty()) return;
+
+        synchronized (LOCK) {
+            SharedPreferences prefs = prefs(context);
+            SharedPreferences.Editor editor = prefs.edit();
+            for (DayEntry slice : slices) {
+                editor.putLong(slice.dayKey, prefs.getLong(slice.dayKey, 0L) + slice.millis);
+            }
+            editor.commit();
         }
     }
 
@@ -97,8 +124,49 @@ public final class ReadingStats {
         return sum;
     }
 
+    /** Pure interval bucketing used by production and JVM tests. */
+    static List<DayEntry> splitInterval(
+            long startedWallTimeMillis,
+            long durationMillis,
+            TimeZone timeZone) {
+        if (durationMillis <= 0L) return Collections.emptyList();
+        TimeZone zone = timeZone == null ? TimeZone.getDefault() : timeZone;
+        long endExclusive = durationMillis > Long.MAX_VALUE - startedWallTimeMillis
+                ? Long.MAX_VALUE
+                : startedWallTimeMillis + durationMillis;
+        if (endExclusive <= startedWallTimeMillis) return Collections.emptyList();
+
+        List<DayEntry> out = new ArrayList<>();
+        long cursor = startedWallTimeMillis;
+        while (cursor < endExclusive) {
+            Calendar nextMidnight = Calendar.getInstance(zone, Locale.US);
+            nextMidnight.setTimeInMillis(cursor);
+            nextMidnight.set(Calendar.HOUR_OF_DAY, 0);
+            nextMidnight.set(Calendar.MINUTE, 0);
+            nextMidnight.set(Calendar.SECOND, 0);
+            nextMidnight.set(Calendar.MILLISECOND, 0);
+            nextMidnight.add(Calendar.DAY_OF_MONTH, 1);
+
+            long boundary = nextMidnight.getTimeInMillis();
+            long sliceEnd = boundary > cursor
+                    ? Math.min(endExclusive, boundary)
+                    : endExclusive;
+            long sliceMillis = sliceEnd - cursor;
+            if (sliceMillis <= 0L) break;
+            out.add(new DayEntry(dayKey(new Date(cursor), zone), sliceMillis));
+            cursor = sliceEnd;
+        }
+        return out;
+    }
+
     static String dayKey(Date date) {
-        return new SimpleDateFormat("yyyyMMdd", Locale.US).format(date);
+        return dayKey(date, TimeZone.getDefault());
+    }
+
+    static String dayKey(Date date, TimeZone timeZone) {
+        SimpleDateFormat fmt = new SimpleDateFormat("yyyyMMdd", Locale.US);
+        fmt.setTimeZone(timeZone == null ? TimeZone.getDefault() : timeZone);
+        return fmt.format(date);
     }
 
     private static String dayKey() {
