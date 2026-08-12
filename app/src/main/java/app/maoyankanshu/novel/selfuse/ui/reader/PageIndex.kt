@@ -250,10 +250,12 @@ object PageIndex {
      * Below 1.0 so Chinese full-width + letterSpacing rarely overfill the screen
      * (overfill clips the last line in a non-scrolling page Text).
      *
-     * Kept deliberately low: approx paging has no real TextLayout, and overfill
-     * shows as “last line half-cut” which users reported after earlier 0.70 fixes.
+     * The old 0.58 value stacked too much safety on top of the two-line reserve,
+     * page-local indent fix, clipped pager bounds, and dedicated footer gap. 0.64
+     * reclaims roughly one visible line on typical phone layouts while remaining
+     * below the older 0.70 setting that proved too aggressive before those guards.
      */
-    const val APPROX_FILL_FACTOR: Float = 0.58f
+    const val APPROX_FILL_FACTOR: Float = 0.64f
 
     /**
      * Reserve this many line-heights at the bottom of the exact-measure viewport.
