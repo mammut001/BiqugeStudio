@@ -1,0 +1,46 @@
+name: One-time reading insights integration
+
+"on":
+  push:
+    branches:
+      - feat/reading-insights-heatmap
+    paths:
+      - .github/workflows/one-time-reading-insights.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/reading-insights-heatmap
+          fetch-depth: 0
+
+      - name: Wire reading insights into Discover
+        run: python3 tools/one_time_reading_insights_patch.py
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Validate patched tree
+        run: ./gradlew :app:testDebugUnitTest :app:lint :app:assembleDebug --stacktrace --no-daemon
+
+      - name: Commit integration and remove temporary files
+        run: |
+          rm -f tools/one_time_reading_insights_patch.py .github/workflows/one-time-reading-insights.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- app/src/main/java/app/maoyankanshu/novel/selfuse/ui/screens/DiscoverScreen.kt tools/one_time_reading_insights_patch.py .github/workflows/one-time-reading-insights.yml
+          git commit -m "feat(insights): add weekly goal streak and reading heatmap"
+          git push origin HEAD:feat/reading-insights-heatmap
