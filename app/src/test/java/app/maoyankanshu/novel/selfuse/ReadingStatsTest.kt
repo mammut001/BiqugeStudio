@@ -5,6 +5,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Calendar
+import java.util.TimeZone
 
 class ReadingStatsTest {
 
@@ -67,6 +68,17 @@ class ReadingStatsTest {
         }
     }
 
+    private fun utcMillis(
+        year: Int,
+        month0: Int,
+        day: Int,
+        hour: Int,
+        minute: Int,
+    ): Long = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+        clear()
+        set(year, month0, day, hour, minute, 0)
+    }.timeInMillis
+
     @Test
     fun formatDuration_boundaries() {
         assertEquals("0 秒", ReadingStats.formatDuration(0))
@@ -125,6 +137,47 @@ class ReadingStatsTest {
         assertEquals("20260729", days[0].dayKey)
         assertEquals("20260804", days[6].dayKey)
         assertEquals(10_000L + 1_000L + 2_000L + 3_000L, ReadingStats.sumEntries(days))
+    }
+
+    @Test
+    fun splitInterval_sameDayKeepsSingleBucket() {
+        val utc = TimeZone.getTimeZone("UTC")
+        val start = utcMillis(2026, Calendar.AUGUST, 4, 21, 10)
+
+        val slices = ReadingStats.splitInterval(start, 35 * 60_000L, utc)
+
+        assertEquals(1, slices.size)
+        assertEquals("20260804", slices[0].dayKey)
+        assertEquals(35 * 60_000L, slices[0].millis)
+    }
+
+    @Test
+    fun splitInterval_crossMidnightSplitsCalendarDays() {
+        val utc = TimeZone.getTimeZone("UTC")
+        val start = utcMillis(2026, Calendar.AUGUST, 4, 23, 50)
+
+        val slices = ReadingStats.splitInterval(start, 30 * 60_000L, utc)
+
+        assertEquals(2, slices.size)
+        assertEquals("20260804", slices[0].dayKey)
+        assertEquals(10 * 60_000L, slices[0].millis)
+        assertEquals("20260805", slices[1].dayKey)
+        assertEquals(20 * 60_000L, slices[1].millis)
+        assertEquals(30 * 60_000L, ReadingStats.sumEntries(slices))
+    }
+
+    @Test
+    fun splitInterval_respectsLocalTimezoneBoundary() {
+        val toronto = TimeZone.getTimeZone("America/Toronto")
+        val start = Calendar.getInstance(toronto).apply {
+            clear()
+            set(2026, Calendar.AUGUST, 4, 23, 55, 0)
+        }.timeInMillis
+
+        val slices = ReadingStats.splitInterval(start, 10 * 60_000L, toronto)
+
+        assertEquals(listOf("20260804", "20260805"), slices.map { it.dayKey })
+        assertEquals(listOf(5 * 60_000L, 5 * 60_000L), slices.map { it.millis })
     }
 
     @Test

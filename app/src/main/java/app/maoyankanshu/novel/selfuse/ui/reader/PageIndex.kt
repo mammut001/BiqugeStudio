@@ -26,6 +26,15 @@ object PageIndex {
      */
     const val DEFAULT_APPROX_CHARS_PER_PAGE: Int = 900
 
+    /**
+     * Absolute lower bound for all virtual-pagination math.
+     *
+     * Large fonts and narrow viewports can legitimately fit fewer than the old 200/256 floors.
+     * Virtual paging is O(1), so correctness matters more than forcing an arbitrary page size.
+     * Keep this low enough for large-text accessibility layouts while bounding pathological inputs.
+     */
+    const val MIN_APPROX_CHARS_PER_PAGE: Int = 64
+
     /** Half-width (in pages) of a progressive page-start window around restored progress. */
     const val PROGRESSIVE_WINDOW_RADIUS: Int = 4
 
@@ -151,7 +160,7 @@ object PageIndex {
     fun approximatePageCount(textLength: Int, charsPerPage: Int): Int {
         val length = textLength.coerceAtLeast(0)
         if (length == 0) return 1
-        val size = charsPerPage.coerceAtLeast(256)
+        val size = charsPerPage.coerceAtLeast(MIN_APPROX_CHARS_PER_PAGE)
         return ((length - 1) / size) + 1
     }
 
@@ -161,7 +170,7 @@ object PageIndex {
     fun approximateOffsetForPage(pageIndex: Int, charsPerPage: Int, textLength: Int): Int {
         val length = textLength.coerceAtLeast(0)
         if (length == 0) return 0
-        val size = charsPerPage.coerceAtLeast(256)
+        val size = charsPerPage.coerceAtLeast(MIN_APPROX_CHARS_PER_PAGE)
         val count = approximatePageCount(length, size)
         val page = clampPageIndex(pageIndex, count)
         return (page * size).coerceIn(0, length)
@@ -174,7 +183,7 @@ object PageIndex {
     fun approximatePageText(fullText: String, charsPerPage: Int, pageIndex: Int): String {
         val length = fullText.length
         if (length == 0) return ""
-        val size = charsPerPage.coerceAtLeast(256)
+        val size = charsPerPage.coerceAtLeast(MIN_APPROX_CHARS_PER_PAGE)
         val start = approximateOffsetForPage(pageIndex, size, length)
         val endExclusive = (start + size).coerceAtMost(length)
         if (start >= endExclusive) return ""
@@ -192,7 +201,7 @@ object PageIndex {
     ): Pair<Int, Int> {
         val length = textLength.coerceAtLeast(0)
         if (length == 0) return 0 to 0
-        val size = charsPerPage.coerceAtLeast(256)
+        val size = charsPerPage.coerceAtLeast(MIN_APPROX_CHARS_PER_PAGE)
         val count = approximatePageCount(length, size)
         val page = pageForProgress(progress, count)
         val start = (page * size).coerceIn(0, length)
@@ -214,7 +223,7 @@ object PageIndex {
     ): List<Int> {
         val length = textLength.coerceAtLeast(0)
         if (length == 0) return listOf(0)
-        val size = charsPerPage.coerceAtLeast(256)
+        val size = charsPerPage.coerceAtLeast(MIN_APPROX_CHARS_PER_PAGE)
         val pageCount = approximatePageCount(length, size)
         val focus = pageForProgress(progress, pageCount)
         val r = radius.coerceAtLeast(0)
@@ -240,7 +249,7 @@ object PageIndex {
     fun approximatePageStartOffsets(textLength: Int, charsPerPage: Int): List<Int> {
         val length = textLength.coerceAtLeast(0)
         if (length == 0) return listOf(0)
-        val size = charsPerPage.coerceAtLeast(256)
+        val size = charsPerPage.coerceAtLeast(MIN_APPROX_CHARS_PER_PAGE)
         val pageCount = approximatePageCount(length, size)
         return List(pageCount) { it * size }
     }
@@ -250,10 +259,23 @@ object PageIndex {
      * Below 1.0 so Chinese full-width + letterSpacing rarely overfill the screen
      * (overfill clips the last line in a non-scrolling page Text).
      *
-     * Kept deliberately low: approx paging has no real TextLayout, and overfill
-     * shows as “last line half-cut” which users reported after earlier 0.70 fixes.
+     * The old 0.58 value stacked too much safety on top of the two-line reserve,
+     * page-local indent fix, clipped pager bounds, and dedicated footer gap. 0.64
+     * reclaims roughly one visible line on typical phone layouts while remaining
+     * below the older 0.70 setting that proved too aggressive before those guards.
      */
-    const val APPROX_FILL_FACTOR: Float = 0.58f
+    const val APPROX_FILL_FACTOR: Float = 0.64f
+
+    /** One overflow feedback step removes roughly one typical CJK line worth of capacity. */
+    const val APPROX_OVERFLOW_SHRINK_FACTOR: Float = 0.94f
+
+    /** Tighten capacity only after the real Compose page reports vertical overflow. */
+    fun tightenApproxCharsPerPageAfterOverflow(charsPerPage: Int): Int {
+        val current = charsPerPage.coerceAtLeast(MIN_APPROX_CHARS_PER_PAGE)
+        if (current <= MIN_APPROX_CHARS_PER_PAGE) return MIN_APPROX_CHARS_PER_PAGE
+        val tightened = (current * APPROX_OVERFLOW_SHRINK_FACTOR).toInt()
+        return tightened.coerceIn(MIN_APPROX_CHARS_PER_PAGE, current - 1)
+    }
 
     /**
      * Reserve this many line-heights at the bottom of the exact-measure viewport.
@@ -321,7 +343,8 @@ object PageIndex {
         // Leave two lines empty: one for safety, one for wrap/indent variance.
         val rawLines = (heightPx.coerceAtLeast(1) / lineHeight).toInt().coerceAtLeast(1)
         val lines = (rawLines - 2).coerceAtLeast(1)
-        return (columns * lines * APPROX_FILL_FACTOR).roundToInt().coerceIn(200, 3600)
+        return (columns * lines * APPROX_FILL_FACTOR).roundToInt()
+            .coerceIn(MIN_APPROX_CHARS_PER_PAGE, 3600)
     }
 
     /**

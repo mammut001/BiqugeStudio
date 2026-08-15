@@ -99,21 +99,31 @@ fun DiscoverScreen(
         DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
     }
 
-    // ReadingStats may read several day buckets from local persistence. Keep that work out of
-    // composition/main; the lightweight Long list is all the chart actually needs.
-    var dayMillis by remember { mutableStateOf<List<Long>>(emptyList()) }
+    // Keep day keys as well as millis: the chart can now explain its time axis instead of showing
+    // anonymous bars, while all SharedPreferences work remains off the Compose/main thread.
+    var dayEntries by remember { mutableStateOf<List<ReadingStats.DayEntry>>(emptyList()) }
     LaunchedEffect(historyVersion, timeRange) {
-        dayMillis = withContext(Dispatchers.IO) {
-            ReadingStats.days(context, timeRange.dayCount).map { it.millis }
+        dayEntries = withContext(Dispatchers.IO) {
+            ReadingStats.days(context, timeRange.dayCount)
         }
     }
+    val dayMillis = remember(dayEntries) { dayEntries.map { it.millis } }
     val rangeMillis = remember(dayMillis) { dayMillis.sum() }
     val rangeLabel = ReadingStats.formatDuration(rangeMillis)
+    val dailyAverageMillis = if (timeRange.dayCount > 0) rangeMillis / timeRange.dayCount else 0L
+    val dailyAverageLabel = ReadingStats.formatDuration(dailyAverageMillis)
+    val activeDays = remember(dayMillis) { dayMillis.count { it > 0L } }
+    val bestDayMillis = remember(dayMillis) { dayMillis.maxOrNull() ?: 0L }
+    val bestDayLabel = ReadingStats.formatDuration(bestDayMillis)
     val rangeStatLabel = when (timeRange) {
         ReadingTimeRange.TODAY -> stringResource(R.string.discover_stat_today)
         ReadingTimeRange.LAST_7_DAYS -> stringResource(R.string.discover_stat_last_7_days)
         ReadingTimeRange.LAST_30_DAYS -> stringResource(R.string.discover_stat_last_30_days)
     }
+    val dailyAverageStatLabel = stringResource(R.string.discover_stat_daily_average)
+    val activeDaysStatLabel = stringResource(R.string.discover_stat_active_days)
+    val activeDaysLabel = stringResource(R.string.discover_stat_days, activeDays)
+    val bestDayStatLabel = stringResource(R.string.discover_stat_best_day)
 
     val overviewCd = stringResource(
         R.string.discover_overview_cd,
@@ -124,7 +134,8 @@ fun DiscoverScreen(
         characters,
     )
     val clearHistory = stringResource(R.string.discover_clear_history)
-    val chartCd = stringResource(R.string.discover_duration_chart_cd, rangeStatLabel, rangeLabel)
+    val chartCd = "$rangeStatLabel，$rangeLabel；$dailyAverageStatLabel $dailyAverageLabel；" +
+        "$activeDaysStatLabel $activeDaysLabel；$bestDayStatLabel $bestDayLabel"
     val rangeTodayCd = stringResource(R.string.discover_range_today_cd)
     val range7Cd = stringResource(R.string.discover_range_last_7_days_cd)
     val range30Cd = stringResource(R.string.discover_range_last_30_days_cd)
@@ -221,14 +232,14 @@ fun DiscoverScreen(
                             modifier = Modifier.weight(1f),
                         )
                         OverviewStatTile(
-                            label = stringResource(R.string.discover_stat_books),
-                            value = stringResource(R.string.discover_stat_count, books.size),
+                            label = dailyAverageStatLabel,
+                            value = dailyAverageLabel,
                             modifier = Modifier.weight(1f),
                         )
                     }
                     Spacer(Modifier.height(12.dp))
                     ReadingDurationBars(
-                        dayMillis = dayMillis,
+                        dayEntries = dayEntries,
                         contentDescription = chartCd,
                     )
                     Spacer(Modifier.height(12.dp))
@@ -237,16 +248,37 @@ fun DiscoverScreen(
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
                         OverviewStatTile(
+                            label = activeDaysStatLabel,
+                            value = activeDaysLabel,
+                            modifier = Modifier.weight(1f),
+                        )
+                        OverviewStatTile(
+                            label = bestDayStatLabel,
+                            value = bestDayLabel,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        OverviewStatTile(
+                            label = stringResource(R.string.discover_stat_books),
+                            value = stringResource(R.string.discover_stat_count, books.size),
+                            modifier = Modifier.weight(1f),
+                        )
+                        OverviewStatTile(
                             label = stringResource(R.string.discover_stat_started),
                             value = stringResource(R.string.discover_stat_count, started),
                             modifier = Modifier.weight(1f),
                         )
-                        OverviewStatTile(
-                            label = stringResource(R.string.discover_stat_characters),
-                            value = stringResource(R.string.discover_stat_chars, characters),
-                            modifier = Modifier.weight(1f),
-                        )
                     }
+                    Spacer(Modifier.height(12.dp))
+                    OverviewStatTile(
+                        label = stringResource(R.string.discover_stat_characters),
+                        value = stringResource(R.string.discover_stat_chars, characters),
+                    )
                 }
             }
         }
@@ -373,41 +405,68 @@ private fun ReadingTimeRangeChips(
 
 @Composable
 private fun ReadingDurationBars(
-    dayMillis: List<Long>,
+    dayEntries: List<ReadingStats.DayEntry>,
     contentDescription: String,
 ) {
+    val dayMillis = remember(dayEntries) { dayEntries.map { it.millis } }
     val maxMillis = dayMillis.maxOrNull()?.coerceAtLeast(1L) ?: 1L
     val barColor = MaterialTheme.colorScheme.primary
     val trackColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.18f)
 
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(56.dp)
             .semantics { this.contentDescription = contentDescription },
-        horizontalArrangement = Arrangement.spacedBy(if (dayMillis.size > 14) 2.dp else 4.dp),
-        verticalAlignment = Alignment.Bottom,
     ) {
-        dayMillis.forEach { millis ->
-            val fraction = (millis.toFloat() / maxMillis.toFloat()).coerceIn(0f, 1f)
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(trackColor),
-                contentAlignment = Alignment.BottomCenter,
-            ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (dayMillis.size > 14) 2.dp else 4.dp),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            dayMillis.forEach { millis ->
+                val fraction = (millis.toFloat() / maxMillis.toFloat()).coerceIn(0f, 1f)
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .fillMaxHeight(fraction.coerceAtLeast(if (millis > 0L) 0.08f else 0f))
+                        .weight(1f)
+                        .fillMaxHeight()
                         .clip(RoundedCornerShape(3.dp))
-                        .background(barColor),
+                        .background(trackColor),
+                    contentAlignment = Alignment.BottomCenter,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .fillMaxHeight(fraction.coerceAtLeast(if (millis > 0L) 0.08f else 0f))
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(barColor),
+                    )
+                }
+            }
+        }
+        if (dayEntries.size > 1) {
+            Spacer(Modifier.height(4.dp))
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = dayKeyAxisLabel(dayEntries.first().dayKey),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = stringResource(R.string.discover_chart_today),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                 )
             }
         }
     }
+}
+
+private fun dayKeyAxisLabel(dayKey: String): String {
+    if (dayKey.length != 8) return dayKey
+    return "${dayKey.substring(4, 6)}/${dayKey.substring(6, 8)}"
 }
 
 @Composable

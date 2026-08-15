@@ -153,14 +153,39 @@ class PageIndexTest {
     fun approximatePageStartOffsets_boundsLargeTextWithoutLayout() {
         assertEquals(listOf(0), PageIndex.approximatePageStartOffsets(0, 1200))
         assertEquals(listOf(0, 1000, 2000), PageIndex.approximatePageStartOffsets(2500, 1000))
-        assertEquals(listOf(0, 256), PageIndex.approximatePageStartOffsets(257, 1))
+        assertEquals(listOf(0, 64, 128, 192, 256), PageIndex.approximatePageStartOffsets(257, 1))
+    }
+
+    @Test
+    fun approximatePaging_acceptsRealCapacitiesBelowLegacyFloors() {
+        val min = PageIndex.MIN_APPROX_CHARS_PER_PAGE
+        val text = "甲".repeat(457)
+        assertTrue(min < 200)
+        assertEquals(8, PageIndex.approximatePageCount(text.length, min))
+        assertEquals(min, PageIndex.approximateOffsetForPage(1, min, text.length))
+        assertEquals(3, PageIndex.approximatePageCount(text.length, 180))
+        assertEquals(180, PageIndex.approximateOffsetForPage(1, 180, text.length))
+        assertEquals(8, PageIndex.approximatePageCount(text.length, 1))
+    }
+
+    @Test
+    fun overflowFeedback_tightensMonotonicallyToAbsoluteMinimum() {
+        val first = PageIndex.tightenApproxCharsPerPageAfterOverflow(256)
+        assertTrue(first in PageIndex.MIN_APPROX_CHARS_PER_PAGE until 256)
+        val second = PageIndex.tightenApproxCharsPerPageAfterOverflow(first)
+        assertTrue(second < first)
+        assertEquals(PageIndex.MIN_APPROX_CHARS_PER_PAGE, PageIndex.tightenApproxCharsPerPageAfterOverflow(PageIndex.MIN_APPROX_CHARS_PER_PAGE))
+        assertEquals(PageIndex.MIN_APPROX_CHARS_PER_PAGE, PageIndex.tightenApproxCharsPerPageAfterOverflow(1))
     }
 
     @Test
     fun approximateCharsPerPage_isPositiveAndConservative() {
         val count = PageIndex.approximateCharsPerPage(1080, 2000, 54f, 1.5f)
-        assertTrue(count in 200..3600)
-        assertEquals(200, PageIndex.approximateCharsPerPage(1, 1, 1000f, 10f))
+        assertTrue(count in PageIndex.MIN_APPROX_CHARS_PER_PAGE..3600)
+        assertEquals(
+            PageIndex.MIN_APPROX_CHARS_PER_PAGE,
+            PageIndex.approximateCharsPerPage(1, 1, 1000f, 10f),
+        )
         // Must stay below theoretical full fill so last line is not clipped.
         val font = 54f
         val lineH = font * 1.5f

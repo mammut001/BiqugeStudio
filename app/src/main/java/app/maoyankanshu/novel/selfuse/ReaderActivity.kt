@@ -1,6 +1,7 @@
 package app.maoyankanshu.novel.selfuse
 
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -26,6 +27,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import app.maoyankanshu.novel.selfuse.ui.reader.ProgressiveTextOpen
+import app.maoyankanshu.novel.selfuse.ui.reader.ReaderActiveSession
+import app.maoyankanshu.novel.selfuse.ui.reader.ReaderLeaveSave
 import app.maoyankanshu.novel.selfuse.ui.reader.ReaderScreen
 import app.maoyankanshu.novel.selfuse.ui.theme.BiqugeTheme
 import kotlinx.coroutines.Dispatchers
@@ -40,10 +43,19 @@ import kotlinx.coroutines.withContext
  * 1. Load metadata + file bytes (target book only).
  * 2. Decode a bounded window around saved progress → first readable body (秒开).
  * 3. Decode the full string in the background and swap in without re-reading the shelf.
+ *
+ * Reading-time trust boundary:
+ * - loading time is not reading time;
+ * - only RESUMED foreground time after the first readable body is shown is counted;
+ * - HOME / lock screen / another app ends the active segment immediately;
+ * - each foreground segment is persisted independently, so background gaps never inflate stats.
  */
 class ReaderActivity : ComponentActivity() {
 
     private var openState by mutableStateOf<OpenState>(OpenState.Loading)
+    private val activeReadingSession = ReaderActiveSession()
+    private var readerResumed = false
+    private var readableBodyShown = false
 
     /**
      * Optional volume-key page-turn hook set by [ReaderScreen] while composed.
@@ -90,6 +102,49 @@ class ReaderActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        readerResumed = true
+        maybeStartReadingSegment()
+    }
+
+    override fun onPause() {
+        stopReadingSegment()
+        readerResumed = false
+        super.onPause()
+    }
+
+    override fun onDestroy() {
+        // Defensive fallback for unusual teardown orders. Normal lifecycle has already paused.
+        stopReadingSegment()
+        super.onDestroy()
+    }
+
+    private fun maybeStartReadingSegment() {
+        if (!readerResumed || !readableBodyShown || activeReadingSession.isActive()) return
+        activeReadingSession.resume(
+            nowElapsedRealtime = SystemClock.elapsedRealtime(),
+            nowWallTimeMillis = System.currentTimeMillis(),
+        )
+    }
+
+    private fun stopReadingSegment() {
+        val segment = activeReadingSession.pause(SystemClock.elapsedRealtime()) ?: return
+        ReaderLeaveSave.recordReadingAsync(
+            context = applicationContext,
+            startedWallTimeMillis = segment.startedWallTimeMillis,
+            durationMs = segment.durationMillis,
+        )
+    }
+
+    private fun showReady(book: Book, textFullyLoaded: Boolean) {
+        openState = OpenState.Ready(book = book, textFullyLoaded = textFullyLoaded)
+        if (!readableBodyShown) {
+            readableBodyShown = true
+            maybeStartReadingSegment()
+        }
+    }
+
     private suspend fun openBook(bookId: String?) {
         if (bookId.isNullOrEmpty()) {
             openState = OpenState.Missing
@@ -116,7 +171,7 @@ class ReaderActivity : ComponentActivity() {
                 ProgressiveTextOpen.firstWindowText(bytes, record.position)
             }
             if (isFinishing || isDestroyed) return
-            openState = OpenState.Ready(
+            showReady(
                 book = Book(
                     record.id,
                     record.title,
@@ -136,7 +191,7 @@ class ReaderActivity : ComponentActivity() {
                 store.recordById(bookId)?.position ?: record.position
             }
             if (isFinishing || isDestroyed) return
-            openState = OpenState.Ready(
+            showReady(
                 book = Book(
                     record.id,
                     record.title,
@@ -152,7 +207,7 @@ class ReaderActivity : ComponentActivity() {
                 ProgressiveTextOpen.decodeFullText(bytes)
             }
             if (isFinishing || isDestroyed) return
-            openState = OpenState.Ready(
+            showReady(
                 book = Book(
                     record.id,
                     record.title,

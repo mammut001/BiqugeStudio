@@ -11,38 +11,33 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Leave-path persistence for Compose [ReaderScreen].
+ * Process-lifetime persistence used by reader leave/background paths.
  *
- * Pure helpers ([elapsedReadingMs], [shouldRecordStats]) are JVM unit-testable
- * with no Android runtime. [persistAsync] uses a **process-lifetime** IO scope so
- * [androidx.compose.runtime.DisposableEffect] `onDispose` does not allocate a
- * fire-and-forget [CoroutineScope] per leave (unstructured concurrency anti-pattern
- * on API 23+ / Compose).
- *
- * Progress is always written through [ProgressMath.clampProgress] (0…1000).
+ * Progress and reading-time writes intentionally share one IO scope and pending-write counter so
+ * the main shell can wait for both before refreshing shelf/history/statistics.
  */
 object ReaderLeaveSave {
     private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val pendingWrites = AtomicInteger(0)
 
     /**
-     * Elapsed reading time from [android.os.SystemClock.elapsedRealtime] samples.
-     * Zero or negative delta (clock skew / same-tick leave) → `0`.
+     * Elapsed reading time from monotonic elapsed-realtime samples.
+     * Zero or negative delta (same tick / invalid order) becomes zero.
      */
     fun elapsedReadingMs(startedElapsedRealtime: Long, endedElapsedRealtime: Long): Long {
         val delta = endedElapsedRealtime - startedElapsedRealtime
         return if (delta <= 0L) 0L else delta
     }
 
-    /** Matches [ReadingStats.add] guard: non-positive durations are ignored. */
+    /** Matches ReadingStats guards: non-positive durations are ignored. */
     fun shouldRecordStats(durationMs: Long): Boolean = durationMs > 0L
 
-    /** True while at least one [persistAsync] write is still in flight. */
+    /** True while at least one reader persistence write is still in flight. */
     fun hasPendingWrites(): Boolean = pendingWrites.get() > 0
 
     /**
-     * Suspend until in-flight leave-saves finish, or [timeoutMs] elapses.
-     * Used by the main shell so ON_RESUME list refresh sees the latest progress/stats.
+     * Suspend until in-flight reader writes finish, or [timeoutMs] elapses.
+     * Used by the main shell so ON_RESUME refresh sees latest progress/stats.
      */
     suspend fun awaitIdle(timeoutMs: Long = 1_500L) {
         if (!hasPendingWrites()) return
@@ -54,8 +49,9 @@ object ReaderLeaveSave {
     }
 
     /**
-     * Schedule daily stats + position write off the main thread.
-     * Safe to call from Compose `onDispose` (does not use [rememberCoroutineScope]).
+     * Save reading progress off-main. [durationMs] is retained for source compatibility with the
+     * existing Compose leave path, but reading time is now owned by the Activity lifecycle via
+     * [recordReadingAsync] so background/locked time is never double counted.
      */
     fun persistAsync(
         context: Context,
@@ -65,14 +61,31 @@ object ReaderLeaveSave {
     ) {
         val app = context.applicationContext
         val clamped = ProgressMath.clampProgress(progress)
-        val duration = if (shouldRecordStats(durationMs)) durationMs else 0L
         pendingWrites.incrementAndGet()
         ioScope.launch {
             try {
-                if (duration > 0L) {
-                    ReadingStats.add(app, duration)
-                }
                 LibraryStore.getForReading(app).savePosition(bookId, clamped)
+            } finally {
+                pendingWrites.decrementAndGet()
+            }
+        }
+    }
+
+    /**
+     * Persist exactly one foreground-active reading segment.
+     * Duration is monotonic; wall time is used only for local-day bucketing/cross-midnight split.
+     */
+    fun recordReadingAsync(
+        context: Context,
+        startedWallTimeMillis: Long,
+        durationMs: Long,
+    ) {
+        if (!shouldRecordStats(durationMs)) return
+        val app = context.applicationContext
+        pendingWrites.incrementAndGet()
+        ioScope.launch {
+            try {
+                ReadingStats.addInterval(app, startedWallTimeMillis, durationMs)
             } finally {
                 pendingWrites.decrementAndGet()
             }
