@@ -446,7 +446,7 @@ fun ReaderScreen(
                 OpenProgressGate.restoreTargetPage(saved, count)
             } else {
                 // Preserve reading position across reflow (font / margin / theme).
-                (anchorOffset / charsPerPage.coerceAtLeast(256))
+                (anchorOffset / charsPerPage.coerceAtLeast(PageIndex.MIN_APPROX_CHARS_PER_PAGE))
                     .coerceIn(0, (count - 1).coerceAtLeast(0))
             }
             val clamped = PageIndex.clampPageIndex(targetPage, count)
@@ -596,7 +596,7 @@ fun ReaderScreen(
         val clampedOffset = offset.coerceIn(0, book.text.length)
         anchorOffset = clampedOffset
         val page = if (useApproxPaging) {
-            val cpp = approxCharsPerPage.coerceAtLeast(256)
+            val cpp = approxCharsPerPage.coerceAtLeast(PageIndex.MIN_APPROX_CHARS_PER_PAGE)
             PageIndex.clampPageIndex(
                 clampedOffset / cpp,
                 PageIndex.approximatePageCount(book.text.length, cpp),
