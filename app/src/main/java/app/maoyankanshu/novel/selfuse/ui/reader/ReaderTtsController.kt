@@ -52,6 +52,12 @@ class ReaderTtsController(
      * full body string passed to [start].
      */
     private val onChunkRange: (start: Int, endExclusive: Int) -> Unit = { _, _ -> },
+    /**
+     * Fired on main when app-owned synthesized playback starts and its duration is known.
+     * Direct engine.speak fallback has no reliable duration and intentionally does not fire this.
+     */
+    private val onChunkPlayback: (start: Int, endExclusive: Int, durationMs: Long) -> Unit =
+        { _, _, _ -> },
     /** Fired on main when engine list is refreshed via [TextToSpeech.getEngines]. */
     private val onEnginesDiscovered: (List<TtsEngineOption>) -> Unit = {},
     /** Fired on main after an engine is ready with its available voices. */
@@ -617,6 +623,7 @@ class ReaderTtsController(
             )
             schedulePlaybackTimeout(gen, playTimeoutMs)
             emitChunkRangePlaying(gen)
+            emitChunkPlaybackInfo(gen, knownDurationMs)
             Log.i(
                 TAG,
                 "MediaPlayer started size=${file.length()} durationMs=${knownDurationMs ?: -1} watchdogMs=$playTimeoutMs",
@@ -888,6 +895,7 @@ class ReaderTtsController(
                 )
                 schedulePlaybackTimeout(gen, playTimeoutMs)
                 emitChunkRangePlaying(gen)
+                emitChunkPlaybackInfo(gen, knownDurationMs)
                 Log.i(
                     TAG,
                     "AudioTrack started size=${file.length()} rate=${wav.sampleRate} channels=${wav.channels} durationMs=$knownDurationMs watchdogMs=$playTimeoutMs",
@@ -1146,6 +1154,26 @@ class ReaderTtsController(
             if (destroyed.get() || previewing || !speaking) return
             if (gen != speakGeneration.get()) return
             onChunkRange(start, end)
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            fire()
+        } else {
+            main.post { fire() }
+        }
+    }
+
+    /** Notify UI when app-owned playback has a trustworthy media duration. */
+    private fun emitChunkPlaybackInfo(gen: Int, durationMs: Long?) {
+        val duration = durationMs?.takeIf { it > 1L } ?: return
+        if (destroyed.get() || previewing || !speaking) return
+        if (gen != speakGeneration.get()) return
+        val start = pendingChunkStart
+        val end = pendingChunkEnd
+        if (end <= start) return
+        fun fire() {
+            if (destroyed.get() || previewing || !speaking) return
+            if (gen != speakGeneration.get()) return
+            onChunkPlayback(start, end, duration)
         }
         if (Looper.myLooper() == Looper.getMainLooper()) {
             fire()
