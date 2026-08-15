@@ -1211,16 +1211,32 @@ fun ReaderScreen(
                                 softWrap = true,
                             )
                         } else {
-                            SelectionContainer(modifier = bodyModifier) {
-                                Text(
-                                    text = annotatedBody,
-                                    modifier = textModifier,
-                                    style = pageTextStyle,
-                                    onTextLayout = ::capturePageTextLayout,
-                                    // Clip within the padded body; footer gap + line safety prevent cut-off.
-                                    overflow = TextOverflow.Clip,
-                                    softWrap = true,
-                                )
+                            // HorizontalPager keeps neighboring pages composed. Re-key the
+                            // selection host when the active page or reader surface changes so
+                            // stale selection handles / copy-select-all toolbar cannot remain
+                            // attached to content the user has already navigated away from.
+                            key(
+                                page,
+                                pagerState.currentPage,
+                                menuVisible,
+                                showToc,
+                                showBookmarks,
+                                showFind,
+                                showAppearance,
+                                showTtsRateDialog,
+                                showVoiceManagerSheet,
+                            ) {
+                                SelectionContainer(modifier = bodyModifier) {
+                                    Text(
+                                        text = annotatedBody,
+                                        modifier = textModifier,
+                                        style = pageTextStyle,
+                                        onTextLayout = ::capturePageTextLayout,
+                                        // Clip within the padded body; footer gap + line safety prevent cut-off.
+                                        overflow = TextOverflow.Clip,
+                                        softWrap = true,
+                                    )
+                                }
                             }
                         }
                     }

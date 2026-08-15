@@ -91,6 +91,14 @@ fun StoreScreen(
         }
 
         item {
+            Text(
+                text = stringResource(R.string.online_import_scope_notice),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        item {
             // Browser download → Share / Open with → 阅笺 (no Download-folder hunt).
             val shareTipTitle = stringResource(R.string.store_share_import_title)
             val shareTipBody = stringResource(R.string.store_share_import_body)

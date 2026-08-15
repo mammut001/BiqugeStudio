@@ -1,0 +1,14 @@
+阅笺开源许可与源码
+
+阅笺（Yuejian）的应用源代码以 GNU General Public License v3.0（GPL-3.0）许可发布。
+
+对应源代码：
+https://github.com/mammut001/BiqugeStudio
+
+GPL-3.0 许可证全文位于项目根目录 LICENSE。
+
+发行版本中使用的 AndroidX / Jetpack Compose 等 Android 开源组件按其各自许可证提供，主要为 Apache License 2.0。Kotlin 运行时及其他随构建工具链引入的组件保留其各自版权和许可。测试依赖不会作为应用功能 SDK 运行。
+
+本页不改变任何第三方组件原有许可。精确版权、NOTICE 与许可证文本以对应依赖发行包及其官方项目为准。
+
+如果以修改后的 GPL-3.0 版本分发阅笺，应继续履行 GPL-3.0 对相应源代码可获得性的要求。项目仓库与 LICENSE 不应从发行说明中移除。
