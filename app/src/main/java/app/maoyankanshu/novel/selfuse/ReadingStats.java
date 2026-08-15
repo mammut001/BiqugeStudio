@@ -15,6 +15,8 @@ import java.util.TimeZone;
 /** Device-only daily reading duration tracker. */
 public final class ReadingStats {
     private static final String PREFS = "reading_stats";
+    private static final String KEY_WEEKLY_GOAL_MILLIS = "_weekly_goal_millis";
+    public static final long DEFAULT_WEEKLY_GOAL_MILLIS = 3L * 60L * 60L * 1000L;
 
     /** One calendar day's accumulated reading duration. */
     public static final class DayEntry {
@@ -83,6 +85,17 @@ public final class ReadingStats {
         return minutes < 60
                 ? minutes + " 分钟"
                 : (minutes / 60) + " 小时 " + (minutes % 60) + " 分钟";
+    }
+
+    /** Device-only weekly goal. Stored beside the daily buckets under a reserved non-date key. */
+    public static long weeklyGoalMillis(Context context) {
+        long stored = prefs(context).getLong(KEY_WEEKLY_GOAL_MILLIS, DEFAULT_WEEKLY_GOAL_MILLIS);
+        return stored > 0L ? stored : DEFAULT_WEEKLY_GOAL_MILLIS;
+    }
+
+    public static void setWeeklyGoalMillis(Context context, long millis) {
+        if (millis <= 0L) return;
+        prefs(context).edit().putLong(KEY_WEEKLY_GOAL_MILLIS, millis).apply();
     }
 
     public static long millisForDay(Context context, Calendar day) {

@@ -5,4 +5,17 @@
     <string name="discover_stat_best_day">最高单日</string>
     <string name="discover_stat_days">%1$d 天</string>
     <string name="discover_chart_today">今天</string>
+
+    <string name="discover_weekly_goal">本周目标</string>
+    <string name="discover_weekly_goal_progress">%1$s / %2$d 小时</string>
+    <string name="discover_weekly_goal_adjust">调整</string>
+    <string name="discover_weekly_goal_dialog_title">设置本周阅读目标</string>
+    <string name="discover_weekly_goal_option">每周 %1$d 小时</string>
+    <string name="discover_current_streak">连续阅读</string>
+    <string name="discover_longest_streak">最长连续</string>
+    <string name="discover_heatmap_title">阅读足迹</string>
+    <string name="discover_heatmap_period">近 26 周</string>
+    <string name="discover_heatmap_less">少</string>
+    <string name="discover_heatmap_more">多</string>
+    <string name="discover_heatmap_cd">近 26 周阅读热力图，连续阅读 %1$d 天，最长连续 %2$d 天</string>
 </resources>
