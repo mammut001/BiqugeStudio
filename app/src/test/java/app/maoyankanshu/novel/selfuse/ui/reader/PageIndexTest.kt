@@ -153,14 +153,32 @@ class PageIndexTest {
     fun approximatePageStartOffsets_boundsLargeTextWithoutLayout() {
         assertEquals(listOf(0), PageIndex.approximatePageStartOffsets(0, 1200))
         assertEquals(listOf(0, 1000, 2000), PageIndex.approximatePageStartOffsets(2500, 1000))
-        assertEquals(listOf(0, 256), PageIndex.approximatePageStartOffsets(257, 1))
+        assertEquals(listOf(0, 200), PageIndex.approximatePageStartOffsets(257, 1))
+    }
+
+    @Test
+    fun approximatePaging_honorsEstimatorBelowLegacy256Floor() {
+        val cpp = PageIndex.MIN_APPROX_CHARS_PER_PAGE
+        val text = "甲".repeat(457)
+
+        assertEquals(3, PageIndex.approximatePageCount(text.length, cpp))
+        assertEquals(cpp, PageIndex.approximateOffsetForPage(1, cpp, text.length))
+        assertEquals(cpp, PageIndex.approximatePageText(text, cpp, 0).length)
+        assertEquals(listOf(0, 200, 400), PageIndex.approximatePageStartOffsets(text.length, cpp))
+
+        // Passing an even smaller value must normalize to the same shared minimum, not old 256.
+        assertEquals(3, PageIndex.approximatePageCount(text.length, 1))
+        assertEquals(cpp, PageIndex.approximateOffsetForPage(1, 1, text.length))
     }
 
     @Test
     fun approximateCharsPerPage_isPositiveAndConservative() {
         val count = PageIndex.approximateCharsPerPage(1080, 2000, 54f, 1.5f)
-        assertTrue(count in 200..3600)
-        assertEquals(200, PageIndex.approximateCharsPerPage(1, 1, 1000f, 10f))
+        assertTrue(count in PageIndex.MIN_APPROX_CHARS_PER_PAGE..3600)
+        assertEquals(
+            PageIndex.MIN_APPROX_CHARS_PER_PAGE,
+            PageIndex.approximateCharsPerPage(1, 1, 1000f, 10f),
+        )
         // Must stay below theoretical full fill so last line is not clipped.
         val font = 54f
         val lineH = font * 1.5f
