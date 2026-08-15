@@ -1,0 +1,280 @@
+name: One-time reader overflow calibration
+
+"on":
+  push:
+    branches:
+      - improve/reading-time-accuracy
+    paths:
+      - .github/workflows/one-time-reader-overflow-calibration.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: improve/reading-time-accuracy
+          fetch-depth: 0
+
+      - name: Apply pagination calibration patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          page_index = Path('app/src/main/java/app/maoyankanshu/novel/selfuse/ui/reader/PageIndex.kt')
+          text = page_index.read_text(encoding='utf-8')
+          old = '''    /**
+     * Shared lower bound for all virtual-pagination math.
+     *
+     * The estimator was lowered from the old 256-char floor to 200 when the last-line clipping
+     * safeguards were tightened, but several downstream helpers still silently re-clamped to 256.
+     * That mismatch forced 256 characters onto layouts whose measured estimate was smaller.
+     */
+    const val MIN_APPROX_CHARS_PER_PAGE: Int = 200
+'''
+          new = '''    /**
+     * Absolute lower bound for virtual-pagination math.
+     *
+     * This is intentionally well below the old 200/256 floors: large fonts and narrow viewports
+     * can legitimately fit fewer than 200 characters. Virtual paging is O(1), so correctness is
+     * more important than forcing an arbitrary minimum page size.
+     */
+    const val MIN_APPROX_CHARS_PER_PAGE: Int = 64
+'''
+          if text.count(old) != 1:
+              raise SystemExit('MIN_APPROX_CHARS_PER_PAGE block did not match exactly once')
+          text = text.replace(old, new)
+
+          marker = '''    const val APPROX_FILL_FACTOR: Float = 0.64f
+
+'''
+          insert = '''    const val APPROX_FILL_FACTOR: Float = 0.64f
+
+    /** One overflow feedback step removes roughly one typical CJK line worth of capacity. */
+    const val APPROX_OVERFLOW_SHRINK_FACTOR: Float = 0.94f
+
+    /**
+     * Tighten a virtual-page capacity after the real Compose layout reports vertical overflow.
+     * The result is strictly smaller until the absolute minimum is reached, so repeated feedback
+     * converges without oscillation. Empty-space pages never call this path, so capacity cannot
+     * bounce back and forth while the user reads.
+     */
+    fun tightenApproxCharsPerPageAfterOverflow(charsPerPage: Int): Int {
+        val current = charsPerPage.coerceAtLeast(MIN_APPROX_CHARS_PER_PAGE)
+        if (current <= MIN_APPROX_CHARS_PER_PAGE) return MIN_APPROX_CHARS_PER_PAGE
+        val tightened = (current * APPROX_OVERFLOW_SHRINK_FACTOR).toInt()
+        return tightened.coerceIn(MIN_APPROX_CHARS_PER_PAGE, current - 1)
+    }
+
+'''
+          if text.count(marker) != 1:
+              raise SystemExit('APPROX_FILL_FACTOR marker did not match exactly once')
+          text = text.replace(marker, insert)
+          page_index.write_text(text, encoding='utf-8')
+
+          reader = Path('app/src/main/java/app/maoyankanshu/novel/selfuse/ui/reader/ReaderScreen.kt')
+          text = reader.read_text(encoding='utf-8')
+
+          old = '''    var approxCharsPerPage by remember(book.id) {
+        mutableIntStateOf(PageIndex.DEFAULT_APPROX_CHARS_PER_PAGE)
+    }
+
+'''
+          new = '''    var approxCharsPerPage by remember(book.id) {
+        mutableIntStateOf(PageIndex.DEFAULT_APPROX_CHARS_PER_PAGE)
+    }
+    // Large-book virtual pages start from a fast estimate, then only tighten when the real
+    // Compose layout proves that the current page overflows vertically. Keep the underlying
+    // character offset stable while the virtual page number changes.
+    var pendingApproxCalibrationOffset by remember(book.id) { mutableStateOf<Int?>(null) }
+    var lastOverflowCalibrationCapacity by remember(book.id) { mutableIntStateOf(-1) }
+
+'''
+          if text.count(old) != 1:
+              raise SystemExit('approxCharsPerPage state block did not match exactly once')
+          text = text.replace(old, new)
+
+          old = '''            approxCharsPerPage = charsPerPage
+            val count = PageIndex.approximatePageCount(text.length, charsPerPage)
+'''
+          new = '''            approxCharsPerPage = charsPerPage
+            // A font/margin/viewport reflow establishes a fresh estimate; overflow feedback for
+            // the previous layout must not suppress calibration of the new one.
+            pendingApproxCalibrationOffset = null
+            lastOverflowCalibrationCapacity = -1
+            val count = PageIndex.approximatePageCount(text.length, charsPerPage)
+'''
+          if text.count(old) != 1:
+              raise SystemExit('approx estimator assignment did not match exactly once')
+          text = text.replace(old, new)
+
+          marker = '''    // Page turns → progress (0…1000) + chapter + anchor.
+'''
+          insert = '''    // Real-layout overflow calibration changes the virtual page size, so preserve the
+    // current character anchor instead of preserving the old page number.
+    LaunchedEffect(
+        approxCharsPerPage,
+        pendingApproxCalibrationOffset,
+        useApproxPaging,
+        book.text.length,
+    ) {
+        if (!useApproxPaging) return@LaunchedEffect
+        val offset = pendingApproxCalibrationOffset ?: return@LaunchedEffect
+        val cpp = approxCharsPerPage.coerceAtLeast(PageIndex.MIN_APPROX_CHARS_PER_PAGE)
+        val count = PageIndex.approximatePageCount(book.text.length, cpp)
+        val target = PageIndex.clampPageIndex(offset / cpp, count)
+        anchorOffset = offset.coerceIn(0, book.text.length)
+        if (pagerState.currentPage != target) {
+            pagerState.scrollToPage(target)
+        }
+        pendingApproxCalibrationOffset = null
+    }
+
+    // Page turns → progress (0…1000) + chapter + anchor.
+'''
+          if text.count(marker) != 1:
+              raise SystemExit('page-turn marker did not match exactly once')
+          text = text.replace(marker, insert)
+
+          old = '''            .collect { (page, starts, cpp) ->
+                if (useApproxPaging) {
+'''
+          new = '''            .collect { (page, starts, cpp) ->
+                // During a capacity calibration the pager briefly still exposes the old page
+                // index with the new chars/page. Do not persist that transient mapping.
+                if (pendingApproxCalibrationOffset != null) return@collect
+                if (useApproxPaging) {
+'''
+          if text.count(old) != 1:
+              raise SystemExit('page-turn collect block did not match exactly once')
+          text = text.replace(old, new)
+
+          old = '''                        var pageTextLayout by remember(pageBody, pageTextStyle) {
+                            mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null)
+                        }
+                        val bodyModifier = Modifier
+'''
+          new = '''                        var pageTextLayout by remember(pageBody, pageTextStyle) {
+                            mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null)
+                        }
+                        fun capturePageTextLayout(layout: androidx.compose.ui.text.TextLayoutResult) {
+                            pageTextLayout = layout
+                            if (!useApproxPaging || !restoreApplied || !layout.didOverflowHeight) return
+                            if (page != pagerState.currentPage || bodyPage != pagerState.currentPage) return
+                            val currentCapacity = approxCharsPerPage
+                            if (lastOverflowCalibrationCapacity == currentCapacity) return
+                            val tightened = PageIndex.tightenApproxCharsPerPageAfterOverflow(currentCapacity)
+                            if (tightened >= currentCapacity) return
+                            lastOverflowCalibrationCapacity = currentCapacity
+                            pendingApproxCalibrationOffset = pageStartOffset
+                            approxCharsPerPage = tightened
+                        }
+                        val bodyModifier = Modifier
+'''
+          if text.count(old) != 1:
+              raise SystemExit('pageTextLayout block did not match exactly once')
+          text = text.replace(old, new)
+
+          old = 'onTextLayout = { pageTextLayout = it },'
+          count = text.count(old)
+          if count != 2:
+              raise SystemExit(f'Expected exactly two Text onTextLayout callbacks, found {count}')
+          text = text.replace(old, 'onTextLayout = ::capturePageTextLayout,')
+          reader.write_text(text, encoding='utf-8')
+
+          tests = Path('app/src/test/java/app/maoyankanshu/novel/selfuse/ui/reader/PageIndexTest.kt')
+          text = tests.read_text(encoding='utf-8')
+          text = text.replace(
+              'assertEquals(listOf(0, 200), PageIndex.approximatePageStartOffsets(257, 1))',
+              'assertEquals(listOf(0, 64, 128, 192, 256), PageIndex.approximatePageStartOffsets(257, 1))',
+          )
+          old = '''    @Test
+    fun approximatePaging_honorsEstimatorBelowLegacy256Floor() {
+        val cpp = PageIndex.MIN_APPROX_CHARS_PER_PAGE
+        val text = "甲".repeat(457)
+
+        assertEquals(3, PageIndex.approximatePageCount(text.length, cpp))
+        assertEquals(cpp, PageIndex.approximateOffsetForPage(1, cpp, text.length))
+        assertEquals(cpp, PageIndex.approximatePageText(text, cpp, 0).length)
+        assertEquals(listOf(0, 200, 400), PageIndex.approximatePageStartOffsets(text.length, cpp))
+
+        // Passing an even smaller value must normalize to the same shared minimum, not old 256.
+        assertEquals(3, PageIndex.approximatePageCount(text.length, 1))
+        assertEquals(cpp, PageIndex.approximateOffsetForPage(1, 1, text.length))
+    }
+'''
+          new = '''    @Test
+    fun approximatePaging_acceptsRealCapacitiesBelowLegacy200And256Floors() {
+        val min = PageIndex.MIN_APPROX_CHARS_PER_PAGE
+        val text = "甲".repeat(457)
+
+        assertTrue(min < 200)
+        assertEquals(8, PageIndex.approximatePageCount(text.length, min))
+        assertEquals(min, PageIndex.approximateOffsetForPage(1, min, text.length))
+        assertEquals(min, PageIndex.approximatePageText(text, min, 0).length)
+
+        // A real estimator result such as 180 must remain 180 instead of being raised to 200/256.
+        assertEquals(3, PageIndex.approximatePageCount(text.length, 180))
+        assertEquals(180, PageIndex.approximateOffsetForPage(1, 180, text.length))
+        // Values below the absolute safety floor normalize consistently.
+        assertEquals(8, PageIndex.approximatePageCount(text.length, 1))
+        assertEquals(min, PageIndex.approximateOffsetForPage(1, 1, text.length))
+    }
+
+    @Test
+    fun overflowFeedback_tightensMonotonicallyToAbsoluteMinimum() {
+        val first = PageIndex.tightenApproxCharsPerPageAfterOverflow(256)
+        assertTrue(first in PageIndex.MIN_APPROX_CHARS_PER_PAGE until 256)
+        val second = PageIndex.tightenApproxCharsPerPageAfterOverflow(first)
+        assertTrue(second < first)
+        assertEquals(
+            PageIndex.MIN_APPROX_CHARS_PER_PAGE,
+            PageIndex.tightenApproxCharsPerPageAfterOverflow(PageIndex.MIN_APPROX_CHARS_PER_PAGE),
+        )
+        assertEquals(
+            PageIndex.MIN_APPROX_CHARS_PER_PAGE,
+            PageIndex.tightenApproxCharsPerPageAfterOverflow(1),
+        )
+    }
+'''
+          if text.count(old) != 1:
+              raise SystemExit('legacy approximate floor test did not match exactly once')
+          text = text.replace(old, new)
+          tests.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Validate patched tree
+        shell: bash
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:testDebugUnitTest :app:lint :app:assembleDebug --stacktrace --no-daemon
+
+      - name: Commit patch and remove one-time workflow
+        shell: bash
+        run: |
+          rm .github/workflows/one-time-reader-overflow-calibration.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            app/src/main/java/app/maoyankanshu/novel/selfuse/ui/reader/PageIndex.kt \
+            app/src/main/java/app/maoyankanshu/novel/selfuse/ui/reader/ReaderScreen.kt \
+            app/src/test/java/app/maoyankanshu/novel/selfuse/ui/reader/PageIndexTest.kt \
+            .github/workflows/one-time-reader-overflow-calibration.yml
+          git commit -m 'fix(reader): calibrate large pages from real overflow'
+          git push origin HEAD:improve/reading-time-accuracy
