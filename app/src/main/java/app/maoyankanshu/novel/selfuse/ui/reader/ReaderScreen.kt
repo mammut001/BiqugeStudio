@@ -668,6 +668,7 @@ fun ReaderScreen(
     val ttsChunkJump = remember { mutableStateOf<(Int) -> Unit>({}) }
     ttsChunkJump.value = { jumpToOffset(it) }
     var ttsHighlightRange by remember { mutableStateOf<IntRange?>(null) }
+    var ttsChunkPlayback by remember(book.id) { mutableStateOf<TtsChunkPlayback?>(null) }
     /** Body snapshot used by the active TTS session (offsets from controller.start). */
     val ttsSpeakBodyRef = remember { mutableStateOf("") }
     var ttsController by remember { mutableStateOf<ReaderTtsController?>(null) }
@@ -677,6 +678,8 @@ fun ReaderScreen(
                 context = context,
                 onState = { ttsState = it },
                 onChunkRange = { start, _ ->
+                    // Cancel any delayed turns from the previous audio chunk immediately.
+                    ttsChunkPlayback = null
                     ttsChunkJump.value(start)
                     val body = ttsSpeakBodyRef.value
                     ttsHighlightRange = if (body.isEmpty()) {
@@ -684,6 +687,14 @@ fun ReaderScreen(
                     } else {
                         TtsSpeechChunks.paragraphRangeContaining(body, start)
                     }
+                },
+                onChunkPlayback = { start, endExclusive, durationMs ->
+                    ttsChunkPlayback = TtsChunkPlayback(
+                        start = start,
+                        endExclusive = endExclusive,
+                        durationMs = durationMs,
+                        startedElapsedRealtimeMs = android.os.SystemClock.elapsedRealtime(),
+                    )
                 },
                 onEnginesDiscovered = { list ->
                     if (list.isNotEmpty()) ttsEngines = list
@@ -711,6 +722,7 @@ fun ReaderScreen(
                 ctrl.shutdown()
                 if (ttsController === ctrl) ttsController = null
                 ttsHighlightRange = null
+                ttsChunkPlayback = null
                 ttsSpeakBodyRef.value = ""
                 ttsState = ReaderTtsState.Ready
             }
@@ -720,11 +732,61 @@ fun ReaderScreen(
     // Clear follow highlight when reading truly ends — keep it during Preparing
     // engine failover so the current paragraph does not blink off mid-session.
     LaunchedEffect(ttsState) {
+        if (ttsState != ReaderTtsState.Speaking) {
+            // Playback has stopped or the engine is rebinding; stale timed turns must die.
+            ttsChunkPlayback = null
+        }
         when (ttsState) {
             ReaderTtsState.Ready, ReaderTtsState.Unavailable -> {
                 ttsHighlightRange = null
             }
             else -> Unit
+        }
+    }
+
+    // App-owned WAV playback has a real duration even though Android gives us no character-level
+    // range callbacks for it. Map page boundaries inside the active chunk onto that duration so a
+    // paragraph can visually continue onto page 2 before the next paragraph/chunk begins.
+    LaunchedEffect(
+        ttsChunkPlayback,
+        ttsState,
+        useApproxPaging,
+        approxCharsPerPage,
+        pageStarts,
+        book.text.length,
+    ) {
+        val playback = ttsChunkPlayback ?: return@LaunchedEffect
+        if (ttsState != ReaderTtsState.Speaking) return@LaunchedEffect
+        val cues = if (useApproxPaging) {
+            TtsPageFollow.cuesForApproximatePages(
+                textLength = book.text.length,
+                charsPerPage = approxCharsPerPage,
+                chunkStart = playback.start,
+                chunkEndExclusive = playback.endExclusive,
+                durationMs = playback.durationMs,
+            )
+        } else {
+            TtsPageFollow.cuesForExactPages(
+                pageStarts = pageStarts,
+                textLength = book.text.length,
+                chunkStart = playback.start,
+                chunkEndExclusive = playback.endExclusive,
+                durationMs = playback.durationMs,
+            )
+        }
+        for (cue in cues) {
+            val elapsed = (
+                android.os.SystemClock.elapsedRealtime() - playback.startedElapsedRealtimeMs
+                ).coerceAtLeast(0L)
+            val waitMs = cue.atMillis - elapsed
+            if (waitMs > 0L) delay(waitMs)
+            if (ttsState != ReaderTtsState.Speaking || ttsChunkPlayback != playback) {
+                return@LaunchedEffect
+            }
+            // Never fight manual navigation. Only advance if TTS still owns the page expected
+            // immediately before this boundary; the next chunk can resume following naturally.
+            if (pagerState.currentPage != cue.fromPage) return@LaunchedEffect
+            pagerState.scrollToPage(cue.page)
         }
     }
 
