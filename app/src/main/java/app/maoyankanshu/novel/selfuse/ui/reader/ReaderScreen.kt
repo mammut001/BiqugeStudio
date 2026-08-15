@@ -260,6 +260,9 @@ fun ReaderScreen(
     var approxCharsPerPage by remember(book.id) {
         mutableIntStateOf(PageIndex.DEFAULT_APPROX_CHARS_PER_PAGE)
     }
+    // Tighten large-book capacity only when the current real layout proves it overflows.
+    var pendingApproxCalibrationOffset by remember(book.id) { mutableStateOf<Int?>(null) }
+    var lastOverflowCalibrationCapacity by remember(book.id) { mutableIntStateOf(-1) }
 
     // Character anchor for reflow: keep nearest page after font/line/theme change.
     var anchorOffset by remember(book.id, book.text.length, textFullyLoaded) {
@@ -434,6 +437,8 @@ fun ReaderScreen(
                 lineHeightMultiplier = lineHeightMultiplier,
             )
             approxCharsPerPage = charsPerPage
+            pendingApproxCalibrationOffset = null
+            lastOverflowCalibrationCapacity = -1
             val count = PageIndex.approximatePageCount(text.length, charsPerPage)
             val saved = ProgressMath.clampProgress(book.position)
             // Seed held progress from library only before first layout; reflow must not
@@ -521,6 +526,18 @@ fun ReaderScreen(
         currentChapter = ChapterIndex.chapterAtOffset(chapters, anchorOffset)
     }
 
+    // Preserve the underlying character anchor when overflow feedback changes chars/page.
+    LaunchedEffect(approxCharsPerPage, pendingApproxCalibrationOffset, useApproxPaging, book.text.length) {
+        if (!useApproxPaging) return@LaunchedEffect
+        val offset = pendingApproxCalibrationOffset ?: return@LaunchedEffect
+        val cpp = approxCharsPerPage.coerceAtLeast(PageIndex.MIN_APPROX_CHARS_PER_PAGE)
+        val count = PageIndex.approximatePageCount(book.text.length, cpp)
+        val target = PageIndex.clampPageIndex(offset / cpp, count)
+        anchorOffset = offset.coerceIn(0, book.text.length)
+        if (pagerState.currentPage != target) pagerState.scrollToPage(target)
+        pendingApproxCalibrationOffset = null
+    }
+
     // Page turns → progress (0…1000) + chapter + anchor.
     // Must not commit progress until OpenProgressGate allows (avoids clobber on swap).
     LaunchedEffect(pagerState, pageStarts, chapters, useApproxPaging, approxCharsPerPage, textFullyLoaded, restoreApplied) {
@@ -529,6 +546,7 @@ fun ReaderScreen(
         }
             .distinctUntilChanged()
             .collect { (page, starts, cpp) ->
+                if (pendingApproxCalibrationOffset != null) return@collect
                 if (useApproxPaging) {
                     val count = PageIndex.approximatePageCount(book.text.length, cpp)
                     val p = PageIndex.clampPageIndex(page, count)
@@ -1091,6 +1109,18 @@ fun ReaderScreen(
                         var pageTextLayout by remember(pageBody, pageTextStyle) {
                             mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null)
                         }
+                        fun capturePageTextLayout(layout: androidx.compose.ui.text.TextLayoutResult) {
+                            pageTextLayout = layout
+                            if (!useApproxPaging || !restoreApplied || !layout.didOverflowHeight) return
+                            if (page != pagerState.currentPage || bodyPage != pagerState.currentPage) return
+                            val currentCapacity = approxCharsPerPage
+                            if (lastOverflowCalibrationCapacity == currentCapacity) return
+                            val tightened = PageIndex.tightenApproxCharsPerPageAfterOverflow(currentCapacity)
+                            if (tightened >= currentCapacity) return
+                            lastOverflowCalibrationCapacity = currentCapacity
+                            pendingApproxCalibrationOffset = pageStartOffset
+                            approxCharsPerPage = tightened
+                        }
                         val bodyModifier = Modifier
                             .align(Alignment.TopStart)
                             .fillMaxWidth()
@@ -1113,7 +1143,7 @@ fun ReaderScreen(
                                 text = annotatedBody,
                                 modifier = bodyModifier.then(textModifier),
                                 style = pageTextStyle,
-                                onTextLayout = { pageTextLayout = it },
+                                onTextLayout = ::capturePageTextLayout,
                                 // Clip within the padded body; footer gap + line safety prevent cut-off.
                                 overflow = TextOverflow.Clip,
                                 softWrap = true,
@@ -1124,7 +1154,7 @@ fun ReaderScreen(
                                     text = annotatedBody,
                                     modifier = textModifier,
                                     style = pageTextStyle,
-                                    onTextLayout = { pageTextLayout = it },
+                                    onTextLayout = ::capturePageTextLayout,
                                     // Clip within the padded body; footer gap + line safety prevent cut-off.
                                     overflow = TextOverflow.Clip,
                                     softWrap = true,

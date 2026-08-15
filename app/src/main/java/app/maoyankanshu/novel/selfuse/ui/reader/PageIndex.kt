@@ -27,13 +27,13 @@ object PageIndex {
     const val DEFAULT_APPROX_CHARS_PER_PAGE: Int = 900
 
     /**
-     * Shared lower bound for all virtual-pagination math.
+     * Absolute lower bound for all virtual-pagination math.
      *
-     * The estimator was lowered from the old 256-char floor to 200 when the last-line clipping
-     * safeguards were tightened, but several downstream helpers still silently re-clamped to 256.
-     * That mismatch forced 256 characters onto layouts whose measured estimate was smaller.
+     * Large fonts and narrow viewports can legitimately fit fewer than the old 200/256 floors.
+     * Virtual paging is O(1), so correctness matters more than forcing an arbitrary page size.
+     * Keep this low enough for large-text accessibility layouts while bounding pathological inputs.
      */
-    const val MIN_APPROX_CHARS_PER_PAGE: Int = 200
+    const val MIN_APPROX_CHARS_PER_PAGE: Int = 64
 
     /** Half-width (in pages) of a progressive page-start window around restored progress. */
     const val PROGRESSIVE_WINDOW_RADIUS: Int = 4
@@ -265,6 +265,17 @@ object PageIndex {
      * below the older 0.70 setting that proved too aggressive before those guards.
      */
     const val APPROX_FILL_FACTOR: Float = 0.64f
+
+    /** One overflow feedback step removes roughly one typical CJK line worth of capacity. */
+    const val APPROX_OVERFLOW_SHRINK_FACTOR: Float = 0.94f
+
+    /** Tighten capacity only after the real Compose page reports vertical overflow. */
+    fun tightenApproxCharsPerPageAfterOverflow(charsPerPage: Int): Int {
+        val current = charsPerPage.coerceAtLeast(MIN_APPROX_CHARS_PER_PAGE)
+        if (current <= MIN_APPROX_CHARS_PER_PAGE) return MIN_APPROX_CHARS_PER_PAGE
+        val tightened = (current * APPROX_OVERFLOW_SHRINK_FACTOR).toInt()
+        return tightened.coerceIn(MIN_APPROX_CHARS_PER_PAGE, current - 1)
+    }
 
     /**
      * Reserve this many line-heights at the bottom of the exact-measure viewport.
