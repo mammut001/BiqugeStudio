@@ -66,6 +66,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import app.maoyankanshu.novel.selfuse.ui.screens.PrivacyConsentGate
 import app.maoyankanshu.novel.selfuse.ui.theme.BiqugeTheme
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -92,22 +93,40 @@ import kotlinx.coroutines.withContext
 class SearchActivity : ComponentActivity() {
 
     private var intentUrisState = mutableStateOf<List<Uri>>(emptyList())
+    private var privacyAccepted = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        val consentStore = PrivacyConsentStore.get(this)
+        privacyAccepted = consentStore.hasAcceptedCurrentPolicy()
         val openImport = intent?.getBooleanExtra(EXTRA_IMPORT, false) ?: false
-        applyImportIntent(intent)
+        if (privacyAccepted) applyImportIntent(intent)
 
         setContent {
+            var accepted by remember { mutableStateOf(privacyAccepted) }
             // Observe share / open-with URIs so SEND and onNewIntent recompose SearchScreen.
             val sharedUris by intentUrisState
-            BiqugeTheme(darkTheme = ReaderPreferences.get(this).nightMode()) {
-                SearchScreen(
-                    openImportOnStart = openImport,
-                    initialUris = sharedUris,
-                    onClose = { finish() },
-                )
+            BiqugeTheme(
+                darkTheme = if (accepted) ReaderPreferences.get(this).nightMode() else false,
+            ) {
+                if (accepted) {
+                    SearchScreen(
+                        openImportOnStart = openImport,
+                        initialUris = sharedUris,
+                        onClose = { finish() },
+                    )
+                } else {
+                    PrivacyConsentGate(
+                        onAccept = {
+                            consentStore.acceptCurrentPolicy()
+                            privacyAccepted = true
+                            applyImportIntent(intent)
+                            accepted = true
+                        },
+                        onDecline = { finish() },
+                    )
+                }
             }
         }
     }
@@ -115,7 +134,7 @@ class SearchActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        applyImportIntent(intent)
+        if (privacyAccepted) applyImportIntent(intent)
     }
 
     private fun applyImportIntent(intent: Intent?) {

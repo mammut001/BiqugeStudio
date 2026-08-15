@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- TTS playback may request transient audio focus on media stream. -->
-    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <!--
       Android 11+ package visibility: without this, queryIntentServices(TTS_SERVICE)
       returns empty and the in-app engine picker cannot show Google / 讯飞 / etc.

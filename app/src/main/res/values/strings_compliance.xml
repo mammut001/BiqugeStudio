@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="privacy_gate_title">隐私政策</string>
+    <string name="privacy_gate_summary">阅笺是本地 TXT / EPUB 阅读工具。书籍、进度、书签与阅读统计默认保存在你的设备中。只有当你主动使用维基文库、HTTPS 直链或授权网页导入时才会联网；朗读由你选择的 Android 系统/第三方 TTS 引擎处理。</string>
+    <string name="privacy_gate_read_full">查看完整隐私政策</string>
+    <string name="privacy_gate_accept">同意并继续</string>
+    <string name="privacy_gate_decline">不同意并退出</string>
+    <string name="privacy_policy_title">阅笺隐私政策</string>
+    <string name="compliance_center_title">隐私、开源与合规信息</string>
+    <string name="compliance_center_subtitle">隐私政策、GPL、源码与备案信息</string>
+    <string name="compliance_version">版本 v%1$s</string>
+    <string name="compliance_package">应用包名：%1$s</string>
+    <string name="compliance_developer_label">开发者/运营者：%1$s</string>
+    <string name="compliance_contact_label">联系邮箱：%1$s</string>
+    <string name="compliance_missing_required">未配置（正式发布前必须补充）</string>
+    <string name="compliance_privacy_policy">隐私政策</string>
+    <string name="compliance_open_source">开源许可</string>
+    <string name="compliance_source_code">查看对应源代码</string>
+    <string name="compliance_app_record">APP备案号：%1$s</string>
+    <string name="compliance_close">关闭</string>
+    <string name="open_source_title">开源许可与源码</string>
+    <string name="online_import_scope_notice">阅笺不提供在线书源。网络导入仅用于获取你主动指定且有权访问的内容或公版/开放内容。</string>
+
+    <!--
+      Release-owned values. Keep empty in source control until the real publishing entity is known.
+      docs/CHINA_RELEASE_READINESS.md treats missing developer identity/contact as a release blocker.
+    -->
+    <string name="compliance_developer_name"></string>
+    <string name="compliance_developer_contact"></string>
+    <string name="app_record_number"></string>
+
+    <string name="source_repository_url" translatable="false">https://github.com/mammut001/BiqugeStudio</string>
+    <string name="miit_app_record_query_url" translatable="false">https://beian.miit.gov.cn/</string>
+</resources>

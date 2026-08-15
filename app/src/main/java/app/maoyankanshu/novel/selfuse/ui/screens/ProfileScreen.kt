@@ -103,6 +103,7 @@ fun ProfileScreen(
     var fontSize by remember { mutableIntStateOf(preferences.fontSize()) }
     var nightMode by remember { mutableStateOf(preferences.nightMode()) }
     var showAbout by remember { mutableStateOf(false) }
+    var showCompliance by remember { mutableStateOf(false) }
 
     var isLoading by remember { mutableStateOf(false) }
     var loadingText by remember { mutableStateOf("") }
@@ -392,6 +393,15 @@ fun ProfileScreen(
                             onClick = { showAbout = true },
                             contentDescription = stringResource(R.string.about_app, appName),
                         )
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        ProfileItemRow(
+                            icon = Icons.Filled.Info,
+                            title = stringResource(R.string.compliance_center_title),
+                            subtitle = stringResource(R.string.compliance_center_subtitle),
+                            enabled = !isLoading,
+                            onClick = { showCompliance = true },
+                            contentDescription = stringResource(R.string.compliance_center_title),
+                        )
                     }
                 }
             }
@@ -475,6 +485,10 @@ fun ProfileScreen(
                 }
             },
         )
+    }
+
+    if (showCompliance) {
+        ComplianceCenterDialog(onDismiss = { showCompliance = false })
     }
 
     errorMessage?.let { msg ->

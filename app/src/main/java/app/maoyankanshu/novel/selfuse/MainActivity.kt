@@ -17,6 +17,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.maoyankanshu.novel.selfuse.ui.BiqugeApp
+import app.maoyankanshu.novel.selfuse.ui.screens.PrivacyConsentGate
 import app.maoyankanshu.novel.selfuse.ui.theme.BiqugeTheme
 
 /**
@@ -29,18 +30,23 @@ import app.maoyankanshu.novel.selfuse.ui.theme.BiqugeTheme
  */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        // Android 12+ SplashScreen API (Theme.BiqugeStudio.Splash → Theme.BiqugeStudio).
         installSplashScreen()
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         setContent {
+            val consentStore = remember { PrivacyConsentStore.get(this@MainActivity) }
+            var privacyAccepted by remember {
+                mutableStateOf(consentStore.hasAcceptedCurrentPolicy())
+            }
             var darkTheme by remember {
-                mutableStateOf(ReaderPreferences.get(this).nightMode())
+                mutableStateOf(
+                    if (privacyAccepted) ReaderPreferences.get(this@MainActivity).nightMode() else false,
+                )
             }
             val lifecycleOwner = LocalLifecycleOwner.current
-            DisposableEffect(lifecycleOwner) {
+            DisposableEffect(lifecycleOwner, privacyAccepted) {
                 val observer = LifecycleEventObserver { _, event ->
-                    if (event == Lifecycle.Event.ON_RESUME) {
+                    if (privacyAccepted && event == Lifecycle.Event.ON_RESUME) {
                         darkTheme = ReaderPreferences.get(this@MainActivity).nightMode()
                     }
                 }
@@ -51,9 +57,22 @@ class MainActivity : ComponentActivity() {
             }
             BiqugeTheme(darkTheme = darkTheme) {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    BiqugeApp(
-                        onDarkThemeChanged = { enabled -> darkTheme = enabled },
-                    )
+                    if (privacyAccepted) {
+                        BiqugeApp(
+                            onDarkThemeChanged = { enabled -> darkTheme = enabled },
+                        )
+                    } else {
+                        PrivacyConsentGate(
+                            onAccept = {
+                                consentStore.acceptCurrentPolicy()
+                                darkTheme = ReaderPreferences.get(this@MainActivity).nightMode()
+                                privacyAccepted = true
+                            },
+                            onDecline = {
+                                finishAndRemoveTask()
+                            },
+                        )
+                    }
                 }
             }
         }
