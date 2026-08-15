@@ -107,6 +107,19 @@ fun DiscoverScreen(
             ReadingStats.days(context, timeRange.dayCount)
         }
     }
+
+    // Habit insights use a longer local-only window than the short-range chart. ReadingStats.days()
+    // includes zero-value dates, which gives streak and heatmap calculations a stable calendar axis.
+    var insightEntries by remember { mutableStateOf<List<ReadingStats.DayEntry>>(emptyList()) }
+    var weeklyGoalMillis by remember { mutableStateOf(ReadingStats.DEFAULT_WEEKLY_GOAL_MILLIS) }
+    LaunchedEffect(historyVersion) {
+        val loaded = withContext(Dispatchers.IO) {
+            ReadingStats.days(context, ReadingInsights.INSIGHT_LOOKBACK_DAYS) to
+                ReadingStats.weeklyGoalMillis(context)
+        }
+        insightEntries = loaded.first
+        weeklyGoalMillis = loaded.second
+    }
     val dayMillis = remember(dayEntries) { dayEntries.map { it.millis } }
     val rangeMillis = remember(dayMillis) { dayMillis.sum() }
     val rangeLabel = ReadingStats.formatDuration(rangeMillis)
@@ -214,6 +227,19 @@ fun DiscoverScreen(
                         modifier = Modifier.semantics { heading() },
                     )
                     Spacer(Modifier.height(12.dp))
+                    ReadingHabitInsights(
+                        entries = insightEntries,
+                        weeklyGoalMillis = weeklyGoalMillis,
+                        onWeeklyGoalChanged = { millis ->
+                            weeklyGoalMillis = millis
+                            scope.launch {
+                                withContext(Dispatchers.IO) {
+                                    ReadingStats.setWeeklyGoalMillis(context, millis)
+                                }
+                            }
+                        },
+                    )
+                    Spacer(Modifier.height(16.dp))
                     ReadingTimeRangeChips(
                         selected = timeRange,
                         onSelected = { timeRangeName = it.name },
