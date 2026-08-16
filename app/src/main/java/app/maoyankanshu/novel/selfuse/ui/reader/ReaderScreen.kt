@@ -289,9 +289,11 @@ fun ReaderScreen(
     var pageStarts by remember(book.id, textFullyLoaded) { mutableStateOf(emptyList<Int>()) }
     var contentWidthPx by remember { mutableIntStateOf(0) }
     var contentHeightPx by remember { mutableIntStateOf(0) }
-    // While the chrome slider is down, pager snapshots must not overwrite [progress]
-    // or the thumb fights the finger and the page animates every tick.
-    var sliderScrubbing by remember { mutableStateOf(false) }
+    // Keep slider drag preview separate from committed reading progress. The body/pager must stay
+    // completely still while the thumb is down; otherwise every pointer tick remounts another page
+    // and can also persist an intermediate seek through the debounced progress writer.
+    var sliderScrubbing by remember(book.id) { mutableStateOf(false) }
+    var sliderPreviewProgress by remember(book.id) { mutableStateOf<Int?>(null) }
 
     val approxPageCount = if (useApproxPaging) {
         PageIndex.approximatePageCount(book.text.length, approxCharsPerPage)
@@ -1520,7 +1522,8 @@ fun ReaderScreen(
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    val sliderPercent = ProgressMath.percentOfProgress(progress)
+                    val sliderDisplayProgress = sliderPreviewProgress ?: progress
+                    val sliderPercent = ProgressMath.percentOfProgress(sliderDisplayProgress)
                     val sliderProgressCd = stringResource(R.string.reader_progress_cd, sliderPercent)
                     // Percent label + slider on one row so progress is never “bar only”.
                     Row(
@@ -1538,27 +1541,19 @@ fun ReaderScreen(
                             maxLines = 1,
                         )
                         Slider(
-                            value = progress.toFloat(),
+                            value = sliderDisplayProgress.toFloat(),
                             onValueChange = {
                                 sliderScrubbing = true
-                                val next = ProgressMath.clampProgress(it.roundToInt())
-                                progress = next
-                                val count = if (useApproxPaging) {
-                                    PageIndex.approximatePageCount(
-                                        book.text.length,
-                                        approxCharsPerPage,
-                                    )
-                                } else {
-                                    pageStarts.size
-                                }
-                                val page = PageIndex.pageForProgress(next, count)
-                                if (page != pagerState.currentPage) {
-                                    scope.launch { pagerState.scrollToPage(page) }
-                                }
+                                sliderPreviewProgress = ProgressMath.clampProgress(it.roundToInt())
                             },
                             onValueChangeFinished = {
+                                val target = sliderPreviewProgress ?: progress
+                                // Release the pager observer before the one committed seek so the
+                                // resulting page can refresh anchor/chapter/progress normally.
+                                sliderPreviewProgress = null
                                 sliderScrubbing = false
-                                jumpToProgress(progress)
+                                progress = target
+                                jumpToProgress(target)
                             },
                             valueRange = 0f..1000f,
                             colors = SliderDefaults.colors(
