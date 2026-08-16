@@ -181,7 +181,7 @@ class PageIndexTest {
     @Test
     fun approximateCharsPerPage_isPositiveAndConservative() {
         val count = PageIndex.approximateCharsPerPage(1080, 2000, 54f, 1.5f)
-        assertTrue(count in PageIndex.MIN_APPROX_CHARS_PER_PAGE..3600)
+        assertTrue(count in PageIndex.MIN_APPROX_CHARS_PER_PAGE..PageIndex.APPROX_CHARS_PER_PAGE_MAX)
         assertEquals(
             PageIndex.MIN_APPROX_CHARS_PER_PAGE,
             PageIndex.approximateCharsPerPage(1, 1, 1000f, 10f),
@@ -190,23 +190,105 @@ class PageIndexTest {
         val font = 54f
         val lineH = font * 1.5f
         val cols = ((1080 / font) * 0.92f).toInt()
-        val lines = ((2000 / lineH).toInt() - 2).coerceAtLeast(1)
+        val lines = (2000 / lineH).toInt().coerceAtLeast(1)
         val theoretical = cols * lines
-        assertTrue(count < theoretical)
+        assertTrue(count <= theoretical)
         assertTrue(count <= (theoretical * PageIndex.APPROX_FILL_FACTOR).toInt() + 1)
+    }
+
+    @Test
+    fun approximateCharsPerPage_fillsMostOfTypicalPhoneViewport() {
+        // 1080×2000 px, 18sp@3x = 54px, default line height 1.85.
+        // The old 0.64 fill × two-line reserve used ~55% of the page (half-blank).
+        val count = PageIndex.approximateCharsPerPage(1080, 2000, 54f, 1.85f)
+        val font = 54f
+        val lineH = font * 1.85f
+        val cols = ((1080 / font) * 0.92f).toInt()
+        val rawLines = (2000 / lineH).toInt()
+        val raw = cols * rawLines
+        assertTrue(count >= (raw * 0.75f).toInt())
+        assertTrue(count < raw)
+    }
+
+    @Test
+    fun charsPerPageFromMeasuredLines_hardWrappedFillsViewport() {
+        // 20 hard-wrapped lines × 30px; viewport 400 with 0.2-line safety → 394.
+        // Lines 0–12 fit (bottom 390 ≤ 394); line 13 (420) does not.
+        val n = 20
+        val tops = FloatArray(n) { it * 30f }
+        val bottoms = FloatArray(n) { (it + 1) * 30f }
+        val chars = IntArray(n) { it * 22 }
+        val fitted = PageIndex.charsPerPageFromMeasuredLines(
+            tops,
+            bottoms,
+            chars,
+            sampleLength = 440,
+            viewportHeightPx = 400f,
+        )
+        assertEquals(13 * 22, fitted)
+        assertTrue(fitted > 200)
+    }
+
+    @Test
+    fun charsPerPageFromMeasuredLines_shortSampleReturnsSampleLength() {
+        val tops = floatArrayOf(0f, 20f, 40f)
+        val bottoms = floatArrayOf(20f, 40f, 60f)
+        val chars = intArrayOf(0, 10, 20)
+        assertEquals(
+            80,
+            PageIndex.charsPerPageFromMeasuredLines(
+                tops,
+                bottoms,
+                chars,
+                sampleLength = 80,
+                viewportHeightPx = 400f,
+            ),
+        )
+    }
+
+    @Test
+    fun paintedTextHeightPx_usesLastLineBottom() {
+        assertEquals(0f, PageIndex.paintedTextHeightPx(0, 100f), 0.01f)
+        assertEquals(480f, PageIndex.paintedTextHeightPx(12, 480f), 0.01f)
+    }
+
+    @Test
+    fun expandAfterUnderfill_growsHalfEmptyFullSlice() {
+        val grown = PageIndex.expandApproxCharsPerPageAfterUnderfill(
+            charsPerPage = 300,
+            paintedHeightPx = 500f,
+            viewportHeightPx = 1000f,
+        )
+        assertTrue(grown > 300)
+        assertTrue(grown <= PageIndex.APPROX_CHARS_PER_PAGE_MAX)
+        assertTrue(
+            PageIndex.expandApproxCharsPerPageAfterUnderfill(300, 900f, 1000f) > 300,
+        )
+        assertEquals(
+            300,
+            PageIndex.expandApproxCharsPerPageAfterUnderfill(300, 980f, 1000f),
+        )
+        assertEquals(
+            300,
+            PageIndex.expandApproxCharsPerPageAfterUnderfill(300, 50f, 1000f),
+        )
+        assertEquals(
+            300,
+            PageIndex.expandApproxCharsPerPageAfterUnderfill(300, 0f, 1000f),
+        )
     }
 
     @Test
     fun effectivePageViewportHeight_reservesBottomSafety() {
         val effective = PageIndex.effectivePageViewportHeight(1000f, typicalLineHeightPx = 40f)
         assertTrue(effective < 1000f)
-        // Full line reserved (1.0 × line height) so last line is not half-clipped.
+        // Thin descender pad only — a full empty line left a gap above the footer.
         assertEquals(
             1000f - (40f * PageIndex.PAGE_BOTTOM_SAFETY_LINE_FRACTION),
             effective,
             0.01f,
         )
-        assertEquals(1.0f, PageIndex.PAGE_BOTTOM_SAFETY_LINE_FRACTION, 0.001f)
+        assertEquals(0.2f, PageIndex.PAGE_BOTTOM_SAFETY_LINE_FRACTION, 0.001f)
         val noLine = PageIndex.effectivePageViewportHeight(500f, 0f)
         assertTrue(noLine < 500f)
         assertTrue(noLine >= 500f * 0.5f)
@@ -272,23 +354,22 @@ class PageIndexTest {
 
     @Test
     fun pageStartOffsets_multiPagePacking() {
-        // 5 lines × 30px; viewport 100 with full-line safety (30) → effective 70
-        // line0+1: bottom 60 ≤ 70 → same page
-        // line2: bottom 90 > 70 → new page at char 20
-        // line3: 120-60=60 ≤ 70
-        // line4: 150-60=90 > 70 → new page at char 40
+        // 5 lines × 30px; viewport 100 with 0.2-line safety (6) → effective 94
+        // line0+1+2: bottom 90 ≤ 94 → same page
+        // line3: bottom 120 > 94 → new page at char 30
+        // line4: 150-90=60 ≤ 94
         val tops = floatArrayOf(0f, 30f, 60f, 90f, 120f)
         val bottoms = floatArrayOf(30f, 60f, 90f, 120f, 150f)
         val chars = intArrayOf(0, 10, 20, 30, 40)
         val starts = PageIndex.pageStartOffsets(tops, bottoms, chars, viewportHeightPx = 100f)
-        assertEquals(listOf(0, 20, 40), starts)
-        assertEquals(3, starts.size)
+        assertEquals(listOf(0, 30), starts)
+        assertEquals(2, starts.size)
     }
 
     @Test
     fun pageStartOffsets_doesNotPackLineThatTouchesViewportEdge() {
-        // Full-line safety: line height 50, viewport 100 → effective 50
-        // line0: 0-50 fits alone; line1: 100-0=100 > 50 → new page
+        // 0.2-line safety: line height 50, viewport 100 → effective 90
+        // line0: 0-50 fits; line1: 100-0=100 > 90 → new page
         val tops = floatArrayOf(0f, 50f)
         val bottoms = floatArrayOf(50f, 100f)
         val chars = intArrayOf(0, 20)
@@ -308,8 +389,8 @@ class PageIndexTest {
 
     @Test
     fun pageStartOffsets_thenProgressMapsAcrossPages() {
-        // viewport 120, line height 40 → effective 80 (full line reserved)
-        // line0+1: 80 ≤ 80; line2: 120 > 80 → page at 16; line3: 160-80=80; line4: 200-80=120 > 80 → page at 32
+        // viewport 120, line height 40 → effective 112 (0.2-line safety)
+        // line0+1: 80 ≤ 112; line2: 120 > 112 → page at 16; line3: 160-80=80; line4: 200-80=120 > 112 → page at 32
         val tops = floatArrayOf(0f, 40f, 80f, 120f, 160f)
         val bottoms = floatArrayOf(40f, 80f, 120f, 160f, 200f)
         val chars = intArrayOf(0, 8, 16, 24, 32)

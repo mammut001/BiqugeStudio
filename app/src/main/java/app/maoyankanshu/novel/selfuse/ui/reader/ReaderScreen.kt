@@ -260,9 +260,10 @@ fun ReaderScreen(
     var approxCharsPerPage by remember(book.id) {
         mutableIntStateOf(PageIndex.DEFAULT_APPROX_CHARS_PER_PAGE)
     }
-    // Tighten large-book capacity only when the current real layout proves it overflows.
+    // Tighten / expand large-book capacity from the current real layout.
     var pendingApproxCalibrationOffset by remember(book.id) { mutableStateOf<Int?>(null) }
     var lastOverflowCalibrationCapacity by remember(book.id) { mutableIntStateOf(-1) }
+    var lastUnderfillCalibrationCapacity by remember(book.id) { mutableIntStateOf(-1) }
 
     // Character anchor for reflow: keep nearest page after font/line/theme change.
     var anchorOffset by remember(book.id, book.text.length, textFullyLoaded) {
@@ -430,15 +431,55 @@ fun ReaderScreen(
 
         if (useApproxPaging) {
             val fontPx = with(density) { fontSizeSp.sp.toPx() }
-            val charsPerPage = PageIndex.approximateCharsPerPage(
+            val gridSeed = PageIndex.approximateCharsPerPage(
                 widthPx = width,
                 heightPx = height,
                 fontSizePx = fontPx,
                 lineHeightMultiplier = lineHeightMultiplier,
             )
+            val sampleEnd = text.length.coerceAtMost(PageIndex.APPROX_MEASURE_SAMPLE_CHARS)
+            val measured = if (sampleEnd <= 0) {
+                gridSeed
+            } else {
+                withContext(Dispatchers.Default) {
+                    val layout = textMeasurer.measure(
+                        text = text.substring(0, sampleEnd),
+                        style = style,
+                        constraints = Constraints(maxWidth = width),
+                    )
+                    val lineCount = layout.lineCount
+                    if (lineCount <= 0) {
+                        gridSeed
+                    } else {
+                        val tops = FloatArray(lineCount)
+                        val bottoms = FloatArray(lineCount)
+                        val chars = IntArray(lineCount)
+                        for (i in 0 until lineCount) {
+                            tops[i] = layout.getLineTop(i)
+                            bottoms[i] = layout.getLineBottom(i)
+                            chars[i] = layout.getLineStart(i)
+                        }
+                        PageIndex.charsPerPageFromMeasuredLines(
+                            tops,
+                            bottoms,
+                            chars,
+                            sampleEnd,
+                            height.toFloat(),
+                        )
+                    }
+                }
+            }
+            // Prefer the real layout; never seed below the grid estimate when the
+            // sample was shorter than one page (would lock in a half-empty screen).
+            val charsPerPage = if (measured >= sampleEnd && sampleEnd < text.length) {
+                maxOf(measured, gridSeed)
+            } else {
+                measured
+            }
             approxCharsPerPage = charsPerPage
             pendingApproxCalibrationOffset = null
             lastOverflowCalibrationCapacity = -1
+            lastUnderfillCalibrationCapacity = -1
             val count = PageIndex.approximatePageCount(text.length, charsPerPage)
             val saved = ProgressMath.clampProgress(book.position)
             // Seed held progress from library only before first layout; reflow must not
@@ -1017,21 +1058,24 @@ fun ReaderScreen(
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.safeDrawing),
         ) {
-            // Body + gap + footer: reserve gap so time/page never sits on the last line.
+            // Body + tight gap + footer: only the status strip is reserved at the bottom.
             val bodyFooterGap = PageLayout.BODY_FOOTER_GAP_DP.dp
             BoxWithConstraints(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    // Keep a clear band above the footer strip (not flush against page %).
                     .padding(bottom = bodyFooterGap),
             ) {
                 // Kindle-style adjustable body margins (narrow / standard / wide).
                 val padH = PageLayout.horizontalPadDp(marginStep).dp
                 val padV = PageLayout.verticalPadDp(marginStep).dp
+                val padBottom = PageLayout.BODY_BOTTOM_PAD_DP.dp
+                val pageMaxHeight = maxHeight
                 val widthPx = with(density) { (maxWidth - padH * 2).toPx().toInt().coerceAtLeast(1) }
-                // maxHeight already excludes footer gap; still subtract body pad for measure.
-                val heightPx = with(density) { (maxHeight - padV * 2).toPx().toInt().coerceAtLeast(1) }
+                // Top margin stays user-controlled; bottom is a thin inset above the footer.
+                val heightPx = with(density) {
+                    (pageMaxHeight - padV - padBottom).toPx().toInt().coerceAtLeast(1)
+                }
                 // Publish measured viewport for page breaking (side-effect free after first frame).
                 LaunchedEffect(widthPx, heightPx, marginStep) {
                     contentWidthPx = widthPx
@@ -1173,20 +1217,48 @@ fun ReaderScreen(
                         }
                         fun capturePageTextLayout(layout: androidx.compose.ui.text.TextLayoutResult) {
                             pageTextLayout = layout
-                            if (!useApproxPaging || !restoreApplied || !layout.didOverflowHeight) return
+                            if (!useApproxPaging || !restoreApplied) return
                             if (page != pagerState.currentPage || bodyPage != pagerState.currentPage) return
                             val currentCapacity = approxCharsPerPage
-                            if (lastOverflowCalibrationCapacity == currentCapacity) return
-                            val tightened = PageIndex.tightenApproxCharsPerPageAfterOverflow(currentCapacity)
-                            if (tightened >= currentCapacity) return
-                            lastOverflowCalibrationCapacity = currentCapacity
+                            if (layout.didOverflowHeight) {
+                                if (lastOverflowCalibrationCapacity == currentCapacity) return
+                                val tightened = PageIndex.tightenApproxCharsPerPageAfterOverflow(
+                                    currentCapacity,
+                                )
+                                if (tightened >= currentCapacity) return
+                                lastOverflowCalibrationCapacity = currentCapacity
+                                pendingApproxCalibrationOffset = pageStartOffset
+                                approxCharsPerPage = tightened
+                                return
+                            }
+                            // Full slice that left the lower page empty (hard-wrapped TXT).
+                            // Use last-line ink height — layout.size.height follows the
+                            // heightIn constraint and would look "full" even when it is not.
+                            if (pageBody.length < currentCapacity) return
+                            if (lastUnderfillCalibrationCapacity == currentCapacity) return
+                            val painted = PageIndex.paintedTextHeightPx(
+                                layout.lineCount,
+                                if (layout.lineCount > 0) {
+                                    layout.getLineBottom(layout.lineCount - 1)
+                                } else {
+                                    0f
+                                },
+                            )
+                            val expanded = PageIndex.expandApproxCharsPerPageAfterUnderfill(
+                                currentCapacity,
+                                painted,
+                                contentHeightPx.toFloat(),
+                            )
+                            if (expanded <= currentCapacity) return
+                            lastUnderfillCalibrationCapacity = currentCapacity
                             pendingApproxCalibrationOffset = pageStartOffset
-                            approxCharsPerPage = tightened
+                            approxCharsPerPage = expanded
                         }
                         val bodyModifier = Modifier
                             .align(Alignment.TopStart)
                             .fillMaxWidth()
-                            .padding(horizontal = padH, vertical = padV)
+                            .heightIn(max = pageMaxHeight)
+                            .padding(start = padH, top = padV, end = padH, bottom = padBottom)
                         val textModifier = Modifier
                             .fillMaxWidth()
                             .pointerInput(ttsState, pageStartOffset, pageBody) {
@@ -1260,7 +1332,7 @@ fun ReaderScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
                         .semantics {
                             contentDescription = "$pageLocationCd，$progressCd，$batteryCd"
                         },
