@@ -1058,22 +1058,24 @@ fun ReaderScreen(
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.safeDrawing),
         ) {
-            // Body + gap + footer: reserve gap so time/page never sits on the last line.
+            // Body + tight gap + footer: only the status strip is reserved at the bottom.
             val bodyFooterGap = PageLayout.BODY_FOOTER_GAP_DP.dp
             BoxWithConstraints(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    // Keep a clear band above the footer strip (not flush against page %).
                     .padding(bottom = bodyFooterGap),
             ) {
                 // Kindle-style adjustable body margins (narrow / standard / wide).
                 val padH = PageLayout.horizontalPadDp(marginStep).dp
                 val padV = PageLayout.verticalPadDp(marginStep).dp
+                val padBottom = PageLayout.BODY_BOTTOM_PAD_DP.dp
                 val pageMaxHeight = maxHeight
                 val widthPx = with(density) { (maxWidth - padH * 2).toPx().toInt().coerceAtLeast(1) }
-                // maxHeight already excludes footer gap; still subtract body pad for measure.
-                val heightPx = with(density) { (pageMaxHeight - padV * 2).toPx().toInt().coerceAtLeast(1) }
+                // Top margin stays user-controlled; bottom is a thin inset above the footer.
+                val heightPx = with(density) {
+                    (pageMaxHeight - padV - padBottom).toPx().toInt().coerceAtLeast(1)
+                }
                 // Publish measured viewport for page breaking (side-effect free after first frame).
                 LaunchedEffect(widthPx, heightPx, marginStep) {
                     contentWidthPx = widthPx
@@ -1256,7 +1258,7 @@ fun ReaderScreen(
                             .align(Alignment.TopStart)
                             .fillMaxWidth()
                             .heightIn(max = pageMaxHeight)
-                            .padding(horizontal = padH, vertical = padV)
+                            .padding(start = padH, top = padV, end = padH, bottom = padBottom)
                         val textModifier = Modifier
                             .fillMaxWidth()
                             .pointerInput(ttsState, pageStartOffset, pageBody) {
@@ -1330,7 +1332,7 @@ fun ReaderScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
                         .semantics {
                             contentDescription = "$pageLocationCd，$progressCd，$batteryCd"
                         },

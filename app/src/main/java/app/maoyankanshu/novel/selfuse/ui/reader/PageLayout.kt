@@ -20,9 +20,15 @@ object PageLayout {
 
     /**
      * Extra space (dp) between the last line of body text and the time / page footer.
-     * Keeps status labels from sitting on top of the reading surface — not flush-tight.
+     * Tight on purpose: the footer is the only reserved band at the bottom.
      */
-    const val BODY_FOOTER_GAP_DP: Int = 14
+    const val BODY_FOOTER_GAP_DP: Int = 4
+
+    /**
+     * Bottom inset (dp) inside the reading body. Smaller than [verticalPadDp] so
+     * the last line sits just above the footer instead of repeating the top margin.
+     */
+    const val BODY_BOTTOM_PAD_DP: Int = 4
 
     /**
      * Approximate footer bar height (dp) reserved in the reading column so pagination

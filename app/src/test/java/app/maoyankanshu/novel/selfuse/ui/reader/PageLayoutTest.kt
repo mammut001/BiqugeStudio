@@ -49,10 +49,10 @@ class PageLayoutTest {
     // ── Footer gap (body vs time/page strip) ───────────────────────────────
 
     @Test
-    fun bodyFooterGap_isComfortableNotTight() {
-        // Gap must exist and stay in a human-friendly band (not flush, not huge).
-        assertTrue(PageLayout.BODY_FOOTER_GAP_DP >= 10)
-        assertTrue(PageLayout.BODY_FOOTER_GAP_DP <= 24)
+    fun bodyFooterGap_isTightAboveStatusStrip() {
+        // Small breathing room only — the footer is the reserved bottom band.
+        assertTrue(PageLayout.BODY_FOOTER_GAP_DP in 2..8)
+        assertTrue(PageLayout.BODY_BOTTOM_PAD_DP in 2..8)
         assertTrue(PageLayout.FOOTER_BAR_DP >= 28)
         assertTrue(PageLayout.FOOTER_BAR_DP <= 48)
     }

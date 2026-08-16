@@ -259,11 +259,10 @@ object PageIndex {
      * Below 1.0 so Chinese full-width + letterSpacing rarely overfill the screen
      * (overfill clips the last line in a non-scrolling page Text).
      *
-     * 0.64 (and the older two-line reserve) left roughly half the page empty on
-     * tall phones. Overflow / underfill feedback now corrects residual error, so
-     * the seed can sit close to a full page.
+     * 0.64 left half the page empty. Seed close to a full page; overflow / underfill
+     * feedback corrects residual wrap error so the last line sits above the footer.
      */
-    const val APPROX_FILL_FACTOR: Float = 0.90f
+    const val APPROX_FILL_FACTOR: Float = 0.97f
 
     /** One overflow feedback step removes roughly one typical CJK line worth of capacity. */
     const val APPROX_OVERFLOW_SHRINK_FACTOR: Float = 0.94f
@@ -272,10 +271,10 @@ object PageIndex {
      * Grow toward this fraction of the painted viewport when a full-capacity
      * slice left the lower half of the page empty (hard-wrapped TXT, tall screens).
      */
-    const val APPROX_UNDERFILL_TARGET: Float = 0.92f
+    const val APPROX_UNDERFILL_TARGET: Float = 0.99f
 
     /** Do not grow when the painted page already uses at least this much height. */
-    const val APPROX_UNDERFILL_TRIGGER: Float = 0.84f
+    const val APPROX_UNDERFILL_TRIGGER: Float = 0.96f
 
     /** Hard-wrapped or last-page slices below this ratio are left alone. */
     const val APPROX_UNDERFILL_MIN_USED: Float = 0.12f
@@ -318,13 +317,13 @@ object PageIndex {
 
     /**
      * Reserve this many line-heights at the bottom of the exact-measure viewport.
-     * 1.0 = leave a full empty line so platform font padding / subpixel paint never
-     * clips the last glyph (0.35 was still cutting half a line on some devices).
+     * A thin descender / subpixel pad only — a full empty line left a visible gap
+     * above the footer. Clip + overflow feedback catch the rare last-glyph cut.
      */
-    const val PAGE_BOTTOM_SAFETY_LINE_FRACTION: Float = 1.0f
+    const val PAGE_BOTTOM_SAFETY_LINE_FRACTION: Float = 0.2f
 
     /** Minimum absolute bottom safety in px when line height is unknown. */
-    const val PAGE_BOTTOM_SAFETY_MIN_PX: Float = 12f
+    const val PAGE_BOTTOM_SAFETY_MIN_PX: Float = 6f
 
     /**
      * Whether a page whose body starts at [pageStartOffset] should apply paragraph
@@ -350,7 +349,8 @@ object PageIndex {
      *
      * @param viewportHeightPx measured body height (already after margins)
      * @param typicalLineHeightPx optional average line height; when >0 reserves a
-     *   full line (see [PAGE_BOTTOM_SAFETY_LINE_FRACTION]), otherwise a % of viewport.
+     *   thin descender pad (see [PAGE_BOTTOM_SAFETY_LINE_FRACTION]), otherwise a
+     *   small absolute inset.
      */
     fun effectivePageViewportHeight(
         viewportHeightPx: Float,
@@ -361,7 +361,7 @@ object PageIndex {
             (typicalLineHeightPx * PAGE_BOTTOM_SAFETY_LINE_FRACTION)
                 .coerceAtLeast(PAGE_BOTTOM_SAFETY_MIN_PX)
         } else {
-            (vh * 0.06f).coerceAtLeast(PAGE_BOTTOM_SAFETY_MIN_PX)
+            PAGE_BOTTOM_SAFETY_MIN_PX
         }
         // Never reserve more than ~40% of the viewport (tiny screens / huge fonts).
         val capped = reserve.coerceAtMost(vh * 0.4f)
@@ -379,10 +379,8 @@ object PageIndex {
         val lineHeight = (font * lineHeightMultiplier.coerceAtLeast(1f)).coerceAtLeast(1f)
         // Full-width CJK ≈ 1em; letterSpacing makes real columns slightly fewer.
         val columns = ((widthPx.coerceAtLeast(1) / font) * 0.92f).toInt().coerceAtLeast(1)
-        // Leave one line empty so wrap / indent / font-padding variance can still fit.
         val rawLines = (heightPx.coerceAtLeast(1) / lineHeight).toInt().coerceAtLeast(1)
-        val lines = (rawLines - 1).coerceAtLeast(1)
-        return (columns * lines * APPROX_FILL_FACTOR).roundToInt()
+        return (columns * rawLines * APPROX_FILL_FACTOR).roundToInt()
             .coerceIn(MIN_APPROX_CHARS_PER_PAGE, APPROX_CHARS_PER_PAGE_MAX)
     }
 
