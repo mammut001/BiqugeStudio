@@ -14,7 +14,7 @@
 | **仓库名** | [BiqugeStudio](https://github.com/mammut001/BiqugeStudio) |
 | **包名** | `app.maoyankanshu.novel.selfuse` |
 | **许可证** | [**GNU GPL v3.0**](./LICENSE)（强 copyleft） |
-| **最新安装包** | [Releases · v1.0.1](https://github.com/mammut001/BiqugeStudio/releases/tag/v1.0.1)（`yuejian-1.0.1-release.apk`） |
+| **最新安装包** | [Releases · v1.0.3](https://github.com/mammut001/BiqugeStudio/releases/tag/v1.0.3)（`yuejian-1.0.3-release.apk`） |
 | **关键词** | 本地阅读器 · TXT · EPUB · 离线 · 大 TXT 秒开 · 开源 · Android · Compose · 无广告 |
 
 ### 适合 / 不适合

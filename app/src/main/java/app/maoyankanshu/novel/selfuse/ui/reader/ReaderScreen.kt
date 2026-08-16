@@ -108,11 +108,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.ParagraphStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -267,10 +269,17 @@ fun ReaderScreen(
     var approxCharsPerPage by remember(book.id) {
         mutableIntStateOf(PageIndex.DEFAULT_APPROX_CHARS_PER_PAGE)
     }
-    // Tighten / expand large-book capacity from the current real layout.
+    // Tighten / expand large-book capacity from the current real layout. Keep a
+    // fit/overflow bracket so feedback converges instead of oscillating forever.
     var pendingApproxCalibrationOffset by remember(book.id) { mutableStateOf<Int?>(null) }
-    var lastOverflowCalibrationCapacity by remember(book.id) { mutableIntStateOf(-1) }
-    var lastUnderfillCalibrationCapacity by remember(book.id) { mutableIntStateOf(-1) }
+    var largestFittingCalibrationCapacity by remember(book.id) { mutableIntStateOf(-1) }
+    var smallestOverflowingCalibrationCapacity by remember(book.id) {
+        mutableIntStateOf(Int.MAX_VALUE)
+    }
+    var approxCalibrationSettled by remember(book.id) { mutableStateOf(false) }
+    // Forces one fresh Text layout after an anchor-preserving capacity remap. Without this,
+    // calibration could pause until the next user page turn and make page totals jump then.
+    var approxCalibrationEpoch by remember(book.id) { mutableIntStateOf(0) }
 
     // Character anchor for reflow: keep nearest page after font/line/theme change.
     var anchorOffset by remember(book.id, book.text.length, textFullyLoaded) {
@@ -333,6 +342,16 @@ fun ReaderScreen(
     // Latest progress for leave-save: DisposableEffect keys only on book.id.
     val latestProgress by rememberUpdatedState(progress)
 
+    // The first body can be laid out while restore is still gated, so its onTextLayout callback
+    // intentionally skips calibration. Trigger one fresh layout as soon as restore completes;
+    // otherwise the first user page turn becomes the accidental calibration trigger.
+    LaunchedEffect(useApproxPaging, restoreApplied) {
+        if (useApproxPaging && restoreApplied) {
+            delay(16L)
+            approxCalibrationEpoch += 1
+        }
+    }
+
     val bodyFontFamily = remember(fontFamilyId, customFontName, context) {
         if (fontFamilyId == ReaderPreferences.FONT_CUSTOM && customFontName.isNotEmpty()) {
             ReaderCustomFont.loadFontFamily(context, customFontName) ?: readerFontFamily(ReaderPreferences.FONT_SERIF)
@@ -345,7 +364,6 @@ fun ReaderScreen(
         lineHeightMultiplier,
         palette.onBackground,
         bodyFontFamily,
-        paragraphIndent,
     ) {
         TextStyle(
             color = palette.onBackground,
@@ -353,11 +371,6 @@ fun ReaderScreen(
             lineHeight = (fontSizeSp * lineHeightMultiplier).sp,
             fontFamily = bodyFontFamily,
             letterSpacing = 0.2.sp,
-            textIndent = if (paragraphIndent) {
-                TextIndent(firstLine = (fontSizeSp * 2).sp, restLine = 0.sp)
-            } else {
-                null
-            },
         )
     }
 
@@ -462,12 +475,20 @@ fun ReaderScreen(
                 fontSizePx = fontPx,
                 lineHeightMultiplier = lineHeightMultiplier,
             )
-            val sampleEnd = text.length.coerceAtMost(PageIndex.APPROX_MEASURE_SAMPLE_CHARS)
-            val measured = if (sampleEnd <= 0) {
+            val sampleStart = PageIndex.approximateMeasureSampleStart(
+                textLength = text.length,
+                anchorOffset = anchorOffset,
+            )
+            val sampleEnd = (sampleStart + PageIndex.APPROX_MEASURE_SAMPLE_CHARS)
+                .coerceAtMost(text.length)
+            val sampleLength = sampleEnd - sampleStart
+            val measured = if (sampleLength <= 0) {
                 gridSeed
             } else {
                 withContext(Dispatchers.Default) {
-                    val rawSample = text.substring(0, sampleEnd)
+                    // Calibrate where the user is actually reading. Front matter and chapter
+                    // indexes often have very different paragraph density from the current body.
+                    val rawSample = text.substring(sampleStart, sampleEnd)
                     val displaySample = PageIndex.unwrapHardLineBreaks(rawSample)
                     val layout = textMeasurer.measure(
                         text = displaySample,
@@ -499,15 +520,16 @@ fun ReaderScreen(
             }
             // Prefer the real layout; never seed below the grid estimate when the
             // sample was shorter than one page (would lock in a half-empty screen).
-            val charsPerPage = if (measured >= sampleEnd && sampleEnd < text.length) {
+            val charsPerPage = if (measured >= sampleLength && sampleLength < text.length) {
                 maxOf(measured, gridSeed)
             } else {
                 measured
             }
             approxCharsPerPage = charsPerPage
             pendingApproxCalibrationOffset = null
-            lastOverflowCalibrationCapacity = -1
-            lastUnderfillCalibrationCapacity = -1
+            largestFittingCalibrationCapacity = -1
+            smallestOverflowingCalibrationCapacity = Int.MAX_VALUE
+            approxCalibrationSettled = false
             val count = PageIndex.approximatePageCount(text.length, charsPerPage)
             val saved = ProgressMath.clampProgress(book.position)
             // Seed held progress from library only before first layout; reflow must not
@@ -596,8 +618,15 @@ fun ReaderScreen(
     }
 
     // Preserve the underlying character anchor when overflow feedback changes chars/page.
-    LaunchedEffect(approxCharsPerPage, pendingApproxCalibrationOffset, useApproxPaging, book.text.length) {
-        if (!useApproxPaging) return@LaunchedEffect
+    LaunchedEffect(
+        approxCharsPerPage,
+        pendingApproxCalibrationOffset,
+        useApproxPaging,
+        book.text.length,
+        menuVisible,
+        sliderScrubbing,
+    ) {
+        if (!useApproxPaging || menuVisible || sliderScrubbing) return@LaunchedEffect
         val offset = pendingApproxCalibrationOffset ?: return@LaunchedEffect
         val cpp = approxCharsPerPage.coerceAtLeast(PageIndex.MIN_APPROX_CHARS_PER_PAGE)
         val count = PageIndex.approximatePageCount(book.text.length, cpp)
@@ -605,6 +634,7 @@ fun ReaderScreen(
         anchorOffset = offset.coerceIn(0, book.text.length)
         if (pagerState.currentPage != target) pagerState.scrollToPage(target)
         pendingApproxCalibrationOffset = null
+        approxCalibrationEpoch += 1
     }
 
     // Page turns → progress (0…1000) + chapter + anchor.
@@ -1194,20 +1224,7 @@ fun ReaderScreen(
                         pageStarts.isNotEmpty() -> PageIndex.offsetForPage(pageStarts, bodyPage)
                         else -> 0
                     }
-                    val pageTextStyle = remember(
-                        bodyTextStyle,
-                        paragraphIndent,
-                        pageStartOffset,
-                        book.text,
-                    ) {
-                        if (!paragraphIndent) {
-                            bodyTextStyle
-                        } else if (PageIndex.shouldApplyParagraphIndent(book.text, pageStartOffset)) {
-                            bodyTextStyle
-                        } else {
-                            bodyTextStyle.copy(textIndent = null)
-                        }
-                    }
+                    val pageTextStyle = bodyTextStyle
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -1250,30 +1267,108 @@ fun ReaderScreen(
                                 highlightColor = highlightColor,
                             )
                         }
+                        val renderedBody = remember(
+                            annotatedBody,
+                            displayBody,
+                            paragraphIndent,
+                            pageStartOffset,
+                            book.text,
+                            fontSizeSp,
+                        ) {
+                            if (!paragraphIndent) {
+                                annotatedBody
+                            } else {
+                                val indentFirst = PageIndex.shouldApplyParagraphIndent(
+                                    book.text,
+                                    pageStartOffset,
+                                )
+                                val indentRanges = PageIndex.paragraphIndentRanges(
+                                    displayBody,
+                                    indentFirst,
+                                )
+                                if (indentRanges.isEmpty()) {
+                                    annotatedBody
+                                } else {
+                                    buildAnnotatedString {
+                                        append(annotatedBody)
+                                        indentRanges.forEach { range ->
+                                            addStyle(
+                                                style = ParagraphStyle(
+                                                    textIndent = TextIndent(
+                                                        firstLine = (fontSizeSp * range.missingEm).sp,
+                                                        restLine = 0.sp,
+                                                    ),
+                                                ),
+                                                start = range.start,
+                                                end = range.endExclusive,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         var pageTextLayout by remember(displayBody, pageTextStyle) {
                             mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null)
                         }
                         fun capturePageTextLayout(layout: androidx.compose.ui.text.TextLayoutResult) {
                             pageTextLayout = layout
                             if (!useApproxPaging || !restoreApplied) return
+                            // Reader chrome is an overlay. Opening it or moving its slider must
+                            // never recalibrate the body or move the pager behind the controls.
+                            if (menuVisible || sliderScrubbing) return
+                            // Calibrate once per real viewport/style epoch. Different pages have
+                            // different paragraph density; treating every page as a new global
+                            // sample makes the total page count drift during normal reading.
+                            if (approxCalibrationSettled) return
+                            // Updating approxCharsPerPage recomposes the current pager slot before
+                            // the anchor-preserving scroll can run. Do not let that transient layout
+                            // replace the original offset with currentPage * newCapacity; doing so
+                            // visibly changed 96% into 83% after an otherwise adjacent page turn.
+                            if (pendingApproxCalibrationOffset != null) return
                             if (page != pagerState.currentPage || bodyPage != pagerState.currentPage) return
                             val currentCapacity = approxCharsPerPage
                             if (layout.didOverflowHeight) {
-                                if (lastOverflowCalibrationCapacity == currentCapacity) return
-                                val tightened = PageIndex.tightenApproxCharsPerPageAfterOverflow(
+                                // A fit learned from different wrapping is not a valid lower
+                                // bound when this smaller capacity already overflows.
+                                if (largestFittingCalibrationCapacity >= currentCapacity) {
+                                    largestFittingCalibrationCapacity = -1
+                                }
+                                smallestOverflowingCalibrationCapacity = minOf(
+                                    smallestOverflowingCalibrationCapacity,
                                     currentCapacity,
                                 )
-                                if (tightened >= currentCapacity) return
-                                lastOverflowCalibrationCapacity = currentCapacity
+                                val tightened = PageIndex.nextApproxCapacityAfterOverflow(
+                                    currentCapacity,
+                                    largestFittingCalibrationCapacity,
+                                )
+                                if (tightened >= currentCapacity) {
+                                    approxCalibrationSettled = true
+                                    return
+                                }
                                 pendingApproxCalibrationOffset = pageStartOffset
                                 approxCharsPerPage = tightened
+                                // The bounded TextMeasurer sample is already location-aware.
+                                // Permit one real-page safety correction, then lock capacity so
+                                // ordinary next/previous turns never mutate total pages.
+                                approxCalibrationSettled = true
                                 return
                             }
                             // Full slice that left the lower page empty (hard-wrapped TXT).
                             // Use last-line ink height — layout.size.height follows the
                             // heightIn constraint and would look "full" even when it is not.
-                            if (pageBody.length < currentCapacity) return
-                            if (lastUnderfillCalibrationCapacity == currentCapacity) return
+                            if (pageBody.length < currentCapacity) {
+                                approxCalibrationSettled = true
+                                return
+                            }
+                            // Likewise, a fitting capacity invalidates any stale upper bound at
+                            // or below it (the preserved anchor can change wrapping slightly).
+                            if (smallestOverflowingCalibrationCapacity <= currentCapacity) {
+                                smallestOverflowingCalibrationCapacity = Int.MAX_VALUE
+                            }
+                            largestFittingCalibrationCapacity = maxOf(
+                                largestFittingCalibrationCapacity,
+                                currentCapacity,
+                            )
                             val painted = PageIndex.paintedTextHeightPx(
                                 layout.lineCount,
                                 if (layout.lineCount > 0) {
@@ -1282,15 +1377,19 @@ fun ReaderScreen(
                                     0f
                                 },
                             )
-                            val expanded = PageIndex.expandApproxCharsPerPageAfterUnderfill(
+                            val expanded = PageIndex.nextApproxCapacityAfterUnderfill(
                                 currentCapacity,
                                 painted,
                                 contentHeightPx.toFloat(),
+                                smallestOverflowingCalibrationCapacity,
                             )
-                            if (expanded <= currentCapacity) return
-                            lastUnderfillCalibrationCapacity = currentCapacity
+                            if (expanded <= currentCapacity) {
+                                approxCalibrationSettled = true
+                                return
+                            }
                             pendingApproxCalibrationOffset = pageStartOffset
                             approxCharsPerPage = expanded
+                            approxCalibrationSettled = true
                         }
                         val bodyModifier = Modifier
                             .align(Alignment.TopStart)
@@ -1310,42 +1409,44 @@ fun ReaderScreen(
                                     }
                                 }
                             }
-                        if (ttsHighlightRange != null) {
-                            Text(
-                                text = annotatedBody,
-                                modifier = bodyModifier.then(textModifier),
-                                style = pageTextStyle,
-                                onTextLayout = ::capturePageTextLayout,
-                                // Clip within the padded body; footer gap + line safety prevent cut-off.
-                                overflow = TextOverflow.Clip,
-                                softWrap = true,
-                            )
-                        } else {
-                            // HorizontalPager keeps neighboring pages composed. Re-key the
-                            // selection host when the active page or reader surface changes so
-                            // stale selection handles / copy-select-all toolbar cannot remain
-                            // attached to content the user has already navigated away from.
-                            key(
-                                page,
-                                pagerState.currentPage,
-                                menuVisible,
-                                showToc,
-                                showBookmarks,
-                                showFind,
-                                showAppearance,
-                                showTtsRateDialog,
-                                showVoiceManagerSheet,
-                            ) {
-                                SelectionContainer(modifier = bodyModifier) {
-                                    Text(
-                                        text = annotatedBody,
-                                        modifier = textModifier,
-                                        style = pageTextStyle,
-                                        onTextLayout = ::capturePageTextLayout,
-                                        // Clip within the padded body; footer gap + line safety prevent cut-off.
-                                        overflow = TextOverflow.Clip,
-                                        softWrap = true,
-                                    )
+                        key(approxCalibrationEpoch) {
+                            if (ttsHighlightRange != null) {
+                                Text(
+                                    text = renderedBody,
+                                    modifier = bodyModifier.then(textModifier),
+                                    style = pageTextStyle,
+                                    onTextLayout = ::capturePageTextLayout,
+                                    // Clip within the padded body; footer gap + line safety prevent cut-off.
+                                    overflow = TextOverflow.Clip,
+                                    softWrap = true,
+                                )
+                            } else {
+                                // HorizontalPager keeps neighboring pages composed. Re-key the
+                                // selection host when the active page or reader surface changes so
+                                // stale selection handles / copy-select-all toolbar cannot remain
+                                // attached to content the user has already navigated away from.
+                                key(
+                                    page,
+                                    pagerState.currentPage,
+                                    menuVisible,
+                                    showToc,
+                                    showBookmarks,
+                                    showFind,
+                                    showAppearance,
+                                    showTtsRateDialog,
+                                    showVoiceManagerSheet,
+                                ) {
+                                    SelectionContainer(modifier = bodyModifier) {
+                                        Text(
+                                            text = renderedBody,
+                                            modifier = textModifier,
+                                            style = pageTextStyle,
+                                            onTextLayout = ::capturePageTextLayout,
+                                            // Clip within the padded body; footer gap + line safety prevent cut-off.
+                                            overflow = TextOverflow.Clip,
+                                            softWrap = true,
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1353,59 +1454,64 @@ fun ReaderScreen(
                 }
             }
 
-            // Hide the thin footer while chrome is open so it does not sit under the
-            // progress slider / control bar (they shared the same bottom edge before).
-            if (!menuVisible) {
-                val percent = ProgressMath.percentOfProgress(progress)
-                val pageNum = PageLayout.displayPageNumber(pagerState.currentPage, pageCount)
-                val pageTotal = PageLayout.displayPageCount(pageCount)
-                val pageLocation = PageLayout.pageLocationLabel(pagerState.currentPage, pageCount)
-                val pageLocationCd = stringResource(R.string.reader_page_location_cd, pageNum, pageTotal)
-                val progressCd = stringResource(R.string.reader_progress_cd, percent)
-                val batteryText = ReaderFooterFormat.batteryLabel(batteryPercent, batteryCharging)
-                val batteryCd = ReaderFooterFormat.batteryContentDescription(
-                    batteryPercent,
-                    batteryCharging,
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 6.dp)
-                        .semantics {
-                            contentDescription = "$pageLocationCd，$progressCd，$batteryCd"
-                        },
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "$clock · $batteryText",
-                        color = palette.muted,
-                        style = MaterialTheme.typography.labelMedium,
-                        maxLines = 1,
-                    )
-                    // Kindle-style page location + explicit percent.
-                    Text(
-                        text = "$pageLocation · $percent%",
-                        color = palette.muted,
-                        style = MaterialTheme.typography.labelMedium,
-                        maxLines = 1,
-                    )
-                    val chapterTitle = chapters.getOrNull(currentChapter)?.title.orEmpty()
-                    Text(
-                        text = if (chapterTitle.isNotEmpty()) {
-                            buildString {
-                                append(chapterTitle.take(12))
-                                if (chapterTitle.length > 12) append('…')
-                            }
-                        } else {
-                            ""
-                        },
-                        color = palette.muted,
-                        style = MaterialTheme.typography.labelMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+            // Keep this row in layout while chrome is open. Removing it changed the body
+            // viewport height, restarted approximate pagination, and could enter an endless
+            // overflow/underfill loop behind the slider. Chrome paints over the transparent row.
+            val percent = ProgressMath.percentOfProgress(progress)
+            val pageNum = PageLayout.displayPageNumber(pagerState.currentPage, pageCount)
+            val pageTotal = PageLayout.displayPageCount(pageCount)
+            val pageLocation = PageLayout.pageLocationLabel(pagerState.currentPage, pageCount)
+            val pageLocationCd = stringResource(R.string.reader_page_location_cd, pageNum, pageTotal)
+            val progressCd = stringResource(R.string.reader_progress_cd, percent)
+            val batteryText = ReaderFooterFormat.batteryLabel(batteryPercent, batteryCharging)
+            val batteryCd = ReaderFooterFormat.batteryContentDescription(
+                batteryPercent,
+                batteryCharging,
+            )
+            val footerSemantics = if (menuVisible) {
+                Modifier.clearAndSetSemantics { }
+            } else {
+                Modifier.semantics {
+                    contentDescription = "$pageLocationCd，$progressCd，$batteryCd"
                 }
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                    .graphicsLayer { alpha = if (menuVisible) 0f else 1f }
+                    .then(footerSemantics),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "$clock · $batteryText",
+                    color = palette.muted,
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                )
+                // Kindle-style page location + explicit percent.
+                Text(
+                    text = "$pageLocation · $percent%",
+                    color = palette.muted,
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                )
+                val chapterTitle = chapters.getOrNull(currentChapter)?.title.orEmpty()
+                Text(
+                    text = if (chapterTitle.isNotEmpty()) {
+                        buildString {
+                            append(chapterTitle.take(12))
+                            if (chapterTitle.length > 12) append('…')
+                        }
+                    } else {
+                        ""
+                    },
+                    color = palette.muted,
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
 
@@ -3066,6 +3172,13 @@ private fun AppearanceDialog(
                     }
                 }
 
+                AppearanceToggleRow(
+                    label = stringResource(R.string.reader_paragraph_indent),
+                    contentDescription = stringResource(R.string.reader_paragraph_indent_cd),
+                    checked = paragraphIndent,
+                    onCheckedChange = onParagraphIndent,
+                )
+
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = stringResource(R.string.reader_tts_engine_title),
@@ -3277,12 +3390,6 @@ private fun AppearanceDialog(
                     contentDescription = stringResource(R.string.reader_page_turn_animation_cd),
                     checked = pageTurnAnimation,
                     onCheckedChange = onPageTurnAnimation,
-                )
-                AppearanceToggleRow(
-                    label = stringResource(R.string.reader_paragraph_indent),
-                    contentDescription = stringResource(R.string.reader_paragraph_indent_cd),
-                    checked = paragraphIndent,
-                    onCheckedChange = onParagraphIndent,
                 )
             }
         },

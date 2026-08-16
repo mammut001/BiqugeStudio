@@ -17,6 +17,13 @@ enum class TapZoneAction {
  * so they are fully JVM unit-testable without a device.
  */
 object PageIndex {
+    /** Visual first-line indent still missing from one displayed paragraph. */
+    data class ParagraphIndentRange(
+        val start: Int,
+        val endExclusive: Int,
+        val missingEm: Float,
+    )
+
     /** TextMeasurer is deliberately avoided for very large books to prevent OOM/ANR. */
     const val MAX_EXACT_MEASURE_CHARS: Int = 200_000
 
@@ -295,12 +302,47 @@ object PageIndex {
      */
     const val APPROX_MEASURE_SAMPLE_CHARS: Int = 4096
 
+    /**
+     * Start a bounded measurement sample at the current reading anchor when possible.
+     * Near EOF, shift the sample back so calibration still receives a full window.
+     */
+    fun approximateMeasureSampleStart(
+        textLength: Int,
+        anchorOffset: Int,
+        sampleChars: Int = APPROX_MEASURE_SAMPLE_CHARS,
+    ): Int {
+        val length = textLength.coerceAtLeast(0)
+        val window = sampleChars.coerceAtLeast(1).coerceAtMost(length.coerceAtLeast(1))
+        val latestStart = (length - window).coerceAtLeast(0)
+        return anchorOffset.coerceIn(0, length).coerceAtMost(latestStart)
+    }
+
     /** Tighten capacity only after the real Compose page reports vertical overflow. */
     fun tightenApproxCharsPerPageAfterOverflow(charsPerPage: Int): Int {
         val current = charsPerPage.coerceAtLeast(MIN_APPROX_CHARS_PER_PAGE)
         if (current <= MIN_APPROX_CHARS_PER_PAGE) return MIN_APPROX_CHARS_PER_PAGE
         val tightened = (current * APPROX_OVERFLOW_SHRINK_FACTOR).toInt()
         return tightened.coerceIn(MIN_APPROX_CHARS_PER_PAGE, current - 1)
+    }
+
+    /**
+     * Pick the next capacity after an overflowing real layout.
+     *
+     * Once a known fitting lower bound exists, bisect toward it instead of blindly
+     * shrinking by a percentage. This makes overflow/underfill feedback converge on
+     * the largest fitting capacity instead of bouncing between two capacities.
+     */
+    fun nextApproxCapacityAfterOverflow(
+        charsPerPage: Int,
+        largestFittingCapacity: Int,
+    ): Int {
+        val current = charsPerPage.coerceAtLeast(MIN_APPROX_CHARS_PER_PAGE)
+        val lower = largestFittingCapacity.coerceAtLeast(MIN_APPROX_CHARS_PER_PAGE)
+        if (largestFittingCapacity >= MIN_APPROX_CHARS_PER_PAGE && lower < current) {
+            if (current - lower <= 1) return lower
+            return (lower + (current - lower) / 2).coerceIn(lower + 1, current - 1)
+        }
+        return tightenApproxCharsPerPageAfterOverflow(current)
     }
 
     /**
@@ -321,6 +363,34 @@ object PageIndex {
         }
         val expanded = (current / used * APPROX_UNDERFILL_TARGET).toInt()
         return expanded.coerceIn(current + 1, APPROX_CHARS_PER_PAGE_MAX)
+    }
+
+    /**
+     * Pick the next capacity after a fitting but underfilled real layout.
+     *
+     * [smallestOverflowingCapacity] is an exclusive upper bound learned from a
+     * previous overflow. Bisect inside the known fit/overflow bracket so feedback
+     * cannot expand straight back to a capacity that already overflowed.
+     */
+    fun nextApproxCapacityAfterUnderfill(
+        charsPerPage: Int,
+        paintedHeightPx: Float,
+        viewportHeightPx: Float,
+        smallestOverflowingCapacity: Int,
+    ): Int {
+        val current = charsPerPage.coerceAtLeast(MIN_APPROX_CHARS_PER_PAGE)
+        val proposed = expandApproxCharsPerPageAfterUnderfill(
+            current,
+            paintedHeightPx,
+            viewportHeightPx,
+        )
+        if (proposed <= current) return current
+        if (smallestOverflowingCapacity <= current + 1) return current
+        if (smallestOverflowingCapacity <= APPROX_CHARS_PER_PAGE_MAX) {
+            val midpoint = current + (smallestOverflowingCapacity - current) / 2
+            return minOf(proposed, midpoint).coerceIn(current + 1, smallestOverflowingCapacity - 1)
+        }
+        return proposed
     }
 
     /**
@@ -346,6 +416,14 @@ object PageIndex {
         val o = pageStartOffset.coerceIn(0, fullText.length)
         if (o <= 0) return true
         var i = o - 1
+        // A virtual page may start inside indentation already present in the source.
+        // Walk back through that indentation before deciding whether this is a real
+        // paragraph start; otherwise one of the two spaces can disappear at a page edge.
+        while (i >= 0 && (fullText[i] == ' ' || fullText[i] == '\t' ||
+                fullText[i] == '\u3000' || fullText[i] == '\u00a0')
+        ) {
+            i--
+        }
         if (i >= 0 && fullText[i] == '\r') i--
         if (i < 0) return true
         if (fullText[i] != '\n') return false
@@ -356,6 +434,50 @@ object PageIndex {
             j--
         }
         return j < 0 || fullText[j] == '\n'
+    }
+
+    /**
+     * Paragraph-local indentation for already displayed text.
+     *
+     * Hard-wrap newlines have already been removed by [unwrapHardLineBreaks], so every
+     * non-empty paragraph after a blank line is a real paragraph. Existing full-width,
+     * ASCII, NBSP, or tab indentation counts toward the two-em target instead of being
+     * doubled. The first displayed paragraph is skipped when a page starts mid-paragraph.
+     */
+    fun paragraphIndentRanges(
+        displayedText: String,
+        indentFirstParagraph: Boolean,
+    ): List<ParagraphIndentRange> {
+        if (displayedText.isEmpty()) return emptyList()
+        val ranges = ArrayList<ParagraphIndentRange>()
+        var paragraphStart = 0
+        var paragraphIndex = 0
+        while (paragraphStart < displayedText.length) {
+            val newline = displayedText.indexOf('\n', paragraphStart)
+            val contentEnd = if (newline >= 0) newline else displayedText.length
+            val rangeEnd = if (newline >= 0) newline + 1 else displayedText.length
+            var firstContent = paragraphStart
+            var existingEm = 0f
+            while (firstContent < contentEnd) {
+                val em = when (displayedText[firstContent]) {
+                    '\u3000' -> 1f
+                    ' ', '\u00a0' -> 0.5f
+                    '\t' -> 2f
+                    else -> break
+                }
+                existingEm += em
+                firstContent++
+            }
+            val hasContent = firstContent < contentEnd
+            val shouldIndent = hasContent && (paragraphIndex > 0 || indentFirstParagraph)
+            val missing = (2f - existingEm).coerceAtLeast(0f)
+            if (shouldIndent && missing > 0f) {
+                ranges += ParagraphIndentRange(paragraphStart, rangeEnd, missing)
+            }
+            paragraphStart = rangeEnd
+            paragraphIndex++
+        }
+        return ranges
     }
 
     /**

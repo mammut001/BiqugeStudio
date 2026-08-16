@@ -189,6 +189,52 @@ class PageIndexTest {
     }
 
     @Test
+    fun approximateCalibration_bracketsAndConvergesWithoutOscillation() {
+        val largestRealFit = 237
+        var capacity = 300
+        var largestFit = -1
+        var smallestOverflow = Int.MAX_VALUE
+        val visited = mutableListOf<Int>()
+
+        repeat(24) {
+            visited += capacity
+            if (capacity > largestRealFit) {
+                smallestOverflow = minOf(smallestOverflow, capacity)
+                capacity = PageIndex.nextApproxCapacityAfterOverflow(capacity, largestFit)
+            } else {
+                largestFit = maxOf(largestFit, capacity)
+                capacity = PageIndex.nextApproxCapacityAfterUnderfill(
+                    charsPerPage = capacity,
+                    paintedHeightPx = 900f,
+                    viewportHeightPx = 1000f,
+                    smallestOverflowingCapacity = smallestOverflow,
+                )
+            }
+        }
+
+        assertEquals(largestRealFit, capacity)
+        assertEquals(largestRealFit, largestFit)
+        assertEquals(largestRealFit + 1, smallestOverflow)
+        assertTrue(visited.takeLast(5).all { it == largestRealFit })
+    }
+
+    @Test
+    fun approximateCalibration_neverReentersKnownOverflowCapacity() {
+        val next = PageIndex.nextApproxCapacityAfterUnderfill(
+            charsPerPage = 234,
+            paintedHeightPx = 900f,
+            viewportHeightPx = 1000f,
+            smallestOverflowingCapacity = 249,
+        )
+
+        assertTrue(next in 235 until 249)
+        assertEquals(
+            234,
+            PageIndex.nextApproxCapacityAfterUnderfill(234, 900f, 1000f, 235),
+        )
+    }
+
+    @Test
     fun approximateCharsPerPage_isPositiveAndConservative() {
         val count = PageIndex.approximateCharsPerPage(1080, 2000, 54f, 1.5f)
         assertTrue(count in PageIndex.MIN_APPROX_CHARS_PER_PAGE..PageIndex.APPROX_CHARS_PER_PAGE_MAX)
@@ -317,6 +363,46 @@ class PageIndexTest {
         val second = blankLine.indexOf('第', 1)
         assertTrue(PageIndex.shouldApplyParagraphIndent(blankLine, second))
         assertTrue(!PageIndex.shouldApplyParagraphIndent(blankLine, 1))
+
+        val existingIndent = "第一段。\n\n　　第二段"
+        val indentStart = existingIndent.indexOf('　')
+        assertTrue(PageIndex.shouldApplyParagraphIndent(existingIndent, indentStart))
+        assertTrue(PageIndex.shouldApplyParagraphIndent(existingIndent, indentStart + 1))
+    }
+
+    @Test
+    fun paragraphIndentRanges_indentsEachRealParagraphWithoutDoublingSourceSpaces() {
+        val text = "当前页从段中开始。\n\n第二段无缩进。\n\n　　第三段已有缩进。"
+        val ranges = PageIndex.paragraphIndentRanges(text, indentFirstParagraph = false)
+
+        assertEquals(1, ranges.size)
+        val secondStart = text.indexOf("第二段")
+        assertEquals(secondStart, ranges.single().start)
+        assertEquals(2f, ranges.single().missingEm, 0.001f)
+
+        val withFirst = PageIndex.paragraphIndentRanges(text, indentFirstParagraph = true)
+        assertEquals(2, withFirst.size)
+        assertEquals(0, withFirst.first().start)
+        assertEquals(2f, withFirst.first().missingEm, 0.001f)
+    }
+
+    @Test
+    fun paragraphIndentRanges_topsUpPartialAsciiIndentToTwoEm() {
+        val ranges = PageIndex.paragraphIndentRanges(
+            displayedText = "  两个半角空格",
+            indentFirstParagraph = true,
+        )
+
+        assertEquals(1, ranges.size)
+        assertEquals(1f, ranges.single().missingEm, 0.001f)
+    }
+
+    @Test
+    fun approximateMeasureSampleStart_tracksAnchorAndKeepsFullTailWindow() {
+        assertEquals(0, PageIndex.approximateMeasureSampleStart(20_000, 0, 4_000))
+        assertEquals(7_000, PageIndex.approximateMeasureSampleStart(20_000, 7_000, 4_000))
+        assertEquals(16_000, PageIndex.approximateMeasureSampleStart(20_000, 19_500, 4_000))
+        assertEquals(0, PageIndex.approximateMeasureSampleStart(2_000, 1_500, 4_000))
     }
 
     @Test
