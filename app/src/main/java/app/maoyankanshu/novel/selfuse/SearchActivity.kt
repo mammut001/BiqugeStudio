@@ -414,7 +414,7 @@ private fun SearchScreen(
     LaunchedEffect(Unit) {
         if (openImportOnStart && !autoOpenPickerDone && initialUris.isEmpty()) {
             autoOpenPickerDone = true
-            openDocument.launch(arrayOf("text/plain", "application/epub+zip"))
+            openDocument.launch(LocalBookImport.OPEN_DOCUMENT_MIME_TYPES)
         }
     }
 

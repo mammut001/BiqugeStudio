@@ -305,17 +305,39 @@ class PageIndexTest {
     }
 
     @Test
-    fun shouldApplyParagraphIndent_onlyAtParagraphStarts() {
-        val text = "第一段开头\n第二段开头续写"
-        assertTrue(PageIndex.shouldApplyParagraphIndent(text, 0))
-        assertTrue(PageIndex.shouldApplyParagraphIndent(text, text.indexOf('第', 1))) // 第二段
-        // Mid-paragraph (after first char of line 1)
-        assertTrue(!PageIndex.shouldApplyParagraphIndent(text, 1))
-        assertTrue(!PageIndex.shouldApplyParagraphIndent(text, 3))
+    fun shouldApplyParagraphIndent_onlyAfterBlankLine() {
+        val hardWrapped = "第一段开头续写到行末\n第二行仍是同一段"
+        assertTrue(PageIndex.shouldApplyParagraphIndent(hardWrapped, 0))
+        // Single newline = hard wrap, not a new paragraph.
+        assertTrue(!PageIndex.shouldApplyParagraphIndent(hardWrapped, hardWrapped.indexOf('第', 1)))
+        assertTrue(!PageIndex.shouldApplyParagraphIndent(hardWrapped, 1))
         assertTrue(!PageIndex.shouldApplyParagraphIndent("", 0))
-        // After newline
-        val nl = text.indexOf('\n')
-        assertTrue(PageIndex.shouldApplyParagraphIndent(text, nl + 1))
+
+        val blankLine = "第一段完。\n\n第二段开头"
+        val second = blankLine.indexOf('第', 1)
+        assertTrue(PageIndex.shouldApplyParagraphIndent(blankLine, second))
+        assertTrue(!PageIndex.shouldApplyParagraphIndent(blankLine, 1))
+    }
+
+    @Test
+    fun unwrapHardLineBreaks_joinsWrappedLinesKeepsParagraphs() {
+        val raw = "气，犹如潜龙蛰伏，不鸣则已，一旦\n爆发，必将势如雷霆。\n\n这种变化，令得牧锋"
+        val out = PageIndex.unwrapHardLineBreaks(raw)
+        assertEquals(
+            "气，犹如潜龙蛰伏，不鸣则已，一旦爆发，必将势如雷霆。\n\n这种变化，令得牧锋",
+            out,
+        )
+        assertEquals("无换行", PageIndex.unwrapHardLineBreaks("无换行"))
+        assertEquals("", PageIndex.unwrapHardLineBreaks(""))
+    }
+
+    @Test
+    fun rawCharsSpanningUnwrapped_includesDroppedWraps() {
+        val raw = "一二三四五六七八九十\n甲乙丙丁"
+        val unwrapped = PageIndex.unwrapHardLineBreaks(raw)
+        assertEquals("一二三四五六七八九十甲乙丙丁", unwrapped)
+        assertEquals(raw.length, PageIndex.rawCharsSpanningUnwrapped(raw, unwrapped.length))
+        assertEquals(10, PageIndex.rawCharsSpanningUnwrapped(raw, 10))
     }
 
     @Test

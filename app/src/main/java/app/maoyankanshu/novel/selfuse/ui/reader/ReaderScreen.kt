@@ -127,6 +127,9 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlin.math.roundToInt
 import app.maoyankanshu.novel.selfuse.Book
 import app.maoyankanshu.novel.selfuse.BookmarkStore
@@ -233,7 +236,11 @@ fun ReaderScreen(
     LaunchedEffect(book.id, book.text.length, showToc, textFullyLoaded) {
         if (!textFullyLoaded) return@LaunchedEffect
         if (chaptersLoaded) return@LaunchedEffect
-        if (!showToc && book.text.length > PageIndex.MAX_EXACT_MEASURE_CHARS) return@LaunchedEffect
+        // Large books: wait one frame-budget so first paint/TTS win, then scan anyway
+        // so 上一章 / footer titles work without opening TOC first.
+        if (!showToc && book.text.length > PageIndex.MAX_EXACT_MEASURE_CHARS) {
+            delay(400)
+        }
         val text = book.text
         val label = fullTextChapterLabel
         chapters = withContext(Dispatchers.Default) {
@@ -297,8 +304,9 @@ fun ReaderScreen(
         !textFullyLoaded -> pageStarts.size.coerceAtLeast(1)
         else -> pageStarts.size.coerceAtLeast(1)
     }
-    // Remount pager on progressive→full so initialPage is pageForProgress, not stale window index.
-    val pagerState = key(book.id, textFullyLoaded) {
+    // Keep the same pager across progressive→full. Remounting reset the user to a
+    // new initialPage and looked like a jump-back after the first second.
+    val pagerState = key(book.id) {
         val initialPagerPage = if (useApproxPaging) {
             OpenProgressGate.restoreTargetPage(
                 ProgressMath.clampProgress(book.position),
@@ -390,14 +398,26 @@ fun ReaderScreen(
         }
     }
 
-    DisposableEffect(book.id) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, book.id) {
         val appContext = context.applicationContext
         val bookId = book.id
         ReadingHistory.get(appContext).record(bookId)
         val started = android.os.SystemClock.elapsedRealtime()
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE) {
+                ReaderLeaveSave.persistAsync(
+                    appContext,
+                    bookId,
+                    ProgressMath.clampProgress(latestProgress),
+                    0L,
+                )
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
             // Do not use rememberCoroutineScope here — composition is leaving.
-            // Process-lifetime IO scope + clamp 0…1000; stats skip non-positive duration.
             val ended = android.os.SystemClock.elapsedRealtime()
             val duration = ReaderLeaveSave.elapsedReadingMs(started, ended)
             val finalProgress = ProgressMath.clampProgress(latestProgress)
@@ -445,8 +465,10 @@ fun ReaderScreen(
                 gridSeed
             } else {
                 withContext(Dispatchers.Default) {
+                    val rawSample = text.substring(0, sampleEnd)
+                    val displaySample = PageIndex.unwrapHardLineBreaks(rawSample)
                     val layout = textMeasurer.measure(
-                        text = text.substring(0, sampleEnd),
+                        text = displaySample,
                         style = style,
                         constraints = Constraints(maxWidth = width),
                     )
@@ -462,13 +484,14 @@ fun ReaderScreen(
                             bottoms[i] = layout.getLineBottom(i)
                             chars[i] = layout.getLineStart(i)
                         }
-                        PageIndex.charsPerPageFromMeasuredLines(
+                        val unwrappedFit = PageIndex.charsPerPageFromMeasuredLines(
                             tops,
                             bottoms,
                             chars,
-                            sampleEnd,
+                            displaySample.length,
                             height.toFloat(),
                         )
+                        PageIndex.rawCharsSpanningUnwrapped(rawSample, unwrappedFit)
                     }
                 }
             }
@@ -1148,6 +1171,9 @@ fun ReaderScreen(
                             else -> PageIndex.safePageText(book.text, pageStarts, bodyPage)
                         }
                     }
+                    val displayBody = remember(pageBody) {
+                        PageIndex.unwrapHardLineBreaks(pageBody)
+                    }
                     // Left/right book-style turn: 3D tilt about the vertical edge while the
                     // pager scrolls (finger swipe or tap animateScrollToPage).
                     val pageOffset =
@@ -1210,19 +1236,19 @@ fun ReaderScreen(
                     ) {
                         val highlightColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
                         val annotatedBody = remember(
-                            pageBody,
+                            displayBody,
                             pageStartOffset,
                             ttsHighlightRange,
                             highlightColor,
                         ) {
                             ttsFollowHighlightAnnotated(
-                                pageBody = pageBody,
+                                pageBody = displayBody,
                                 pageStartOffset = pageStartOffset,
                                 highlight = ttsHighlightRange,
                                 highlightColor = highlightColor,
                             )
                         }
-                        var pageTextLayout by remember(pageBody, pageTextStyle) {
+                        var pageTextLayout by remember(displayBody, pageTextStyle) {
                             mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null)
                         }
                         fun capturePageTextLayout(layout: androidx.compose.ui.text.TextLayoutResult) {

@@ -102,10 +102,6 @@ fun ShelfScreen(
         }
     }
 
-    fun openDetail(book: Book) {
-        context.startActivity(AppIntents.bookDetail(context, book.id))
-    }
-
     fun openReader(book: Book) {
         context.startActivity(AppIntents.reader(context, book.id))
     }
@@ -168,7 +164,7 @@ fun ShelfScreen(
                     items(continueReading, key = { "continue-${it.id}" }) { book ->
                         BookCard(
                             book = book,
-                            onClick = { openDetail(book) },
+                            onClick = { openReader(book) },
                             onLongClick = { menuBook = book },
                             onContinueReading = { openReader(book) },
                         )
@@ -222,7 +218,7 @@ fun ShelfScreen(
                         items(group.books, key = { "all-${it.id}" }) { book ->
                             BookCard(
                                 book = book,
-                                onClick = { openDetail(book) },
+                                onClick = { openReader(book) },
                                 onLongClick = { menuBook = book },
                                 onContinueReading = { openReader(book) },
                             )
@@ -232,7 +228,7 @@ fun ShelfScreen(
                     items(allBooks, key = { "all-${it.id}" }) { book ->
                         BookCard(
                             book = book,
-                            onClick = { openDetail(book) },
+                            onClick = { openReader(book) },
                             onLongClick = { menuBook = book },
                             onContinueReading = { openReader(book) },
                         )

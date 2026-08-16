@@ -337,18 +337,91 @@ object PageIndex {
      * Whether a page whose body starts at [pageStartOffset] should apply paragraph
      * first-line indent.
      *
-     * Full-book measure indents only true paragraph starts. Re-laying each page as
-     * its own [androidx.compose.ui.text.Text] would re-indent mid-paragraph lines,
-     * wrap more, and clip the last line — the recurring “last line half-visible” bug.
+     * Only a **blank line** (or the start of the book) is a paragraph. A single `\n`
+     * is a hard wrap — 笔趣阁-style TXT wraps every ~20 CJK chars — and must not
+     * indent, or Compose re-wraps and leaves orphan characters on the next line.
      */
     fun shouldApplyParagraphIndent(fullText: String, pageStartOffset: Int): Boolean {
         if (fullText.isEmpty()) return false
         val o = pageStartOffset.coerceIn(0, fullText.length)
         if (o <= 0) return true
-        // Paragraph start: previous char is a line break (and skip trailing CR).
         var i = o - 1
         if (i >= 0 && fullText[i] == '\r') i--
-        return i < 0 || fullText[i] == '\n'
+        if (i < 0) return true
+        if (fullText[i] != '\n') return false
+        var j = i - 1
+        while (j >= 0 && (fullText[j] == '\r' || fullText[j] == ' ' ||
+                fullText[j] == '\t' || fullText[j] == '\u3000')
+        ) {
+            j--
+        }
+        return j < 0 || fullText[j] == '\n'
+    }
+
+    /**
+     * Drop hard-wrap newlines so a 笔趣阁-style line (one `\n` per ~20 CJK) paints as
+     * a paragraph. Blank lines (`\n\n`) stay as paragraph breaks. Pagination still
+     * uses the raw string; this is display-only.
+     */
+    fun unwrapHardLineBreaks(text: String): String {
+        if (text.isEmpty() || text.indexOf('\n') < 0) return text
+        val out = StringBuilder(text.length)
+        var i = 0
+        while (i < text.length) {
+            val ch = text[i]
+            if (ch == '\r') {
+                i++
+                continue
+            }
+            if (ch == '\n') {
+                var j = i + 1
+                while (j < text.length && text[j] == '\r') j++
+                if (j < text.length && text[j] == '\n') {
+                    out.append('\n')
+                    out.append('\n')
+                    i = j + 1
+                    while (i < text.length && (text[i] == '\n' || text[i] == '\r')) i++
+                } else {
+                    i = j
+                }
+                continue
+            }
+            out.append(ch)
+            i++
+        }
+        return out.toString()
+    }
+
+    /**
+     * How many raw characters (including dropped hard-wrap newlines) cover
+     * [unwrappedCount] characters of [unwrapHardLineBreaks] output.
+     */
+    fun rawCharsSpanningUnwrapped(raw: String, unwrappedCount: Int): Int {
+        if (raw.isEmpty() || unwrappedCount <= 0) return 0
+        var shown = 0
+        var i = 0
+        while (i < raw.length && shown < unwrappedCount) {
+            val ch = raw[i]
+            if (ch == '\r') {
+                i++
+                continue
+            }
+            if (ch == '\n') {
+                var j = i + 1
+                while (j < raw.length && raw[j] == '\r') j++
+                if (j < raw.length && raw[j] == '\n') {
+                    shown += 2
+                    i = j + 1
+                    while (i < raw.length && (raw[i] == '\n' || raw[i] == '\r')) i++
+                } else {
+                    i = j
+                }
+                continue
+            }
+            shown++
+            i++
+        }
+        return i.coerceAtLeast(1)
     }
 
     /**

@@ -12,6 +12,19 @@ object LocalBookImport {
     /** Standard EPUB MIME from SAF / DocumentsUI (optional parameters allowed). */
     const val MIME_EPUB: String = "application/epub+zip"
 
+    /**
+     * MIME types for [androidx.activity.result.contract.ActivityResultContracts.OpenDocument].
+     * Chat / Downloads providers often label TXT as octet-stream or generic * / *;
+     * restricting to text/plain hides those files from the picker.
+     */
+    @JvmField
+    val OPEN_DOCUMENT_MIME_TYPES: Array<String> = arrayOf(
+        "text/plain",
+        MIME_EPUB,
+        "application/octet-stream",
+        "*/*",
+    )
+
     data class Imported(
         val title: String,
         val author: String,
