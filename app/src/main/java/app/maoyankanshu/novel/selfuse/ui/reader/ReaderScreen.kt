@@ -282,6 +282,9 @@ fun ReaderScreen(
     var pageStarts by remember(book.id, textFullyLoaded) { mutableStateOf(emptyList<Int>()) }
     var contentWidthPx by remember { mutableIntStateOf(0) }
     var contentHeightPx by remember { mutableIntStateOf(0) }
+    // While the chrome slider is down, pager snapshots must not overwrite [progress]
+    // or the thumb fights the finger and the page animates every tick.
+    var sliderScrubbing by remember { mutableStateOf(false) }
 
     val approxPageCount = if (useApproxPaging) {
         PageIndex.approximatePageCount(book.text.length, approxCharsPerPage)
@@ -581,6 +584,7 @@ fun ReaderScreen(
 
     // Page turns → progress (0…1000) + chapter + anchor.
     // Must not commit progress until OpenProgressGate allows (avoids clobber on swap).
+    val sliderScrubbingNow by rememberUpdatedState(sliderScrubbing)
     LaunchedEffect(pagerState, pageStarts, chapters, useApproxPaging, approxCharsPerPage, textFullyLoaded, restoreApplied) {
         snapshotFlow {
             Triple(pagerState.currentPage, pageStarts, approxCharsPerPage)
@@ -588,6 +592,7 @@ fun ReaderScreen(
             .distinctUntilChanged()
             .collect { (page, starts, cpp) ->
                 if (pendingApproxCalibrationOffset != null) return@collect
+                if (sliderScrubbingNow) return@collect
                 if (useApproxPaging) {
                     val count = PageIndex.approximatePageCount(book.text.length, cpp)
                     val p = PageIndex.clampPageIndex(page, count)
@@ -639,7 +644,12 @@ fun ReaderScreen(
         val page = PageIndex.clampPageIndex(target, count)
         if (page == pagerState.currentPage) return
         scope.launch {
-            val ms = ReaderReadingPolish.pageTurnDurationMs(pageTurnAnimation)
+            val animate = PageIndex.shouldAnimatePageTurn(pagerState.currentPage, page)
+            val ms = if (animate) {
+                ReaderReadingPolish.pageTurnDurationMs(pageTurnAnimation)
+            } else {
+                0
+            }
             if (ms <= 0) {
                 pagerState.scrollToPage(page)
             } else {
@@ -1504,9 +1514,26 @@ fun ReaderScreen(
                         Slider(
                             value = progress.toFloat(),
                             onValueChange = {
-                                progress = ProgressMath.clampProgress(it.roundToInt())
+                                sliderScrubbing = true
+                                val next = ProgressMath.clampProgress(it.roundToInt())
+                                progress = next
+                                val count = if (useApproxPaging) {
+                                    PageIndex.approximatePageCount(
+                                        book.text.length,
+                                        approxCharsPerPage,
+                                    )
+                                } else {
+                                    pageStarts.size
+                                }
+                                val page = PageIndex.pageForProgress(next, count)
+                                if (page != pagerState.currentPage) {
+                                    scope.launch { pagerState.scrollToPage(page) }
+                                }
                             },
-                            onValueChangeFinished = { jumpToProgress(progress) },
+                            onValueChangeFinished = {
+                                sliderScrubbing = false
+                                jumpToProgress(progress)
+                            },
                             valueRange = 0f..1000f,
                             colors = SliderDefaults.colors(
                                 thumbColor = palette.onBar,
