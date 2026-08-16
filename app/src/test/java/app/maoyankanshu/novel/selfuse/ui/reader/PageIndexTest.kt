@@ -58,6 +58,16 @@ class PageIndexTest {
     }
 
     @Test
+    fun shouldAnimatePageTurn_onlyAdjacentStep() {
+        assertTrue(PageIndex.shouldAnimatePageTurn(0, 1))
+        assertTrue(PageIndex.shouldAnimatePageTurn(12, 11))
+        assertTrue(!PageIndex.shouldAnimatePageTurn(0, 0))
+        assertTrue(!PageIndex.shouldAnimatePageTurn(0, 2))
+        assertTrue(!PageIndex.shouldAnimatePageTurn(10, 400))
+        assertTrue(!PageIndex.shouldAnimatePageTurn(400, 10))
+    }
+
+    @Test
     fun stepPage_clampsAtFirstAndLast() {
         assertEquals(0, PageIndex.stepPage(0, 5, -1))
         assertEquals(0, PageIndex.stepPage(0, 5, -10))

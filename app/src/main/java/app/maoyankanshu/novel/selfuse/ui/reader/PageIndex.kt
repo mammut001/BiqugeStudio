@@ -71,6 +71,14 @@ object PageIndex {
         clampPageIndex(current + delta, pageCount)
 
     /**
+     * Animate only a single-page step (tap / volume / auto-turn).
+     * Slider, TOC, and bookmark jumps skip the pager animation — animating across
+     * tens or hundreds of pages flashes every in-between page (3D turn + remount).
+     */
+    fun shouldAnimatePageTurn(fromPage: Int, toPage: Int): Boolean =
+        kotlin.math.abs(toPage - fromPage) == 1
+
+    /**
      * Map library progress (0…1000) onto a page index.
      * Single-page (or empty) books always resolve to page 0.
      */
