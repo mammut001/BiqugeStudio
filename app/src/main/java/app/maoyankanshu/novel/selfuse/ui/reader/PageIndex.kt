@@ -259,15 +259,34 @@ object PageIndex {
      * Below 1.0 so Chinese full-width + letterSpacing rarely overfill the screen
      * (overfill clips the last line in a non-scrolling page Text).
      *
-     * The old 0.58 value stacked too much safety on top of the two-line reserve,
-     * page-local indent fix, clipped pager bounds, and dedicated footer gap. 0.64
-     * reclaims roughly one visible line on typical phone layouts while remaining
-     * below the older 0.70 setting that proved too aggressive before those guards.
+     * 0.64 (and the older two-line reserve) left roughly half the page empty on
+     * tall phones. Overflow / underfill feedback now corrects residual error, so
+     * the seed can sit close to a full page.
      */
-    const val APPROX_FILL_FACTOR: Float = 0.64f
+    const val APPROX_FILL_FACTOR: Float = 0.90f
 
     /** One overflow feedback step removes roughly one typical CJK line worth of capacity. */
     const val APPROX_OVERFLOW_SHRINK_FACTOR: Float = 0.94f
+
+    /**
+     * Grow toward this fraction of the painted viewport when a full-capacity
+     * slice left the lower half of the page empty (hard-wrapped TXT, tall screens).
+     */
+    const val APPROX_UNDERFILL_TARGET: Float = 0.92f
+
+    /** Do not grow when the painted page already uses at least this much height. */
+    const val APPROX_UNDERFILL_TRIGGER: Float = 0.84f
+
+    /** Hard-wrapped or last-page slices below this ratio are left alone. */
+    const val APPROX_UNDERFILL_MIN_USED: Float = 0.12f
+
+    const val APPROX_CHARS_PER_PAGE_MAX: Int = 3600
+
+    /**
+     * Sample length measured with [androidx.compose.ui.text.TextMeasurer] to learn how
+     * many characters actually fit on one page. Cheap (4 KiB) and respects hard wraps.
+     */
+    const val APPROX_MEASURE_SAMPLE_CHARS: Int = 4096
 
     /** Tighten capacity only after the real Compose page reports vertical overflow. */
     fun tightenApproxCharsPerPageAfterOverflow(charsPerPage: Int): Int {
@@ -275,6 +294,26 @@ object PageIndex {
         if (current <= MIN_APPROX_CHARS_PER_PAGE) return MIN_APPROX_CHARS_PER_PAGE
         val tightened = (current * APPROX_OVERFLOW_SHRINK_FACTOR).toInt()
         return tightened.coerceIn(MIN_APPROX_CHARS_PER_PAGE, current - 1)
+    }
+
+    /**
+     * Expand capacity when a full-size approximate page painted well below the
+     * viewport. Returns the current value when the ratio is already healthy,
+     * unknown, or too empty to treat as a pagination miss (last page / sparse).
+     */
+    fun expandApproxCharsPerPageAfterUnderfill(
+        charsPerPage: Int,
+        paintedHeightPx: Float,
+        viewportHeightPx: Float,
+    ): Int {
+        val current = charsPerPage.coerceAtLeast(MIN_APPROX_CHARS_PER_PAGE)
+        if (paintedHeightPx <= 0f || viewportHeightPx <= 0f) return current
+        val used = paintedHeightPx / viewportHeightPx
+        if (used >= APPROX_UNDERFILL_TRIGGER || used < APPROX_UNDERFILL_MIN_USED) {
+            return current
+        }
+        val expanded = (current / used * APPROX_UNDERFILL_TARGET).toInt()
+        return expanded.coerceIn(current + 1, APPROX_CHARS_PER_PAGE_MAX)
     }
 
     /**
@@ -340,11 +379,51 @@ object PageIndex {
         val lineHeight = (font * lineHeightMultiplier.coerceAtLeast(1f)).coerceAtLeast(1f)
         // Full-width CJK ≈ 1em; letterSpacing makes real columns slightly fewer.
         val columns = ((widthPx.coerceAtLeast(1) / font) * 0.92f).toInt().coerceAtLeast(1)
-        // Leave two lines empty: one for safety, one for wrap/indent variance.
+        // Leave one line empty so wrap / indent / font-padding variance can still fit.
         val rawLines = (heightPx.coerceAtLeast(1) / lineHeight).toInt().coerceAtLeast(1)
-        val lines = (rawLines - 2).coerceAtLeast(1)
+        val lines = (rawLines - 1).coerceAtLeast(1)
         return (columns * lines * APPROX_FILL_FACTOR).roundToInt()
-            .coerceIn(MIN_APPROX_CHARS_PER_PAGE, 3600)
+            .coerceIn(MIN_APPROX_CHARS_PER_PAGE, APPROX_CHARS_PER_PAGE_MAX)
+    }
+
+    /**
+     * Characters that fit on the first page of a **measured** sample.
+     *
+     * Uses the same line-packing rule as [pageStartOffsets] so hard-wrapped TXT
+     * (one visual line ≈ 20 CJK + newline) is not treated as a full-width grid.
+     * If the whole sample still fits, returns [sampleLength] so the caller can
+     * enlarge the sample or keep the seed.
+     */
+    fun charsPerPageFromMeasuredLines(
+        lineTops: FloatArray,
+        lineBottoms: FloatArray,
+        lineCharStarts: IntArray,
+        sampleLength: Int,
+        viewportHeightPx: Float,
+    ): Int {
+        val n = lineTops.size
+        require(lineBottoms.size == n && lineCharStarts.size == n) {
+            "line metric arrays must have equal length"
+        }
+        val sample = sampleLength.coerceAtLeast(0)
+        if (n == 0 || sample == 0) return MIN_APPROX_CHARS_PER_PAGE
+        val typical = (lineBottoms[0] - lineTops[0]).coerceAtLeast(0f)
+        val vh = effectivePageViewportHeight(viewportHeightPx, typical)
+        val pageTop = lineTops[0]
+        val origin = lineCharStarts[0].coerceAtLeast(0)
+        for (i in 1 until n) {
+            if (lineBottoms[i] - pageTop > vh) {
+                val chars = (lineCharStarts[i] - origin).coerceAtLeast(1)
+                return chars.coerceIn(MIN_APPROX_CHARS_PER_PAGE, APPROX_CHARS_PER_PAGE_MAX)
+            }
+        }
+        return sample.coerceIn(MIN_APPROX_CHARS_PER_PAGE, APPROX_CHARS_PER_PAGE_MAX)
+    }
+
+    /** Ink height of a laid-out page (last line bottom), not the constrained box size. */
+    fun paintedTextHeightPx(lineCount: Int, lastLineBottomPx: Float): Float {
+        if (lineCount <= 0) return 0f
+        return lastLineBottomPx.coerceAtLeast(0f)
     }
 
     /**
