@@ -179,6 +179,15 @@ class LocalBookImportTest {
         assertFalse(LocalBookImport.isEpub(null, "application/x-epub-hint"))
     }
 
+    @Test
+    fun openDocumentMimeTypes_includeGenericAndOctetStream() {
+        val types = LocalBookImport.OPEN_DOCUMENT_MIME_TYPES.toList()
+        assertTrue(types.contains("text/plain"))
+        assertTrue(types.contains(LocalBookImport.MIME_EPUB))
+        assertTrue(types.contains("application/octet-stream"))
+        assertTrue(types.contains("*/*"))
+    }
+
     /**
      * Regression: some SAF providers report MIME application/epub+zip but a display
      * name without ".epub". Without MIME-aware detection this was misread as TXT.
