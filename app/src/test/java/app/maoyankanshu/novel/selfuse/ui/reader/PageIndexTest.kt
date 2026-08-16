@@ -410,7 +410,7 @@ class PageIndexTest {
         val raw = "气，犹如潜龙蛰伏，不鸣则已，一旦\n爆发，必将势如雷霆。\n\n这种变化，令得牧锋"
         val out = PageIndex.unwrapHardLineBreaks(raw)
         assertEquals(
-            "气，犹如潜龙蛰伏，不鸣则已，一旦爆发，必将势如雷霆。\n\n这种变化，令得牧锋",
+            "气，犹如潜龙蛰伏，不鸣则已，一旦爆发，必将势如雷霆。\n这种变化，令得牧锋",
             out,
         )
         assertEquals("无换行", PageIndex.unwrapHardLineBreaks("无换行"))
@@ -424,6 +424,26 @@ class PageIndexTest {
         assertEquals("一二三四五六七八九十甲乙丙丁", unwrapped)
         assertEquals(raw.length, PageIndex.rawCharsSpanningUnwrapped(raw, unwrapped.length))
         assertEquals(10, PageIndex.rawCharsSpanningUnwrapped(raw, 10))
+
+        val paragraphBreak = "甲\n\n乙"
+        val displayedParagraph = PageIndex.unwrapHardLineBreaks(paragraphBreak)
+        assertEquals("甲\n乙", displayedParagraph)
+        assertEquals(
+            paragraphBreak.length,
+            PageIndex.rawCharsSpanningUnwrapped(paragraphBreak, displayedParagraph.length),
+        )
+    }
+
+    @Test
+    fun unwrapHardLineBreaksWithRawOffsets_mapsDisplayBoundariesBackToSource() {
+        val raw = "甲乙\n丙丁\r\n\r\n戊己"
+        val mapped = PageIndex.unwrapHardLineBreaksWithRawOffsets(raw)
+
+        assertEquals("甲乙丙丁\n戊己", mapped.text)
+        assertEquals(0, mapped.rawOffset(0))
+        assertEquals(raw.indexOf('丙'), mapped.rawOffset(mapped.text.indexOf('丙')))
+        assertEquals(raw.indexOf('戊'), mapped.rawOffset(mapped.text.indexOf('戊')))
+        assertEquals(raw.length, mapped.rawOffset(mapped.text.length))
     }
 
     @Test

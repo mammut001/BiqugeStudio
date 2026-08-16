@@ -566,8 +566,35 @@ fun ReaderScreen(
             listOf(0)
         } else {
             withContext(Dispatchers.Default) {
+                // Measure exactly what the page paints. Measuring raw hard wraps and then
+                // unwrapping only at render time produced half-empty pages with the next
+                // paragraph clipped behind the footer.
+                val display = PageIndex.unwrapHardLineBreaksWithRawOffsets(text)
+                val measuredText = if (!paragraphIndent) {
+                    AnnotatedString(display.text)
+                } else {
+                    val indentRanges = PageIndex.paragraphIndentRanges(
+                        display.text,
+                        indentFirstParagraph = true,
+                    )
+                    buildAnnotatedString {
+                        append(display.text)
+                        indentRanges.forEach { range ->
+                            addStyle(
+                                style = ParagraphStyle(
+                                    textIndent = TextIndent(
+                                        firstLine = (fontSizeSp * range.missingEm).sp,
+                                        restLine = 0.sp,
+                                    ),
+                                ),
+                                start = range.start,
+                                end = range.endExclusive,
+                            )
+                        }
+                    }
+                }
                 val layout = textMeasurer.measure(
-                    text = text,
+                    text = measuredText,
                     style = style,
                     constraints = Constraints(maxWidth = width),
                 )
@@ -584,6 +611,8 @@ fun ReaderScreen(
                         chars[i] = layout.getLineStart(i)
                     }
                     PageIndex.pageStartOffsets(tops, bottoms, chars, height.toFloat())
+                        .map(display::rawOffset)
+                        .distinct()
                 }
             }
         }

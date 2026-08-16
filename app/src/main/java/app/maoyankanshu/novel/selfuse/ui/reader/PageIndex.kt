@@ -24,6 +24,15 @@ object PageIndex {
         val missingEm: Float,
     )
 
+    /** Display text plus a boundary map back to offsets in its raw source. */
+    class UnwrappedTextMapping internal constructor(
+        val text: String,
+        private val rawOffsets: IntArray,
+    ) {
+        fun rawOffset(displayOffset: Int): Int =
+            rawOffsets[displayOffset.coerceIn(0, rawOffsets.lastIndex)]
+    }
+
     /** TextMeasurer is deliberately avoided for very large books to prevent OOM/ANR. */
     const val MAX_EXACT_MEASURE_CHARS: Int = 200_000
 
@@ -482,8 +491,8 @@ object PageIndex {
 
     /**
      * Drop hard-wrap newlines so a 笔趣阁-style line (one `\n` per ~20 CJK) paints as
-     * a paragraph. Blank lines (`\n\n`) stay as paragraph breaks. Pagination still
-     * uses the raw string; this is display-only.
+     * a paragraph. Blank lines (`\n\n`) collapse to one paragraph break: indentation,
+     * rather than a full empty visual row, separates Chinese prose paragraphs.
      */
     fun unwrapHardLineBreaks(text: String): String {
         if (text.isEmpty() || text.indexOf('\n') < 0) return text
@@ -500,7 +509,6 @@ object PageIndex {
                 while (j < text.length && text[j] == '\r') j++
                 if (j < text.length && text[j] == '\n') {
                     out.append('\n')
-                    out.append('\n')
                     i = j + 1
                     while (i < text.length && (text[i] == '\n' || text[i] == '\r')) i++
                 } else {
@@ -512,6 +520,50 @@ object PageIndex {
             i++
         }
         return out.toString()
+    }
+
+    /**
+     * [unwrapHardLineBreaks] with a boundary map from displayed offsets to raw offsets.
+     *
+     * Exact pagination measures the displayed string, but bookmarks, progress, search, and TTS
+     * remain anchored to the raw book. The map lets every measured page start return to that raw
+     * coordinate without rescanning the book once per page.
+     */
+    fun unwrapHardLineBreaksWithRawOffsets(raw: String): UnwrappedTextMapping {
+        if (raw.isEmpty()) return UnwrappedTextMapping("", intArrayOf(0))
+        if (raw.indexOf('\n') < 0 && raw.indexOf('\r') < 0) {
+            return UnwrappedTextMapping(raw, IntArray(raw.length + 1) { it })
+        }
+        val out = StringBuilder(raw.length)
+        val offsets = ArrayList<Int>(raw.length + 1)
+        fun appendDisplayed(ch: Char, rawOffset: Int) {
+            offsets += rawOffset
+            out.append(ch)
+        }
+        var i = 0
+        while (i < raw.length) {
+            val ch = raw[i]
+            if (ch == '\r') {
+                i++
+                continue
+            }
+            if (ch == '\n') {
+                var j = i + 1
+                while (j < raw.length && raw[j] == '\r') j++
+                if (j < raw.length && raw[j] == '\n') {
+                    appendDisplayed('\n', i)
+                    i = j + 1
+                    while (i < raw.length && (raw[i] == '\n' || raw[i] == '\r')) i++
+                } else {
+                    i = j
+                }
+                continue
+            }
+            appendDisplayed(ch, i)
+            i++
+        }
+        offsets += raw.length
+        return UnwrappedTextMapping(out.toString(), offsets.toIntArray())
     }
 
     /**
@@ -532,7 +584,7 @@ object PageIndex {
                 var j = i + 1
                 while (j < raw.length && raw[j] == '\r') j++
                 if (j < raw.length && raw[j] == '\n') {
-                    shown += 2
+                    shown += 1
                     i = j + 1
                     while (i < raw.length && (raw[i] == '\n' || raw[i] == '\r')) i++
                 } else {
