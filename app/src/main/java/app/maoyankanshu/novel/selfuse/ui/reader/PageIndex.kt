@@ -33,6 +33,17 @@ object PageIndex {
             rawOffsets[displayOffset.coerceIn(0, rawOffsets.lastIndex)]
     }
 
+    /**
+     * How [unwrapHardLineBreaks] treats a raw `\n`.
+     *
+     * @property keepParagraphBreak emit one displayed newline
+     * @property nextRawIndex first raw index after this newline sequence
+     */
+    data class NewlineUnwrap(
+        val keepParagraphBreak: Boolean,
+        val nextRawIndex: Int,
+    )
+
     /** TextMeasurer is deliberately avoided for very large books to prevent OOM/ANR. */
     const val MAX_EXACT_MEASURE_CHARS: Int = 200_000
 
@@ -212,6 +223,106 @@ object PageIndex {
         val endExclusive = (start + size).coerceAtMost(length)
         if (start >= endExclusive) return ""
         return fullText.substring(start, endExclusive)
+    }
+
+    /**
+     * Raw start of a virtual page, preferring a locally measured override.
+     * Sequential large-book reading chains these so page N+1 begins where page N ended.
+     */
+    fun approximatePageStartWithOverrides(
+        pageIndex: Int,
+        charsPerPage: Int,
+        textLength: Int,
+        startOverrides: Map<Int, Int>,
+    ): Int {
+        val length = textLength.coerceAtLeast(0)
+        val fallback = approximateOffsetForPage(pageIndex, charsPerPage, length)
+        val raw = startOverrides[pageIndex] ?: return fallback
+        return raw.coerceIn(0, length)
+    }
+
+    /**
+     * Raw exclusive end of a virtual page. Uses the next page's measured start when
+     * present; otherwise a one-capacity fallback slice (first frame before local measure).
+     */
+    fun approximatePageEndWithOverrides(
+        pageIndex: Int,
+        charsPerPage: Int,
+        textLength: Int,
+        startOverrides: Map<Int, Int>,
+    ): Int {
+        val length = textLength.coerceAtLeast(0)
+        val start = approximatePageStartWithOverrides(
+            pageIndex,
+            charsPerPage,
+            length,
+            startOverrides,
+        )
+        val next = startOverrides[pageIndex + 1]
+        if (next != null) return next.coerceIn(start, length)
+        val size = charsPerPage.coerceAtLeast(MIN_APPROX_CHARS_PER_PAGE)
+        return (start + size).coerceAtMost(length)
+    }
+
+    /** Body of one virtual page using locally measured starts when available. */
+    fun approximatePageTextWithOverrides(
+        fullText: String,
+        charsPerPage: Int,
+        pageIndex: Int,
+        startOverrides: Map<Int, Int>,
+    ): String {
+        val length = fullText.length
+        if (length == 0) return ""
+        val start = approximatePageStartWithOverrides(
+            pageIndex,
+            charsPerPage,
+            length,
+            startOverrides,
+        )
+        val endExclusive = approximatePageEndWithOverrides(
+            pageIndex,
+            charsPerPage,
+            length,
+            startOverrides,
+        )
+        if (start >= endExclusive) return ""
+        return fullText.substring(start, endExclusive)
+    }
+
+    /**
+     * Nearby exact page starts after measuring the current large-book page.
+     *
+     * An already-chained start for page N+1 is kept so turning back cannot steal
+     * characters from the page the reader just left.
+     */
+    fun nextApproxLocalStarts(
+        pageIndex: Int,
+        textLength: Int,
+        existing: Map<Int, Int>,
+        currentStart: Int,
+        fittedEndExclusive: Int,
+        previousStart: Int?,
+        followingStart: Int? = null,
+    ): Map<Int, Int> {
+        val page = pageIndex.coerceAtLeast(0)
+        val len = textLength.coerceAtLeast(0)
+        val cur = currentStart.coerceIn(0, len)
+        val fitted = fittedEndExclusive.coerceIn(cur, len).let { end ->
+            if (end == cur && cur < len) (cur + 1).coerceAtMost(len) else end
+        }
+        val nearby = existing.filterKeys { it in (page - 2)..(page + 3) }
+        val starts = LinkedHashMap<Int, Int>(6)
+        val prev = previousStart ?: nearby[page - 1]
+        if (prev != null && page > 0) {
+            starts[page - 1] = prev.coerceIn(0, cur)
+        }
+        starts[page] = cur
+        starts[page + 1] = (nearby[page + 1] ?: fitted).coerceIn(cur, len)
+        val follow = followingStart ?: nearby[page + 2]
+        if (follow != null) {
+            starts[page + 2] = follow.coerceIn(starts.getValue(page + 1), len)
+        }
+        return starts
     }
 
     /**
@@ -412,13 +523,69 @@ object PageIndex {
     /** Minimum absolute bottom safety in px when line height is unknown. */
     const val PAGE_BOTTOM_SAFETY_MIN_PX: Float = 6f
 
+    /** Indent characters that count toward 段首缩进 (fullwidth, ASCII, NBSP, tab). */
+    fun isIndentChar(ch: Char): Boolean =
+        ch == ' ' || ch == '\t' || ch == '\u3000' || ch == '\u00a0'
+
+    /**
+     * Whether [offset] begins a source paragraph indent.
+     *
+     * 《大主宰》 and many 笔趣阁 TXT files start a paragraph with two fullwidth
+     * spaces after a **single** newline (`\n　　`). Hard-wrapped continuation
+     * lines never do. Mixed 2em (fullwidth + ASCII) and a tab also count.
+     */
+    fun isSourceParagraphIndent(text: String, offset: Int): Boolean {
+        if (offset < 0 || offset >= text.length) return false
+        var i = offset
+        var fullwidth = 0
+        var halfwidth = 0
+        while (i < text.length) {
+            when (text[i]) {
+                '\u3000' -> {
+                    fullwidth++
+                    i++
+                }
+                ' ', '\u00a0' -> {
+                    halfwidth++
+                    i++
+                }
+                '\t' -> return true
+                else -> break
+            }
+        }
+        val em = fullwidth + halfwidth * 0.5f
+        return fullwidth >= 2 || em >= 2f
+    }
+
+    /**
+     * Classify a raw `\n` at [newlineIndex] for unwrap / raw-span mapping.
+     *
+     * Keep a displayed paragraph break for a blank line (`\n\n`) **or** a single
+     * newline followed by paragraph indent (`\n　　`). A lone `\n` before prose
+     * is a 笔趣阁 hard wrap and is dropped.
+     */
+    fun unwrapNewline(text: String, newlineIndex: Int): NewlineUnwrap {
+        var j = newlineIndex + 1
+        while (j < text.length && text[j] == '\r') j++
+        if (j < text.length && text[j] == '\n') {
+            j++
+            while (j < text.length && (text[j] == '\n' || text[j] == '\r')) j++
+            return NewlineUnwrap(keepParagraphBreak = true, nextRawIndex = j)
+        }
+        if (isSourceParagraphIndent(text, j)) {
+            return NewlineUnwrap(keepParagraphBreak = true, nextRawIndex = j)
+        }
+        return NewlineUnwrap(keepParagraphBreak = false, nextRawIndex = j)
+    }
+
     /**
      * Whether a page whose body starts at [pageStartOffset] should apply paragraph
-     * first-line indent.
+     * first-line indent to its first displayed paragraph.
      *
-     * Only a **blank line** (or the start of the book) is a paragraph. A single `\n`
-     * is a hard wrap — 笔趣阁-style TXT wraps every ~20 CJK chars — and must not
-     * indent, or Compose re-wraps and leaves orphan characters on the next line.
+     * True at the start of the book, after a blank line, or after a single
+     * newline that begins with source indent (`\n　　`). A hard-wrap `\n`
+     * without indent is not a paragraph — indenting it re-wraps and orphans
+     * the last character of a 20-CJK visual line.
      */
     fun shouldApplyParagraphIndent(fullText: String, pageStartOffset: Int): Boolean {
         if (fullText.isEmpty()) return false
@@ -428,18 +595,17 @@ object PageIndex {
         // A virtual page may start inside indentation already present in the source.
         // Walk back through that indentation before deciding whether this is a real
         // paragraph start; otherwise one of the two spaces can disappear at a page edge.
-        while (i >= 0 && (fullText[i] == ' ' || fullText[i] == '\t' ||
-                fullText[i] == '\u3000' || fullText[i] == '\u00a0')
-        ) {
+        while (i >= 0 && isIndentChar(fullText[i])) {
             i--
         }
         if (i >= 0 && fullText[i] == '\r') i--
         if (i < 0) return true
         if (fullText[i] != '\n') return false
+        var lineStart = i + 1
+        while (lineStart < fullText.length && fullText[lineStart] == '\r') lineStart++
+        if (isSourceParagraphIndent(fullText, lineStart)) return true
         var j = i - 1
-        while (j >= 0 && (fullText[j] == '\r' || fullText[j] == ' ' ||
-                fullText[j] == '\t' || fullText[j] == '\u3000')
-        ) {
+        while (j >= 0 && (fullText[j] == '\r' || isIndentChar(fullText[j]))) {
             j--
         }
         return j < 0 || fullText[j] == '\n'
@@ -449,9 +615,11 @@ object PageIndex {
      * Paragraph-local indentation for already displayed text.
      *
      * Hard-wrap newlines have already been removed by [unwrapHardLineBreaks], so every
-     * non-empty paragraph after a blank line is a real paragraph. Existing full-width,
-     * ASCII, NBSP, or tab indentation counts toward the two-em target instead of being
-     * doubled. The first displayed paragraph is skipped when a page starts mid-paragraph.
+     * remaining newline is a real paragraph (blank line or indent after a single
+     * line break). Existing
+     * full-width, ASCII, NBSP, or tab indentation counts toward the two-em target
+     * instead of being doubled. The first displayed paragraph is skipped when a page
+     * starts mid-paragraph.
      */
     fun paragraphIndentRanges(
         displayedText: String,
@@ -491,8 +659,9 @@ object PageIndex {
 
     /**
      * Drop hard-wrap newlines so a 笔趣阁-style line (one `\n` per ~20 CJK) paints as
-     * a paragraph. Blank lines (`\n\n`) collapse to one paragraph break: indentation,
-     * rather than a full empty visual row, separates Chinese prose paragraphs.
+     * a paragraph. A blank line (`\n\n`) or a single newline plus paragraph indent
+     * (`\n　　`) stays as a paragraph break. Indentation, rather than a full empty
+     * visual row, separates Chinese prose paragraphs.
      */
     fun unwrapHardLineBreaks(text: String): String {
         if (text.isEmpty() || text.indexOf('\n') < 0) return text
@@ -505,15 +674,11 @@ object PageIndex {
                 continue
             }
             if (ch == '\n') {
-                var j = i + 1
-                while (j < text.length && text[j] == '\r') j++
-                if (j < text.length && text[j] == '\n') {
+                val decision = unwrapNewline(text, i)
+                if (decision.keepParagraphBreak) {
                     out.append('\n')
-                    i = j + 1
-                    while (i < text.length && (text[i] == '\n' || text[i] == '\r')) i++
-                } else {
-                    i = j
                 }
+                i = decision.nextRawIndex
                 continue
             }
             out.append(ch)
@@ -548,15 +713,11 @@ object PageIndex {
                 continue
             }
             if (ch == '\n') {
-                var j = i + 1
-                while (j < raw.length && raw[j] == '\r') j++
-                if (j < raw.length && raw[j] == '\n') {
+                val decision = unwrapNewline(raw, i)
+                if (decision.keepParagraphBreak) {
                     appendDisplayed('\n', i)
-                    i = j + 1
-                    while (i < raw.length && (raw[i] == '\n' || raw[i] == '\r')) i++
-                } else {
-                    i = j
                 }
+                i = decision.nextRawIndex
                 continue
             }
             appendDisplayed(ch, i)
@@ -581,15 +742,11 @@ object PageIndex {
                 continue
             }
             if (ch == '\n') {
-                var j = i + 1
-                while (j < raw.length && raw[j] == '\r') j++
-                if (j < raw.length && raw[j] == '\n') {
+                val decision = unwrapNewline(raw, i)
+                if (decision.keepParagraphBreak) {
                     shown += 1
-                    i = j + 1
-                    while (i < raw.length && (raw[i] == '\n' || raw[i] == '\r')) i++
-                } else {
-                    i = j
                 }
+                i = decision.nextRawIndex
                 continue
             }
             shown++
@@ -725,5 +882,33 @@ object PageIndex {
             }
         }
         return starts
+    }
+
+    /**
+     * Display-offset start of the **last** page when packing measured lines from
+     * the end of a lookback sample. Used to recover the previous large-book page
+     * so it ends at the current page start and still fills the viewport.
+     */
+    fun lastPageStartFromMeasuredLines(
+        lineTops: FloatArray,
+        lineBottoms: FloatArray,
+        lineCharStarts: IntArray,
+        viewportHeightPx: Float,
+    ): Int {
+        val n = lineTops.size
+        require(lineBottoms.size == n && lineCharStarts.size == n) {
+            "line metric arrays must have equal length"
+        }
+        if (n == 0) return 0
+        val typical = (lineBottoms[n - 1] - lineTops[n - 1]).coerceAtLeast(0f)
+        val vh = effectivePageViewportHeight(viewportHeightPx, typical)
+        val pageBottom = lineBottoms[n - 1]
+        for (i in n - 1 downTo 0) {
+            if (pageBottom - lineTops[i] > vh) {
+                val next = (i + 1).coerceAtMost(n - 1)
+                return lineCharStarts[next].coerceAtLeast(0)
+            }
+        }
+        return lineCharStarts[0].coerceAtLeast(0)
     }
 }

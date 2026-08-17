@@ -116,6 +116,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.ParagraphStyle
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -280,6 +282,11 @@ fun ReaderScreen(
     // Forces one fresh Text layout after an anchor-preserving capacity remap. Without this,
     // calibration could pause until the next user page turn and make page totals jump then.
     var approxCalibrationEpoch by remember(book.id) { mutableIntStateOf(0) }
+    // Locally measured raw page starts around the current large-book page.
+    // Sequential turns chain these so density changes fill the viewport without
+    // remeshing the entire 5M-char book to a single chars-per-page.
+    var approxLocalStarts by remember(book.id) { mutableStateOf<Map<Int, Int>>(emptyMap()) }
+    var approxJumpNonce by remember(book.id) { mutableIntStateOf(0) }
 
     // Character anchor for reflow: keep nearest page after font/line/theme change.
     var anchorOffset by remember(book.id, book.text.length, textFullyLoaded) {
@@ -526,6 +533,7 @@ fun ReaderScreen(
                 measured
             }
             approxCharsPerPage = charsPerPage
+            approxLocalStarts = emptyMap()
             pendingApproxCalibrationOffset = null
             largestFittingCalibrationCapacity = -1
             smallestOverflowingCalibrationCapacity = Int.MAX_VALUE
@@ -570,29 +578,13 @@ fun ReaderScreen(
                 // unwrapping only at render time produced half-empty pages with the next
                 // paragraph clipped behind the footer.
                 val display = PageIndex.unwrapHardLineBreaksWithRawOffsets(text)
-                val measuredText = if (!paragraphIndent) {
-                    AnnotatedString(display.text)
-                } else {
-                    val indentRanges = PageIndex.paragraphIndentRanges(
-                        display.text,
-                        indentFirstParagraph = true,
-                    )
-                    buildAnnotatedString {
-                        append(display.text)
-                        indentRanges.forEach { range ->
-                            addStyle(
-                                style = ParagraphStyle(
-                                    textIndent = TextIndent(
-                                        firstLine = (fontSizeSp * range.missingEm).sp,
-                                        restLine = 0.sp,
-                                    ),
-                                ),
-                                start = range.start,
-                                end = range.endExclusive,
-                            )
-                        }
-                    }
-                }
+                val measuredText = annotateParagraphIndents(
+                    source = AnnotatedString(display.text),
+                    displayedPlain = display.text,
+                    enabled = paragraphIndent,
+                    indentFirstParagraph = true,
+                    fontSizeSp = fontSizeSp,
+                )
                 val layout = textMeasurer.measure(
                     text = measuredText,
                     style = style,
@@ -666,10 +658,113 @@ fun ReaderScreen(
         approxCalibrationEpoch += 1
     }
 
+    // Large-book current page: measure a bounded sample from this page's start
+    // instead of painting a fixed character slice. Neighbors are chained so a
+    // short chapter title cannot leave 1–3 empty lines above the footer.
+    val latestApproxLocalStarts by rememberUpdatedState(approxLocalStarts)
+    val latestApproxJumpNonce by rememberUpdatedState(approxJumpNonce)
+    LaunchedEffect(
+        useApproxPaging,
+        restoreApplied,
+        book.text,
+        approxCharsPerPage,
+        contentWidthPx,
+        contentHeightPx,
+        bodyTextStyle,
+        paragraphIndent,
+        fontSizeSp,
+    ) {
+        if (!useApproxPaging || !restoreApplied) return@LaunchedEffect
+        if (contentWidthPx <= 0 || contentHeightPx <= 0) return@LaunchedEffect
+        approxLocalStarts = emptyMap()
+        val text = book.text
+        val style = bodyTextStyle
+        val width = contentWidthPx
+        val height = contentHeightPx
+        val cpp = approxCharsPerPage
+        val indent = paragraphIndent
+        val sizeSp = fontSizeSp
+        var existing = emptyMap<Int, Int>()
+        snapshotFlow { pagerState.currentPage to latestApproxJumpNonce }
+            .distinctUntilChanged()
+            .collect { (rawPage, _) ->
+                val count = PageIndex.approximatePageCount(text.length, cpp)
+                val page = PageIndex.clampPageIndex(rawPage, count)
+                val jumped = latestApproxLocalStarts[page]
+                val seed = when {
+                    jumped != null && existing[page] != jumped -> mapOf(page to jumped)
+                    page in existing -> existing
+                    else -> latestApproxLocalStarts
+                }
+                val window = withContext(Dispatchers.Default) {
+                    val currentStart = PageIndex.approximatePageStartWithOverrides(
+                        page,
+                        cpp,
+                        text.length,
+                        seed,
+                    )
+                    val fittedEnd = measureFittedRawEnd(
+                        text = text,
+                        rawStart = currentStart,
+                        textMeasurer = textMeasurer,
+                        style = style,
+                        widthPx = width,
+                        heightPx = height,
+                        paragraphIndent = indent,
+                        fontSizeSp = sizeSp,
+                        charsPerPage = cpp,
+                    )
+                    val previousStart = if (page > 0 && page - 1 !in seed) {
+                        measurePreviousRawStart(
+                            text = text,
+                            currentStart = currentStart,
+                            textMeasurer = textMeasurer,
+                            style = style,
+                            widthPx = width,
+                            heightPx = height,
+                            paragraphIndent = indent,
+                            fontSizeSp = sizeSp,
+                        )
+                    } else {
+                        seed[page - 1]
+                    }
+                    val nextStart = seed[page + 1] ?: fittedEnd
+                    val followingStart = if (page + 2 !in seed && nextStart < text.length) {
+                        measureFittedRawEnd(
+                            text = text,
+                            rawStart = nextStart,
+                            textMeasurer = textMeasurer,
+                            style = style,
+                            widthPx = width,
+                            heightPx = height,
+                            paragraphIndent = indent,
+                            fontSizeSp = sizeSp,
+                            charsPerPage = cpp,
+                        )
+                    } else {
+                        seed[page + 2]
+                    }
+                    PageIndex.nextApproxLocalStarts(
+                        pageIndex = page,
+                        textLength = text.length,
+                        existing = seed,
+                        currentStart = currentStart,
+                        fittedEndExclusive = fittedEnd,
+                        previousStart = previousStart,
+                        followingStart = followingStart,
+                    )
+                }
+                existing = window
+                if (window != approxLocalStarts) {
+                    approxLocalStarts = window
+                }
+            }
+    }
+
     // Page turns → progress (0…1000) + chapter + anchor.
     // Must not commit progress until OpenProgressGate allows (avoids clobber on swap).
     val sliderScrubbingNow by rememberUpdatedState(sliderScrubbing)
-    LaunchedEffect(pagerState, pageStarts, chapters, useApproxPaging, approxCharsPerPage, textFullyLoaded, restoreApplied) {
+    LaunchedEffect(pagerState, pageStarts, chapters, useApproxPaging, approxCharsPerPage, approxLocalStarts, textFullyLoaded, restoreApplied) {
         snapshotFlow {
             Triple(pagerState.currentPage, pageStarts, approxCharsPerPage)
         }
@@ -687,7 +782,12 @@ fun ReaderScreen(
                         page = p,
                         pageCount = count,
                     )
-                    val offset = PageIndex.approximateOffsetForPage(p, cpp, book.text.length)
+                    val offset = PageIndex.approximatePageStartWithOverrides(
+                        p,
+                        cpp,
+                        book.text.length,
+                        approxLocalStarts,
+                    )
                     anchorOffset = offset
                     currentChapter = ChapterIndex.chapterAtOffset(chapters, offset)
                 } else {
@@ -750,10 +850,15 @@ fun ReaderScreen(
         anchorOffset = clampedOffset
         val page = if (useApproxPaging) {
             val cpp = approxCharsPerPage.coerceAtLeast(PageIndex.MIN_APPROX_CHARS_PER_PAGE)
-            PageIndex.clampPageIndex(
+            val target = PageIndex.clampPageIndex(
                 clampedOffset / cpp,
                 PageIndex.approximatePageCount(book.text.length, cpp),
             )
+            // Seed the local window so the landed page starts at the chapter/search
+            // hit, then local measure fills from there instead of page * cpp.
+            approxLocalStarts = mapOf(target to clampedOffset)
+            approxJumpNonce++
+            target
         } else {
             PageIndex.pageForOffset(pageStarts, clampedOffset)
         }
@@ -786,10 +891,11 @@ fun ReaderScreen(
 
     fun currentReadingOffset(): Int {
         return if (useApproxPaging) {
-            PageIndex.approximateOffsetForPage(
+            PageIndex.approximatePageStartWithOverrides(
                 pagerState.currentPage,
                 approxCharsPerPage,
                 book.text.length,
+                approxLocalStarts,
             )
         } else {
             PageIndex.offsetForPage(pageStarts, pagerState.currentPage)
@@ -1208,13 +1314,15 @@ fun ReaderScreen(
                         useApproxPaging,
                         approxCharsPerPage,
                         pageCount,
+                        approxLocalStarts,
                     ) {
                         when {
                             useApproxPaging -> {
-                                PageIndex.approximatePageText(
+                                PageIndex.approximatePageTextWithOverrides(
                                     book.text,
                                     approxCharsPerPage,
                                     bodyPage,
+                                    approxLocalStarts,
                                 )
                             }
                             pageStarts.isEmpty() && book.text.isNotEmpty() -> {
@@ -1245,10 +1353,11 @@ fun ReaderScreen(
                     // clips the last line — the longstanding half-line bug.
                     // Use bodyPage so indent matches the gated approx body before restore.
                     val pageStartOffset = when {
-                        useApproxPaging -> PageIndex.approximateOffsetForPage(
+                        useApproxPaging -> PageIndex.approximatePageStartWithOverrides(
                             bodyPage,
                             approxCharsPerPage,
                             book.text.length,
+                            approxLocalStarts,
                         )
                         pageStarts.isNotEmpty() -> PageIndex.offsetForPage(pageStarts, bodyPage)
                         else -> 0
@@ -1304,121 +1413,22 @@ fun ReaderScreen(
                             book.text,
                             fontSizeSp,
                         ) {
-                            if (!paragraphIndent) {
-                                annotatedBody
-                            } else {
-                                val indentFirst = PageIndex.shouldApplyParagraphIndent(
+                            annotateParagraphIndents(
+                                source = annotatedBody,
+                                displayedPlain = displayBody,
+                                enabled = paragraphIndent,
+                                indentFirstParagraph = PageIndex.shouldApplyParagraphIndent(
                                     book.text,
                                     pageStartOffset,
-                                )
-                                val indentRanges = PageIndex.paragraphIndentRanges(
-                                    displayBody,
-                                    indentFirst,
-                                )
-                                if (indentRanges.isEmpty()) {
-                                    annotatedBody
-                                } else {
-                                    buildAnnotatedString {
-                                        append(annotatedBody)
-                                        indentRanges.forEach { range ->
-                                            addStyle(
-                                                style = ParagraphStyle(
-                                                    textIndent = TextIndent(
-                                                        firstLine = (fontSizeSp * range.missingEm).sp,
-                                                        restLine = 0.sp,
-                                                    ),
-                                                ),
-                                                start = range.start,
-                                                end = range.endExclusive,
-                                            )
-                                        }
-                                    }
-                                }
-                            }
+                                ),
+                                fontSizeSp = fontSizeSp,
+                            )
                         }
                         var pageTextLayout by remember(displayBody, pageTextStyle) {
                             mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null)
                         }
-                        fun capturePageTextLayout(layout: androidx.compose.ui.text.TextLayoutResult) {
+                        fun capturePageTextLayout(layout: TextLayoutResult) {
                             pageTextLayout = layout
-                            if (!useApproxPaging || !restoreApplied) return
-                            // Reader chrome is an overlay. Opening it or moving its slider must
-                            // never recalibrate the body or move the pager behind the controls.
-                            if (menuVisible || sliderScrubbing) return
-                            // Calibrate once per real viewport/style epoch. Different pages have
-                            // different paragraph density; treating every page as a new global
-                            // sample makes the total page count drift during normal reading.
-                            if (approxCalibrationSettled) return
-                            // Updating approxCharsPerPage recomposes the current pager slot before
-                            // the anchor-preserving scroll can run. Do not let that transient layout
-                            // replace the original offset with currentPage * newCapacity; doing so
-                            // visibly changed 96% into 83% after an otherwise adjacent page turn.
-                            if (pendingApproxCalibrationOffset != null) return
-                            if (page != pagerState.currentPage || bodyPage != pagerState.currentPage) return
-                            val currentCapacity = approxCharsPerPage
-                            if (layout.didOverflowHeight) {
-                                // A fit learned from different wrapping is not a valid lower
-                                // bound when this smaller capacity already overflows.
-                                if (largestFittingCalibrationCapacity >= currentCapacity) {
-                                    largestFittingCalibrationCapacity = -1
-                                }
-                                smallestOverflowingCalibrationCapacity = minOf(
-                                    smallestOverflowingCalibrationCapacity,
-                                    currentCapacity,
-                                )
-                                val tightened = PageIndex.nextApproxCapacityAfterOverflow(
-                                    currentCapacity,
-                                    largestFittingCalibrationCapacity,
-                                )
-                                if (tightened >= currentCapacity) {
-                                    approxCalibrationSettled = true
-                                    return
-                                }
-                                pendingApproxCalibrationOffset = pageStartOffset
-                                approxCharsPerPage = tightened
-                                // The bounded TextMeasurer sample is already location-aware.
-                                // Permit one real-page safety correction, then lock capacity so
-                                // ordinary next/previous turns never mutate total pages.
-                                approxCalibrationSettled = true
-                                return
-                            }
-                            // Full slice that left the lower page empty (hard-wrapped TXT).
-                            // Use last-line ink height — layout.size.height follows the
-                            // heightIn constraint and would look "full" even when it is not.
-                            if (pageBody.length < currentCapacity) {
-                                approxCalibrationSettled = true
-                                return
-                            }
-                            // Likewise, a fitting capacity invalidates any stale upper bound at
-                            // or below it (the preserved anchor can change wrapping slightly).
-                            if (smallestOverflowingCalibrationCapacity <= currentCapacity) {
-                                smallestOverflowingCalibrationCapacity = Int.MAX_VALUE
-                            }
-                            largestFittingCalibrationCapacity = maxOf(
-                                largestFittingCalibrationCapacity,
-                                currentCapacity,
-                            )
-                            val painted = PageIndex.paintedTextHeightPx(
-                                layout.lineCount,
-                                if (layout.lineCount > 0) {
-                                    layout.getLineBottom(layout.lineCount - 1)
-                                } else {
-                                    0f
-                                },
-                            )
-                            val expanded = PageIndex.nextApproxCapacityAfterUnderfill(
-                                currentCapacity,
-                                painted,
-                                contentHeightPx.toFloat(),
-                                smallestOverflowingCalibrationCapacity,
-                            )
-                            if (expanded <= currentCapacity) {
-                                approxCalibrationSettled = true
-                                return
-                            }
-                            pendingApproxCalibrationOffset = pageStartOffset
-                            approxCharsPerPage = expanded
-                            approxCalibrationSettled = true
                         }
                         val bodyModifier = Modifier
                             .align(Alignment.TopStart)
@@ -3474,6 +3484,134 @@ private fun AppearanceToggleRow(
 
 private fun formatTime(): String =
     SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+
+private fun annotateParagraphIndents(
+    source: AnnotatedString,
+    displayedPlain: String,
+    enabled: Boolean,
+    indentFirstParagraph: Boolean,
+    fontSizeSp: Int,
+): AnnotatedString {
+    if (!enabled) return source
+    val ranges = PageIndex.paragraphIndentRanges(displayedPlain, indentFirstParagraph)
+    if (ranges.isEmpty()) return source
+    return buildAnnotatedString {
+        append(source)
+        for (range in ranges) {
+            addStyle(
+                ParagraphStyle(
+                    textIndent = TextIndent(
+                        firstLine = (fontSizeSp * range.missingEm).sp,
+                        restLine = 0.sp,
+                    ),
+                ),
+                range.start,
+                range.endExclusive,
+            )
+        }
+    }
+}
+
+private fun measureFittedRawEnd(
+    text: String,
+    rawStart: Int,
+    textMeasurer: TextMeasurer,
+    style: TextStyle,
+    widthPx: Int,
+    heightPx: Int,
+    paragraphIndent: Boolean,
+    fontSizeSp: Int,
+    charsPerPage: Int,
+): Int {
+    val length = text.length
+    if (rawStart >= length) return length
+    val sampleChars = maxOf(PageIndex.APPROX_MEASURE_SAMPLE_CHARS, charsPerPage * 3)
+    val sampleEnd = (rawStart + sampleChars).coerceAtMost(length)
+    val rawSample = text.substring(rawStart, sampleEnd)
+    val mapping = PageIndex.unwrapHardLineBreaksWithRawOffsets(rawSample)
+    if (mapping.text.isEmpty()) {
+        return sampleEnd.coerceAtLeast(rawStart + 1).coerceAtMost(length)
+    }
+    val measuredText = annotateParagraphIndents(
+        source = AnnotatedString(mapping.text),
+        displayedPlain = mapping.text,
+        enabled = paragraphIndent,
+        indentFirstParagraph = PageIndex.shouldApplyParagraphIndent(text, rawStart),
+        fontSizeSp = fontSizeSp,
+    )
+    val layout = textMeasurer.measure(
+        text = measuredText,
+        style = style,
+        constraints = Constraints(maxWidth = widthPx.coerceAtLeast(1)),
+    )
+    val lineCount = layout.lineCount
+    if (lineCount <= 0) {
+        return sampleEnd.coerceAtLeast(rawStart + 1).coerceAtMost(length)
+    }
+    val tops = FloatArray(lineCount)
+    val bottoms = FloatArray(lineCount)
+    val chars = IntArray(lineCount)
+    for (i in 0 until lineCount) {
+        tops[i] = layout.getLineTop(i)
+        bottoms[i] = layout.getLineBottom(i)
+        chars[i] = layout.getLineStart(i)
+    }
+    val unwrappedFit = PageIndex.charsPerPageFromMeasuredLines(
+        tops,
+        bottoms,
+        chars,
+        mapping.text.length,
+        heightPx.toFloat(),
+    )
+    val rawSpan = PageIndex.rawCharsSpanningUnwrapped(rawSample, unwrappedFit)
+    return (rawStart + rawSpan.coerceAtLeast(1)).coerceAtMost(length)
+}
+
+private fun measurePreviousRawStart(
+    text: String,
+    currentStart: Int,
+    textMeasurer: TextMeasurer,
+    style: TextStyle,
+    widthPx: Int,
+    heightPx: Int,
+    paragraphIndent: Boolean,
+    fontSizeSp: Int,
+): Int {
+    if (currentStart <= 0) return 0
+    val origin = (currentStart - PageIndex.APPROX_MEASURE_SAMPLE_CHARS).coerceAtLeast(0)
+    val rawSample = text.substring(origin, currentStart)
+    val mapping = PageIndex.unwrapHardLineBreaksWithRawOffsets(rawSample)
+    if (mapping.text.isEmpty()) return origin
+    val measuredText = annotateParagraphIndents(
+        source = AnnotatedString(mapping.text),
+        displayedPlain = mapping.text,
+        enabled = paragraphIndent,
+        indentFirstParagraph = PageIndex.shouldApplyParagraphIndent(text, origin),
+        fontSizeSp = fontSizeSp,
+    )
+    val layout = textMeasurer.measure(
+        text = measuredText,
+        style = style,
+        constraints = Constraints(maxWidth = widthPx.coerceAtLeast(1)),
+    )
+    val lineCount = layout.lineCount
+    if (lineCount <= 0) return origin
+    val tops = FloatArray(lineCount)
+    val bottoms = FloatArray(lineCount)
+    val chars = IntArray(lineCount)
+    for (i in 0 until lineCount) {
+        tops[i] = layout.getLineTop(i)
+        bottoms[i] = layout.getLineBottom(i)
+        chars[i] = layout.getLineStart(i)
+    }
+    val displayStart = PageIndex.lastPageStartFromMeasuredLines(
+        tops,
+        bottoms,
+        chars,
+        heightPx.toFloat(),
+    )
+    return (origin + mapping.rawOffset(displayStart)).coerceIn(0, currentStart)
+}
 
 /**
  * Overlaps a book-absolute TTS highlight range with the current page slice and

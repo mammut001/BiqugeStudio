@@ -368,6 +368,22 @@ class PageIndexTest {
         val indentStart = existingIndent.indexOf('　')
         assertTrue(PageIndex.shouldApplyParagraphIndent(existingIndent, indentStart))
         assertTrue(PageIndex.shouldApplyParagraphIndent(existingIndent, indentStart + 1))
+
+        // 大主宰-style: single newline + two fullwidth spaces is a paragraph.
+        val indentBreak = "第一段完。\n　　第二段开头"
+        assertTrue(PageIndex.shouldApplyParagraphIndent(indentBreak, indentBreak.indexOf('　')))
+        assertTrue(PageIndex.shouldApplyParagraphIndent(indentBreak, indentBreak.indexOf('第', 1)))
+    }
+
+    @Test
+    fun isSourceParagraphIndent_requiresTwoEm() {
+        assertTrue(PageIndex.isSourceParagraphIndent("　　正文", 0))
+        assertTrue(PageIndex.isSourceParagraphIndent("\t正文", 0))
+        assertTrue(PageIndex.isSourceParagraphIndent("    正文", 0))
+        assertTrue(!PageIndex.isSourceParagraphIndent("　正文", 0))
+        assertTrue(!PageIndex.isSourceParagraphIndent(" 正文", 0))
+        assertTrue(!PageIndex.isSourceParagraphIndent("正文", 0))
+        assertTrue(!PageIndex.isSourceParagraphIndent("", 0))
     }
 
     @Test
@@ -415,6 +431,30 @@ class PageIndexTest {
         )
         assertEquals("无换行", PageIndex.unwrapHardLineBreaks("无换行"))
         assertEquals("", PageIndex.unwrapHardLineBreaks(""))
+    }
+
+    @Test
+    fun unwrapHardLineBreaks_keepsSingleNewlineBeforeFullwidthIndent() {
+        val raw = "一旦\n爆发，必将势如雷霆。\n　　这种变化，令得牧锋\n继续同一段"
+        val out = PageIndex.unwrapHardLineBreaks(raw)
+        assertEquals(
+            "一旦爆发，必将势如雷霆。\n　　这种变化，令得牧锋继续同一段",
+            out,
+        )
+        // Old bug: dropped the paragraph newline and left a mid-line 2em hole.
+        assertTrue(!out.contains("。　　"))
+        val mapped = PageIndex.unwrapHardLineBreaksWithRawOffsets(raw)
+        assertEquals(out, mapped.text)
+        assertEquals(raw.length, PageIndex.rawCharsSpanningUnwrapped(raw, out.length))
+        assertEquals(raw.indexOf('这'), mapped.rawOffset(out.indexOf('这')))
+
+        val crlf = "完。\r\n　　下一段"
+        assertEquals("完。\n　　下一段", PageIndex.unwrapHardLineBreaks(crlf))
+        val indentRanges = PageIndex.paragraphIndentRanges(
+            "必将势如雷霆。\n　　这种变化",
+            indentFirstParagraph = false,
+        )
+        assertTrue(indentRanges.isEmpty())
     }
 
     @Test
@@ -523,6 +563,78 @@ class PageIndexTest {
         val chars = intArrayOf(0, 50)
         val starts = PageIndex.pageStartOffsets(tops, bottoms, chars, viewportHeightPx = 100f)
         assertEquals(listOf(0, 50), starts)
+    }
+
+    @Test
+    fun lastPageStartFromMeasuredLines_packsFromTheEnd() {
+        // 5 lines × 30px; viewport 100 with 0.2-line safety → effective 94.
+        // From the bottom: lines 2+3+4 (90px) fit; line 1 would be 120px.
+        val tops = floatArrayOf(0f, 30f, 60f, 90f, 120f)
+        val bottoms = floatArrayOf(30f, 60f, 90f, 120f, 150f)
+        val chars = intArrayOf(0, 10, 20, 30, 40)
+        val start = PageIndex.lastPageStartFromMeasuredLines(
+            tops,
+            bottoms,
+            chars,
+            viewportHeightPx = 100f,
+        )
+        assertEquals(20, start)
+        assertEquals(
+            0,
+            PageIndex.lastPageStartFromMeasuredLines(
+                FloatArray(0),
+                FloatArray(0),
+                IntArray(0),
+                viewportHeightPx = 100f,
+            ),
+        )
+    }
+
+    @Test
+    fun approxLocalStarts_chainForwardAndKeepNextWhenGoingBack() {
+        val first = PageIndex.nextApproxLocalStarts(
+            pageIndex = 10,
+            textLength = 10_000,
+            existing = emptyMap(),
+            currentStart = 2_820,
+            fittedEndExclusive = 3_170,
+            previousStart = 2_500,
+            followingStart = 3_500,
+        )
+        assertEquals(2_500, first[9])
+        assertEquals(2_820, first[10])
+        assertEquals(3_170, first[11])
+        assertEquals(3_500, first[12])
+
+        val backward = PageIndex.nextApproxLocalStarts(
+            pageIndex = 10,
+            textLength = 10_000,
+            existing = first,
+            currentStart = 2_820,
+            fittedEndExclusive = 3_400,
+            previousStart = 2_500,
+            followingStart = 3_500,
+        )
+        // Going back must not steal characters from page 11.
+        assertEquals(3_170, backward[11])
+        assertEquals(2_820, backward[10])
+    }
+
+    @Test
+    fun approximatePageTextWithOverrides_usesChainedEnds() {
+        val text = "0123456789ABCDEFGHIJ"
+        val overrides = mapOf(2 to 8, 3 to 15)
+        assertEquals(
+            "89ABCDE",
+            PageIndex.approximatePageTextWithOverrides(text, charsPerPage = 5, pageIndex = 2, overrides),
+        )
+        assertEquals(8, PageIndex.approximatePageStartWithOverrides(2, 5, text.length, overrides))
+        assertEquals(15, PageIndex.approximatePageEndWithOverrides(2, 5, text.length, overrides))
+        // No override → same fixed-capacity slice as the virtual pager.
+        assertEquals(
+            PageIndex.approximatePageText(text, 5, 0),
+            PageIndex.approximatePageTextWithOverrides(text, 5, 0, emptyMap()),
+        )
     }
 
     @Test
