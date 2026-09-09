@@ -12,12 +12,16 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -35,10 +39,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import android.widget.Toast
 import app.maoyankanshu.novel.selfuse.AppIntents
 import app.maoyankanshu.novel.selfuse.Book
+import app.maoyankanshu.novel.selfuse.BookDataDeletion
 import app.maoyankanshu.novel.selfuse.LibraryStore
 import app.maoyankanshu.novel.selfuse.R
 import app.maoyankanshu.novel.selfuse.ReadingHistory
@@ -144,14 +151,19 @@ fun ShelfScreen(
                         title = stringResource(R.string.shelf_empty_title),
                         body = stringResource(R.string.shelf_empty_body),
                         contentDescription = stringResource(R.string.shelf_empty_cd),
-                        primaryLabel = stringResource(R.string.cta_import),
-                        primaryDescription = stringResource(R.string.import_local_txt_epub_cd),
+                        primaryLabel = stringResource(R.string.import_browser_download),
+                        primaryDescription = stringResource(R.string.import_browser_download_cd),
                         onPrimary = {
+                            context.startActivity(AppIntents.browserImport(context))
+                        },
+                        secondaryLabel = stringResource(R.string.cta_import),
+                        secondaryDescription = stringResource(R.string.import_local_txt_epub_cd),
+                        onSecondary = {
                             context.startActivity(AppIntents.importLocal(context))
                         },
-                        secondaryLabel = stringResource(R.string.cta_search),
-                        secondaryDescription = stringResource(R.string.search_shelf_cd),
-                        onSecondary = {
+                        tertiaryLabel = stringResource(R.string.shelf_empty_wiki),
+                        tertiaryDescription = stringResource(R.string.shelf_empty_wiki_cd),
+                        onTertiary = {
                             context.startActivity(AppIntents.search(context))
                         },
                     )
@@ -166,6 +178,7 @@ fun ShelfScreen(
                             book = book,
                             onClick = { openReader(book) },
                             onLongClick = { menuBook = book },
+                            longClickHint = stringResource(R.string.book_card_long_press_menu),
                             onContinueReading = { openReader(book) },
                         )
                     }
@@ -220,6 +233,7 @@ fun ShelfScreen(
                                 book = book,
                                 onClick = { openReader(book) },
                                 onLongClick = { menuBook = book },
+                                longClickHint = stringResource(R.string.book_card_long_press_menu),
                                 onContinueReading = { openReader(book) },
                             )
                         }
@@ -230,6 +244,7 @@ fun ShelfScreen(
                             book = book,
                             onClick = { openReader(book) },
                             onLongClick = { menuBook = book },
+                            longClickHint = stringResource(R.string.book_card_long_press_menu),
                             onContinueReading = { openReader(book) },
                         )
                     }
@@ -257,11 +272,18 @@ fun ShelfScreen(
             },
             onPin = {
                 menuBook = null
+                val pinnedTitle = book.title
+                val pinnedId = book.id
                 scope.launch {
                     withContext(Dispatchers.IO) {
-                        LibraryStore.get(context).moveToTop(book.id)
+                        LibraryStore.get(context).moveToTop(pinnedId)
                     }
                     onLibraryChanged()
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.detail_pinned, pinnedTitle),
+                        Toast.LENGTH_SHORT,
+                    ).show()
                 }
             },
             onEdit = {
@@ -286,14 +308,19 @@ fun ShelfScreen(
                 TextButton(
                     onClick = {
                         // Close confirmation immediately; storage deletion happens off-main.
+                        val deletedTitle = book.title
                         pendingDelete = null
                         scope.launch {
                             withContext(Dispatchers.IO) {
-                                LibraryStore.get(context).remove(book.id)
-                                ReadingHistory.get(context).remove(book.id)
+                                BookDataDeletion.remove(context, book.id)
                             }
                             onLibraryChanged()
                             onHistoryChanged()
+                            Toast.makeText(
+                                context,
+                                context.getString(R.string.delete_book_done, deletedTitle),
+                                Toast.LENGTH_SHORT,
+                            ).show()
                         }
                     },
                     modifier = Modifier.heightIn(min = 48.dp),
@@ -333,52 +360,59 @@ private fun ShelfToolbar(
     val filterFinishedCd = stringResource(R.string.shelf_filter_finished_cd)
     val sortCd = stringResource(R.string.shelf_sort_cd)
     val groupCd = stringResource(R.string.shelf_group_cd)
+    val currentSortLabel = stringResource(sortLabelRes(sortOrder))
+    val currentGroupLabel = stringResource(groupLabelRes(groupMode))
 
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        FlowRow(
+        // One horizontally scrollable row instead of a wrapping FlowRow: the four
+        // chips always fit one 48dp-tall line, leaving more room for books.
+        LazyRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .semantics {
-                    contentDescription = filterAllCd // group description
-                },
+            modifier = Modifier.fillMaxWidth(),
         ) {
-            FilterChip(
-                selected = progressFilter == ShelfProgressFilter.ALL,
-                onClick = { onFilterChange(ShelfProgressFilter.ALL) },
-                label = { Text(stringResource(R.string.shelf_filter_all)) },
-                modifier = Modifier
-                    .heightIn(min = 48.dp)
-                    .semantics { contentDescription = filterAllCd },
-            )
-            FilterChip(
-                selected = progressFilter == ShelfProgressFilter.IN_PROGRESS,
-                onClick = { onFilterChange(ShelfProgressFilter.IN_PROGRESS) },
-                label = { Text(stringResource(R.string.shelf_filter_progress)) },
-                modifier = Modifier
-                    .heightIn(min = 48.dp)
-                    .semantics { contentDescription = filterProgressCd },
-            )
-            FilterChip(
-                selected = progressFilter == ShelfProgressFilter.NOT_STARTED,
-                onClick = { onFilterChange(ShelfProgressFilter.NOT_STARTED) },
-                label = { Text(stringResource(R.string.shelf_filter_not_started)) },
-                modifier = Modifier
-                    .heightIn(min = 48.dp)
-                    .semantics { contentDescription = filterNotStartedCd },
-            )
-            FilterChip(
-                selected = progressFilter == ShelfProgressFilter.FINISHED,
-                onClick = { onFilterChange(ShelfProgressFilter.FINISHED) },
-                label = { Text(stringResource(R.string.shelf_filter_finished)) },
-                modifier = Modifier
-                    .heightIn(min = 48.dp)
-                    .semantics { contentDescription = filterFinishedCd },
-            )
+            item {
+                FilterChip(
+                    selected = progressFilter == ShelfProgressFilter.ALL,
+                    onClick = { onFilterChange(ShelfProgressFilter.ALL) },
+                    label = { Text(stringResource(R.string.shelf_filter_all)) },
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .semantics { contentDescription = filterAllCd },
+                )
+            }
+            item {
+                FilterChip(
+                    selected = progressFilter == ShelfProgressFilter.IN_PROGRESS,
+                    onClick = { onFilterChange(ShelfProgressFilter.IN_PROGRESS) },
+                    label = { Text(stringResource(R.string.shelf_filter_progress)) },
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .semantics { contentDescription = filterProgressCd },
+                )
+            }
+            item {
+                FilterChip(
+                    selected = progressFilter == ShelfProgressFilter.NOT_STARTED,
+                    onClick = { onFilterChange(ShelfProgressFilter.NOT_STARTED) },
+                    label = { Text(stringResource(R.string.shelf_filter_not_started)) },
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .semantics { contentDescription = filterNotStartedCd },
+                )
+            }
+            item {
+                FilterChip(
+                    selected = progressFilter == ShelfProgressFilter.FINISHED,
+                    onClick = { onFilterChange(ShelfProgressFilter.FINISHED) },
+                    label = { Text(stringResource(R.string.shelf_filter_finished)) },
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .semantics { contentDescription = filterFinishedCd },
+                )
+            }
         }
 
         FlowRow(
@@ -391,7 +425,9 @@ private fun ShelfToolbar(
                     onClick = { onSortMenuExpandedChange(true) },
                     modifier = Modifier
                         .heightIn(min = 48.dp)
-                        .semantics { contentDescription = sortCd },
+                        .semantics {
+                            contentDescription = "$sortCd，$currentSortLabel"
+                        },
                 ) {
                     Text(stringResource(sortLabelRes(sortOrder)))
                 }
@@ -403,7 +439,14 @@ private fun ShelfToolbar(
                         DropdownMenuItem(
                             text = { Text(stringResource(sortLabelRes(order))) },
                             onClick = { onSortOrderChange(order) },
-                            modifier = Modifier.heightIn(min = 48.dp),
+                            trailingIcon = if (order == sortOrder) {
+                                { Icon(Icons.Filled.Check, contentDescription = null) }
+                            } else {
+                                null
+                            },
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .semantics { selected = order == sortOrder },
                         )
                     }
                 }
@@ -413,7 +456,9 @@ private fun ShelfToolbar(
                     onClick = { onGroupMenuExpandedChange(true) },
                     modifier = Modifier
                         .heightIn(min = 48.dp)
-                        .semantics { contentDescription = groupCd },
+                        .semantics {
+                            contentDescription = "$groupCd，$currentGroupLabel"
+                        },
                 ) {
                     Text(stringResource(groupLabelRes(groupMode)))
                 }
@@ -425,7 +470,14 @@ private fun ShelfToolbar(
                         DropdownMenuItem(
                             text = { Text(stringResource(groupLabelRes(mode))) },
                             onClick = { onGroupModeChange(mode) },
-                            modifier = Modifier.heightIn(min = 48.dp),
+                            trailingIcon = if (mode == groupMode) {
+                                { Icon(Icons.Filled.Check, contentDescription = null) }
+                            } else {
+                                null
+                            },
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .semantics { selected = mode == groupMode },
                         )
                     }
                 }

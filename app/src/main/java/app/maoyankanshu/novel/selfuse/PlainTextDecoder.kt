@@ -62,7 +62,60 @@ object PlainTextDecoder {
             } else {
                 0
             }
+        // BOM-less UTF-16: strict UTF-8 fails and GB18030 then emits CJK + NUL
+        // confetti. Detect the NUL-interleave pattern first — even positions NUL
+        // means UTF-16BE, odd positions NUL means UTF-16LE.
+        detectBomLessUtf16(data, offset)?.let { cs ->
+            return String(data, offset, data.size - offset, cs)
+        }
         return decodeUtf8OrGb(data, offset)
+    }
+
+    /**
+     * Heuristic for BOM-less UTF-16 (common in Windows-saved Chinese TXT).
+     * Counts NUL bytes on even/odd positions over a bounded prefix; a strong
+     * majority on one parity with enough NULs total means UTF-16. Pure for tests.
+     */
+    internal fun detectBomLessUtf16(data: ByteArray, offset: Int): Charset? {
+        val size = data.size - offset
+        if (size < 4) return null
+        // Need strict-UTF-8 to actually fail, otherwise plain UTF-8/GBK wins.
+        if (isValidUtf8(data, offset)) return null
+        val sample = minOf(size, 1024)
+        var evenNul = 0
+        var oddNul = 0
+        var i = 0
+        while (i < sample) {
+            if ((data[offset + i].toInt() and 0xff) == 0x00) {
+                if (i % 2 == 0) evenNul++ else oddNul++
+            }
+            i++
+        }
+        val total = evenNul + oddNul
+        // At least ~10% NUL density and a 4:1 parity majority avoids flagging
+        // binary/GB text that merely contains a stray zero.
+        if (total * 10 < sample) return null
+        if (evenNul >= oddNul * 4 && evenNul >= 4) {
+            return charsetOrNull("UTF-16BE")
+        }
+        if (oddNul >= evenNul * 4 && oddNul >= 4) {
+            return charsetOrNull("UTF-16LE")
+        }
+        return null
+    }
+
+    private fun isValidUtf8(data: ByteArray, offset: Int): Boolean {
+        if (offset >= data.size) return true
+        val decoder = StandardCharsets.UTF_8
+            .newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+        return try {
+            decoder.decode(ByteBuffer.wrap(data, offset, data.size - offset))
+            true
+        } catch (_: CharacterCodingException) {
+            false
+        }
     }
 
     /** Pure helpers for tests and [EpubReader] alignment. */

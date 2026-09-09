@@ -221,6 +221,118 @@ class ReaderPreferencesTest {
     }
 
     @Test
+    fun searchHistory_pushDedupeCapAndClear() {
+        val prefs = TestSharedPreferences()
+        val readerPrefs = ReaderPreferences.get(prefs)
+
+        assertTrue(readerPrefs.searchHistory().isEmpty())
+        readerPrefs.pushSearchHistory("  ")
+        assertTrue(readerPrefs.searchHistory().isEmpty())
+
+        readerPrefs.pushSearchHistory("三国演义")
+        readerPrefs.pushSearchHistory("红楼梦")
+        readerPrefs.pushSearchHistory("三国演义")
+        assertEquals(listOf("三国演义", "红楼梦"), readerPrefs.searchHistory())
+
+        for (i in 1..10) readerPrefs.pushSearchHistory("书$i")
+        val history = readerPrefs.searchHistory()
+        assertEquals(8, history.size)
+        assertEquals("书10", history.first())
+
+        readerPrefs.clearSearchHistory()
+        assertTrue(readerPrefs.searchHistory().isEmpty())
+    }
+
+    @Test
+    fun findHistory_perBookDedupeCapAndClear() {
+        val prefs = TestSharedPreferences()
+        val readerPrefs = ReaderPreferences.get(prefs)
+
+        assertTrue(readerPrefs.findHistory("b1").isEmpty())
+        assertTrue(readerPrefs.findHistory("").isEmpty())
+        readerPrefs.pushFindHistory("b1", "  ")
+        assertTrue(readerPrefs.findHistory("b1").isEmpty())
+
+        readerPrefs.pushFindHistory("b1", "萧炎")
+        readerPrefs.pushFindHistory("b1", "魂殿")
+        readerPrefs.pushFindHistory("b1", "萧炎")
+        assertEquals(listOf("萧炎", "魂殿"), readerPrefs.findHistory("b1"))
+        // Other books are isolated.
+        assertTrue(readerPrefs.findHistory("b2").isEmpty())
+        readerPrefs.pushFindHistory("b2", "唐三")
+        assertEquals(listOf("唐三"), readerPrefs.findHistory("b2"))
+
+        for (i in 1..10) readerPrefs.pushFindHistory("b1", "词$i")
+        assertEquals(8, readerPrefs.findHistory("b1").size)
+
+        readerPrefs.clearFindHistory("b1")
+        assertTrue(readerPrefs.findHistory("b1").isEmpty())
+        assertEquals(listOf("唐三"), readerPrefs.findHistory("b2"))
+    }
+
+    @Test
+    fun browserHistory_pushDedupeCapAndClear() {
+        val prefs = TestSharedPreferences()
+        val readerPrefs = ReaderPreferences.get(prefs)
+
+        assertTrue(readerPrefs.browserHistory().isEmpty())
+        readerPrefs.pushBrowserHistory("  ")
+        assertTrue(readerPrefs.browserHistory().isEmpty())
+
+        readerPrefs.pushBrowserHistory("https://a.example/books")
+        readerPrefs.pushBrowserHistory("https://b.example/x.txt")
+        readerPrefs.pushBrowserHistory("https://a.example/books")
+        assertEquals(
+            listOf("https://a.example/books", "https://b.example/x.txt"),
+            readerPrefs.browserHistory(),
+        )
+
+        for (i in 1..10) readerPrefs.pushBrowserHistory("https://h$i.example/")
+        assertEquals(8, readerPrefs.browserHistory().size)
+        assertEquals("https://h10.example/", readerPrefs.browserHistory().first())
+
+        readerPrefs.clearBrowserHistory()
+        assertTrue(readerPrefs.browserHistory().isEmpty())
+    }
+
+    @Test
+    fun browserHistory_removeSingleEntry() {
+        val prefs = TestSharedPreferences()
+        val readerPrefs = ReaderPreferences.get(prefs)
+
+        readerPrefs.pushBrowserHistory("https://a.example/1")
+        readerPrefs.pushBrowserHistory("https://b.example/2")
+        readerPrefs.pushBrowserHistory("https://c.example/3")
+        readerPrefs.removeBrowserHistory("https://b.example/2")
+        assertEquals(
+            listOf("https://c.example/3", "https://a.example/1"),
+            readerPrefs.browserHistory(),
+        )
+        // absent + blank are no-ops
+        readerPrefs.removeBrowserHistory("https://missing.example/")
+        readerPrefs.removeBrowserHistory("  ")
+        assertEquals(2, readerPrefs.browserHistory().size)
+        // removing the last entry drops the key entirely
+        readerPrefs.removeBrowserHistory("https://c.example/3")
+        readerPrefs.removeBrowserHistory("https://a.example/1")
+        assertTrue(readerPrefs.browserHistory().isEmpty())
+    }
+
+    @Test
+    fun ttsSleepMin_defaultOffAndClamp() {
+        val prefs = TestSharedPreferences()
+        val readerPrefs = ReaderPreferences.get(prefs)
+
+        assertEquals(0, readerPrefs.ttsSleepMin())
+        readerPrefs.setTtsSleepMin(30)
+        assertEquals(30, readerPrefs.ttsSleepMin())
+        readerPrefs.setTtsSleepMin(-3)
+        assertEquals(0, readerPrefs.ttsSleepMin())
+        readerPrefs.setTtsSleepMin(999)
+        assertEquals(180, readerPrefs.ttsSleepMin())
+    }
+
+    @Test
     fun autoPageTurnSec_defaultOffAndClamp() {
         val prefs = TestSharedPreferences()
         val readerPrefs = ReaderPreferences.get(prefs)

@@ -28,4 +28,30 @@ object AutoPageTurn {
 
     fun isPresetSelected(seconds: Int, preset: Int): Boolean =
         clampSec(seconds) == clampSec(preset)
+
+    /**
+     * Next page for one auto-turn tick: null when already on the last page (the
+     * loop then idles instead of re-firing animateToPage on the same page).
+     */
+    fun nextPageOrNull(currentPage: Int, pageCount: Int): Int? {
+        if (pageCount <= 0) return null
+        val next = PageIndex.stepPage(currentPage, pageCount, 1)
+        return if (next == currentPage) null else next
+    }
+
+    /**
+     * Whether the tick loop should keep running: enabled, chrome closed, TTS idle,
+     * and not already on the last page. Pure so the UI pause rules stay testable.
+     */
+    fun shouldKeepTurning(
+        seconds: Int,
+        menuVisible: Boolean,
+        ttsSpeaking: Boolean,
+        currentPage: Int,
+        pageCount: Int,
+    ): Boolean {
+        if (!isEnabled(seconds)) return false
+        if (menuVisible || ttsSpeaking) return false
+        return nextPageOrNull(currentPage, pageCount) != null
+    }
 }

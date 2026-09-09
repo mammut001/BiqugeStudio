@@ -22,6 +22,24 @@ class AutoPageTurnTest {
     }
 
     @Test
+    fun nextPageOrNull_stopsAtLastPage() {
+        assertEquals(1, AutoPageTurn.nextPageOrNull(0, 5))
+        assertEquals(4, AutoPageTurn.nextPageOrNull(3, 5))
+        assertEquals(null, AutoPageTurn.nextPageOrNull(4, 5))
+        assertEquals(null, AutoPageTurn.nextPageOrNull(0, 0))
+        assertEquals(null, AutoPageTurn.nextPageOrNull(0, 1))
+    }
+
+    @Test
+    fun shouldKeepTurning_pauseRules() {
+        assertTrue(AutoPageTurn.shouldKeepTurning(20, false, false, 0, 5))
+        assertFalse(AutoPageTurn.shouldKeepTurning(0, false, false, 0, 5))
+        assertFalse(AutoPageTurn.shouldKeepTurning(20, true, false, 0, 5))
+        assertFalse(AutoPageTurn.shouldKeepTurning(20, false, true, 0, 5))
+        assertFalse(AutoPageTurn.shouldKeepTurning(20, false, false, 4, 5))
+    }
+
+    @Test
     fun labelsAndPresets() {
         assertEquals("关", AutoPageTurn.label(0))
         assertEquals("30s", AutoPageTurn.label(30))

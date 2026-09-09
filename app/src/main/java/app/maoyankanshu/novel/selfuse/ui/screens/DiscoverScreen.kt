@@ -30,6 +30,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -111,7 +112,9 @@ fun DiscoverScreen(
     // Habit insights use a longer local-only window than the short-range chart. ReadingStats.days()
     // includes zero-value dates, which gives streak and heatmap calculations a stable calendar axis.
     var insightEntries by remember { mutableStateOf<List<ReadingStats.DayEntry>>(emptyList()) }
-    var weeklyGoalMillis by remember { mutableStateOf(ReadingStats.DEFAULT_WEEKLY_GOAL_MILLIS) }
+    var weeklyGoalMillis by remember {
+        mutableLongStateOf(ReadingStats.DEFAULT_WEEKLY_GOAL_MILLIS)
+    }
     LaunchedEffect(historyVersion) {
         val loaded = withContext(Dispatchers.IO) {
             ReadingStats.days(context, ReadingInsights.INSIGHT_LOOKBACK_DAYS) to
@@ -327,7 +330,6 @@ fun DiscoverScreen(
                     body = stringResource(R.string.discover_empty_progress),
                     contentDescription = stringResource(R.string.discover_empty_progress_cd),
                     primaryLabel = stringResource(R.string.cta_open_shelf),
-                    primaryDescription = stringResource(R.string.cta_open_shelf),
                     onPrimary = onOpenShelf,
                 )
             }
@@ -336,8 +338,12 @@ fun DiscoverScreen(
                 BookCard(
                     book = book,
                     onClick = {
+                        context.startActivity(AppIntents.reader(context, book.id))
+                    },
+                    onLongClick = {
                         context.startActivity(AppIntents.bookDetail(context, book.id))
                     },
+                    longClickHint = stringResource(R.string.book_card_long_press_detail),
                     onContinueReading = {
                         context.startActivity(AppIntents.reader(context, book.id))
                     },
@@ -363,6 +369,9 @@ fun DiscoverScreen(
                     book = book,
                     subtitle = timeFormat.format(Date(entry.at)),
                     onClick = {
+                        context.startActivity(AppIntents.reader(context, book.id))
+                    },
+                    onLongClick = {
                         context.startActivity(AppIntents.bookDetail(context, book.id))
                     },
                     onContinueReading = {
@@ -376,8 +385,7 @@ fun DiscoverScreen(
                     onClick = { showClearDialog = true },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                        .semantics { contentDescription = clearHistory },
+                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
                 ) {
                     Text(clearHistory)
                 }
@@ -470,6 +478,14 @@ private fun ReadingDurationBars(
                     )
                 }
             }
+        }
+        if (dayMillis.all { it <= 0L }) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = stringResource(R.string.discover_chart_empty),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            )
         }
         if (dayEntries.size > 1) {
             Spacer(Modifier.height(4.dp))

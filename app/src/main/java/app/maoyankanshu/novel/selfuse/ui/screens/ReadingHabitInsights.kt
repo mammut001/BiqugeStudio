@@ -109,7 +109,8 @@ internal fun ReadingHabitInsights(
                 .fillMaxWidth()
                 .height(8.dp)
                 .clip(RoundedCornerShape(999.dp))
-                .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f)),
+                .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f))
+                .semantics { contentDescription = goalProgress },
         ) {
             Box(
                 modifier = Modifier

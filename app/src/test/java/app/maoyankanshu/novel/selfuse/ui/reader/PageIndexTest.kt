@@ -65,6 +65,7 @@ class PageIndexTest {
         assertTrue(!PageIndex.shouldAnimatePageTurn(0, 2))
         assertTrue(!PageIndex.shouldAnimatePageTurn(10, 400))
         assertTrue(!PageIndex.shouldAnimatePageTurn(400, 10))
+        assertTrue(!PageIndex.shouldAnimatePageTurn(2, 10))
     }
 
     @Test

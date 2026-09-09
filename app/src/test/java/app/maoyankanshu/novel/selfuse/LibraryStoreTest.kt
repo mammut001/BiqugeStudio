@@ -16,6 +16,9 @@ import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -75,6 +78,126 @@ class LibraryStoreTest {
     }
 
     @Test
+    fun addReturnsIdOfPersistedBook() {
+        val store = createStore()
+
+        val id = store.add("新书", "作者", "正文")
+
+        val added = store.byId(id)
+        assertNotNull(added)
+        assertEquals("新书", added.title)
+        assertEquals("正文", added.text)
+    }
+
+    @Test
+    fun addOrGetExisting_reusesExactCopyAndPreservesProgress() {
+        val store = createStore()
+        val id = store.add("三国演义", "罗贯中", "第一回\n正文")
+        store.savePosition(id, 640)
+
+        val result = store.addOrGetExisting("三国演义", "罗贯中", "第一回\n正文", null)
+
+        assertFalse(result.added)
+        assertEquals(id, result.id)
+        assertEquals(2, store.booksForListing().size)
+        assertEquals(640, store.recordById(id)!!.position)
+    }
+
+    @Test
+    fun addOrGetExisting_pinNewToTop_putsNewBookFirstAndKeepsDuplicateOrder() {
+        val store = createStore()
+        store.add("旧书一", "作者", "正文一")
+        store.add("旧书二", "作者", "正文二")
+
+        val pinned = store.addOrGetExisting("新书", "作者", "全新正文", null, true)
+
+        assertTrue(pinned.added)
+        val listing = store.booksForListing()
+        assertEquals(pinned.id, listing.firstOrNull { it.title == "新书" }?.id)
+        assertEquals("新书", listing[0].title)
+
+        // Exact duplicate keeps its id, progress, and does not jump to top.
+        store.savePosition(pinned.id, 500)
+        val before = store.booksForListing().map { it.id }
+        val dup = store.addOrGetExisting("新书", "作者", "全新正文", null, true)
+        assertFalse(dup.added)
+        assertEquals(pinned.id, dup.id)
+        assertEquals(500, store.recordById(pinned.id)!!.position)
+        assertEquals(before, store.booksForListing().map { it.id })
+    }
+
+    @Test
+    fun addOrGetExisting_keepsDifferentEditionOrMetadataAsSeparateBook() {
+        val store = createStore()
+        val first = store.addOrGetExisting("同名书", "作者", "版本一", null)
+        val differentBody = store.addOrGetExisting("同名书", "作者", "版本二", null)
+        val differentTitle = store.addOrGetExisting("新书名", "作者", "版本一", null)
+
+        assertTrue(first.added)
+        assertTrue(differentBody.added)
+        assertTrue(differentTitle.added)
+        assertEquals(4, store.booksForListing().size)
+    }
+
+    @Test
+    fun concurrentExactImportsAcrossStoreInstancesCreateOnlyOneBook() {
+        val prefs = TestSharedPreferences()
+        val root = tempFolder.newFolder()
+        val firstStore = LibraryStore(prefs, root, "App", "Welcome", "Body")
+        val secondStore = LibraryStore(prefs, root, "App", "Welcome", "Body")
+        val start = CountDownLatch(1)
+        val pool = Executors.newFixedThreadPool(2)
+        try {
+            val first = pool.submit<LibraryStore.AddResult> {
+                start.await()
+                firstStore.addOrGetExisting("并发书", "作者", "相同正文", null)
+            }
+            val second = pool.submit<LibraryStore.AddResult> {
+                start.await()
+                secondStore.addOrGetExisting("并发书", "作者", "相同正文", null)
+            }
+            start.countDown()
+
+            val results = listOf(
+                first.get(5, TimeUnit.SECONDS),
+                second.get(5, TimeUnit.SECONDS),
+            )
+            assertEquals(1, results.count { it.added })
+            assertEquals(1, results.map { it.id }.distinct().size)
+            assertEquals(2, firstStore.booksForListing().size)
+        } finally {
+            pool.shutdownNow()
+        }
+    }
+
+    @Test
+    fun addRejectsBodyBeyondPersistedLibraryLimitWithoutGhostMetadata() {
+        val store = createStore()
+        val before = store.booksForListing().size
+        val oversized = "四".repeat((LibraryStore.MAX_SINGLE_ENTRY_BYTES / 3L + 1L).toInt())
+
+        assertThrows(IllegalArgumentException::class.java) {
+            store.add("过大", "作者", oversized)
+        }
+        assertEquals(before, store.booksForListing().size)
+        assertTrue(store.booksForListing().none { it.title == "过大" })
+    }
+
+    @Test
+    fun addWriteFailureDoesNotPublishGhostMetadata() {
+        val prefs = TestSharedPreferences().apply { map["books_v2"] = "" }
+        val root = tempFolder.newFolder()
+        File(root, "books").writeText("not a directory")
+        val store = LibraryStore(prefs, root, "App", "Welcome", "Body")
+
+        assertThrows(IllegalStateException::class.java) {
+            store.add("无法保存", "作者", "正文")
+        }
+        assertTrue(store.booksForListing().isEmpty())
+        assertTrue(prefs.map["books_v2"].isNullOrEmpty())
+    }
+
+    @Test
     fun testExportAndImportValidZip() {
         val store1 = createStore()
         store1.add("三体", "刘慈欣", "地球往事第一部")
@@ -86,9 +209,15 @@ class LibraryStoreTest {
         val zipBytes = baos.toByteArray()
 
         val store2 = createStore()
-        val importedCount = store2.importFrom(ByteArrayInputStream(zipBytes))
-        assertEquals(2, importedCount)
-        assertEquals(3, store2.books().size) // Welcome book (seed) + 2 imported
+        val detailed = store2.importFromDetailed(ByteArrayInputStream(zipBytes))
+        assertEquals(1, detailed.added)
+        assertEquals(1, detailed.existing)
+        assertEquals(2, store2.books().size) // Welcome book (seed) + 1 imported
+        // Duplicate restore is idempotent: repeated import adds nothing new.
+        val repeat = store2.importFromDetailed(ByteArrayInputStream(zipBytes))
+        assertEquals(0, repeat.added)
+        assertEquals(2, repeat.existing)
+        assertEquals(2, store2.books().size)
     }
 
     @Test

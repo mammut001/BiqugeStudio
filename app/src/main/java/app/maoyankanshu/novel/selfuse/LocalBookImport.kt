@@ -130,13 +130,30 @@ object LocalBookImport {
         defaultName: String,
         authorEpub: String,
         authorTxt: String,
+    ): Imported = fromUri(
+        context = context,
+        uri = uri,
+        defaultName = defaultName,
+        authorEpub = authorEpub,
+        authorTxt = authorTxt,
+        cancellationSignal = null,
+    )
+
+    internal fun fromUri(
+        context: Context,
+        uri: Uri,
+        defaultName: String,
+        authorEpub: String,
+        authorTxt: String,
+        cancellationSignal: StreamCancellationSignal?,
     ): Imported {
         val raw = queryDisplayName(context, uri)
         val mime = queryMimeType(context, uri)
         val stream = context.contentResolver.openInputStream(uri)
             ?: throw IllegalStateException("null stream")
-        return stream.use {
-            fromStream(it, raw, defaultName, authorEpub, authorTxt, mimeType = mime)
+        return stream.use { opened ->
+            val readable = cancellationSignal?.input(opened) ?: opened
+            fromStream(readable, raw, defaultName, authorEpub, authorTxt, mimeType = mime)
         }
     }
 

@@ -14,6 +14,7 @@ import java.io.OutputStream;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,6 +32,8 @@ public final class LibraryStore {
 
     private static final String PREFS = "local_library";
     private static final String KEY = "books_v2";
+    /** All instances share the same prefs/files; serialize additions to avoid lost rows/duplicates. */
+    private static final Object ADD_LOCK = new Object();
     private final Context context;
     private final SharedPreferences prefs;
     private final File filesDir;
@@ -317,20 +320,134 @@ public final class LibraryStore {
         }
     }
 
-    public void add(String title, String author, String text) {
-        add(title, author, text, null);
+    public String add(String title, String author, String text) {
+        return add(title, author, text, null);
     }
 
     /** Adds only the new body + metadata row; existing books are never decoded/re-written. */
-    public void add(String title, String author, String text, byte[] coverBytes) {
-        String id = UUID.randomUUID().toString();
-        writeText(id, text);
-        writeCover(id, coverBytes);
+    public String add(String title, String author, String text, byte[] coverBytes) {
+        synchronized (ADD_LOCK) {
+            return addLocked(title, author, text, coverBytes);
+        }
+    }
 
+    /** Result of an idempotent import: existing exact copies retain their id and progress. */
+    public static final class AddResult {
+        public final String id;
+        public final boolean added;
+
+        AddResult(String id, boolean added) {
+            this.id = id;
+            this.added = added;
+        }
+    }
+
+    /**
+     * Add a book unless title, author, and complete body exactly match an existing entry.
+     * Only same-metadata candidates are decoded, so unrelated multi-megabyte books stay untouched.
+     */
+    public AddResult addOrGetExisting(String title, String author, String text, byte[] coverBytes) {
+        return addOrGetExisting(title, author, text, coverBytes, false);
+    }
+
+    /**
+     * Same as [addOrGetExisting] but newly added books are pinned to the top so the
+     * shelf shows a just-imported book without scrolling. Exact duplicates keep
+     * their id, position, and shelf order.
+     */
+    public AddResult addOrGetExisting(String title, String author, String text, byte[] coverBytes, boolean pinNewToTop) {
+        synchronized (ADD_LOCK) {
+            String safeTitle = title == null ? "" : title;
+            String safeAuthor = author == null ? "" : author;
+            String safeText = text == null ? "" : text;
+            String existingId = findExactDuplicateId(safeTitle, safeAuthor, safeText);
+            if (existingId != null) {
+                if (coverPathIfPresent(existingId) == null) writeCover(existingId, coverBytes);
+                return new AddResult(existingId, false);
+            }
+            String id = addLocked(safeTitle, safeAuthor, safeText, coverBytes);
+            if (pinNewToTop) moveToTopLocked(id);
+            return new AddResult(id, true);
+        }
+    }
+
+    private String addLocked(String title, String author, String text, byte[] coverBytes) {
+        String safeTitle = title == null ? "" : title;
+        String safeAuthor = author == null ? "" : author;
+        String safeText = text == null ? "" : text;
+        byte[] textBytes = safeText.getBytes(StandardCharsets.UTF_8);
+        if (textBytes.length > MAX_SINGLE_ENTRY_BYTES) {
+            throw new IllegalArgumentException("book body exceeds library limit");
+        }
+        String id = UUID.randomUUID().toString();
+        try {
+            // Never publish metadata for a body that did not reach private storage.
+            writeTextStrict(id, textBytes);
+            writeCover(id, coverBytes);
+            String raw = prefs.getString(KEY, "");
+            StringBuilder output = metadataBuilder(raw, 160);
+            appendMetadataRow(output, id, safeTitle, safeAuthor, 0);
+            prefs.edit().putString(KEY, output.toString()).apply();
+            return id;
+        } catch (IOException failure) {
+            deleteBookFiles(id);
+            throw new IllegalStateException("unable to persist book body", failure);
+        } catch (RuntimeException failure) {
+            deleteBookFiles(id);
+            throw failure;
+        }
+    }
+
+    private String findExactDuplicateId(String title, String author, String text) {
         String raw = prefs.getString(KEY, "");
-        StringBuilder output = metadataBuilder(raw, 160);
-        appendMetadataRow(output, id, title, author, 0);
-        prefs.edit().putString(KEY, output.toString()).apply();
+        if (raw == null || raw.isEmpty()) return null;
+        for (String row : raw.split("\\n", -1)) {
+            if (row.trim().isEmpty()) continue;
+            String[] values = row.split("\\|", 4);
+            if (values.length != 4) continue;
+            try {
+                String id = values[0];
+                if (!title.equals(decode(values[1])) || !author.equals(decode(values[2]))) continue;
+                if (textCharCount(id) != text.length()) continue;
+                String storedText = readText(id);
+                if (text.equals(storedText)) return id;
+            } catch (RuntimeException ignored) {
+                // A malformed row is unrelated to this import and must not block a valid add.
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Byte-level duplicate check for restore/import paths that already hold UTF-8 bodies.
+     * Only same-metadata candidates touch storage, and bytes are compared without a
+     * String decode so list/hot paths stay allocation-light.
+     */
+    private String findExactDuplicateIdBytes(String title, String author, byte[] sourceText) {
+        if (sourceText == null) return null;
+        String raw = prefs.getString(KEY, "");
+        if (raw == null || raw.isEmpty()) return null;
+        for (String row : raw.split("\\n", -1)) {
+            if (row.trim().isEmpty()) continue;
+            String[] values = row.split("\\|", 4);
+            if (values.length != 4) continue;
+            try {
+                String id = values[0];
+                if (!title.equals(decode(values[1])) || !author.equals(decode(values[2]))) continue;
+                byte[] stored = readTextBytes(id);
+                if (stored != null && java.util.Arrays.equals(stored, sourceText)) return id;
+            } catch (RuntimeException ignored) {
+                // A malformed row is unrelated to this import and must not block a valid add.
+            }
+        }
+        return null;
+    }
+
+    private void deleteBookFiles(String id) {
+        File body = bookFile(id);
+        if (body.exists()) body.delete();
+        deleteCharCount(id);
+        deleteCover(id);
     }
 
     /** Changes display metadata without changing saved text, cover, position, or other books. */
@@ -367,6 +484,12 @@ public final class LibraryStore {
 
     /** Keeps the shelf order meaningful: a pinned book is shown first. Prefs-only. */
     public void moveToTop(String id) {
+        synchronized (ADD_LOCK) {
+            moveToTopLocked(id);
+        }
+    }
+
+    private void moveToTopLocked(String id) {
         if (id == null || id.isEmpty()) return;
         String raw = prefs.getString(KEY, "");
         if (raw == null || raw.isEmpty()) return;
@@ -482,8 +605,28 @@ public final class LibraryStore {
         output.flush();
     }
 
-    /** Adds books from a backup ZIP; existing local books remain untouched. */
+    /** Detailed restore result so UI can distinguish new books from exact existing copies. */
+    public static final class ImportResult {
+        public final int added;
+        public final int existing;
+
+        ImportResult(int added, int existing) {
+            this.added = added;
+            this.existing = existing;
+        }
+    }
+
+    /** Source-compatible restore API; returns only the number of newly added books. */
     public int importFrom(InputStream input) throws IOException {
+        return importFromDetailed(input).added;
+    }
+
+    /**
+     * Adds books from a backup ZIP while skipping exact title/author/body copies.
+     * Parsing and ZIP-bomb guards happen before the shared add lock; final duplicate checks,
+     * body writes, and metadata publication are serialized with normal imports.
+     */
+    public ImportResult importFromDetailed(InputStream input) throws IOException {
         Map<String, byte[]> texts = new HashMap<>();
         Map<String, byte[]> covers = new HashMap<>();
         String manifest = null;
@@ -522,31 +665,81 @@ public final class LibraryStore {
         }
         if (manifest == null) throw new IOException("备份文件损坏或缺失 library.txt 清单");
 
+        synchronized (ADD_LOCK) {
+            return restoreParsedBackup(manifest, texts, covers);
+        }
+    }
+
+    private ImportResult restoreParsedBackup(
+            String manifest,
+            Map<String, byte[]> texts,
+            Map<String, byte[]> covers
+    ) throws IOException {
         String raw = prefs.getString(KEY, "");
         StringBuilder output = metadataBuilder(raw, manifest.length());
-        int imported = 0;
-        for (String row : manifest.split("\\n", -1)) {
-            if (row.trim().isEmpty()) continue;
-            String[] values = row.split("\\|", 4);
-            byte[] sourceText = values.length == 4 ? texts.get(values[0]) : null;
-            if (values.length != 4 || sourceText == null) continue;
-            try {
-                String title = decode(values[1]);
-                String author = decode(values[2]);
-                int position = Math.max(0, Math.min(Integer.parseInt(values[3]), 1000));
-                String newId = UUID.randomUUID().toString();
-                writeTextStrict(newId, sourceText);
-                writeCover(newId, covers.get(values[0]));
-                appendMetadataRow(output, newId, title, author, position);
-                imported++;
-            } catch (IOException writeFailure) {
-                throw writeFailure;
-            } catch (Exception ignored) { }
+        int added = 0;
+        int existing = 0;
+        List<String> createdIds = new ArrayList<>();
+        Map<String, List<byte[]>> stagedBodies = new HashMap<>();
+        try {
+            for (String row : manifest.split("\\n", -1)) {
+                if (row.trim().isEmpty()) continue;
+                String[] values = row.split("\\|", 4);
+                byte[] sourceText = values.length == 4 ? texts.get(values[0]) : null;
+                if (values.length != 4 || sourceText == null) continue;
+                try {
+                    String title = decode(values[1]);
+                    String author = decode(values[2]);
+                    int position = Math.max(0, Math.min(Integer.parseInt(values[3]), 1000));
+                    String metadataKey = values[1] + "|" + values[2];
+                    List<byte[]> staged = stagedBodies.get(metadataKey);
+                    boolean stagedDuplicate = false;
+                    if (staged != null) {
+                        for (byte[] body : staged) {
+                            if (Arrays.equals(body, sourceText)) {
+                                stagedDuplicate = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (stagedDuplicate) {
+                        existing++;
+                        continue;
+                    }
+                    String existingId = findExactDuplicateIdBytes(title, author, sourceText);
+                    if (existingId != null) {
+                        if (coverPathIfPresent(existingId) == null) {
+                            writeCover(existingId, covers.get(values[0]));
+                        }
+                        existing++;
+                        continue;
+                    }
+                    String newId = UUID.randomUUID().toString();
+                    writeTextStrict(newId, sourceText);
+                    createdIds.add(newId);
+                    writeCover(newId, covers.get(values[0]));
+                    appendMetadataRow(output, newId, title, author, position);
+                    List<byte[]> stagedList = stagedBodies.get(metadataKey);
+                    if (stagedList == null) {
+                        stagedList = new ArrayList<>();
+                        stagedBodies.put(metadataKey, stagedList);
+                    }
+                    stagedList.add(sourceText);
+                    added++;
+                } catch (IOException writeFailure) {
+                    throw writeFailure;
+                } catch (Exception ignored) { }
+            }
+            if (added > 0) {
+                prefs.edit().putString(KEY, output.toString()).apply();
+            }
+            return new ImportResult(added, existing);
+        } catch (IOException | RuntimeException failure) {
+            // Metadata has not been published yet. Remove every staged body/cover/cache so a
+            // failed restore cannot leave private-storage orphans invisible to the shelf.
+            for (String id : createdIds) deleteBookFiles(id);
+            throw failure;
         }
-        if (imported > 0) {
-            prefs.edit().putString(KEY, output.toString()).apply();
-        }
-        return imported;
     }
 
     /** Legacy full-save helper retained for migrations/tests that intentionally own full bodies. */
@@ -622,6 +815,8 @@ public final class LibraryStore {
             output.write(coverBytes);
             return coverFile(id).getAbsolutePath();
         } catch (IOException ignored) {
+            File partial = coverFile(id);
+            if (partial.exists()) partial.delete();
             return null;
         }
     }

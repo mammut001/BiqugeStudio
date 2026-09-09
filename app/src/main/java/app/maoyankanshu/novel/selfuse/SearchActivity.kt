@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -34,6 +36,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -42,9 +45,11 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -61,6 +66,8 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -174,12 +181,28 @@ private fun SearchScreen(
     // Cancelled when SearchScreen leaves composition (back / finish / process death path).
     val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf("") }
+    val preferences = remember { ReaderPreferences.get(context) }
+    var searchHistory: List<String> by remember {
+        mutableStateOf(preferences.searchHistory().toList())
+    }
+    fun recordHistory(raw: String) {
+        preferences.pushSearchHistory(raw)
+        searchHistory = preferences.searchHistory().toList()
+    }
     var libraryVersion by remember { mutableIntStateOf(0) }
     var searchToken by remember { mutableIntStateOf(0) }
     var listState by remember { mutableStateOf<SearchListState>(SearchListState.LocalBooks(emptyList())) }
     var localImporting by remember { mutableStateOf(false) }
+    // Batch progress for multi-file import ("3 / 20"); 0/0 means single/unknown.
+    var localImportDone by remember { mutableIntStateOf(0) }
+    var localImportTotal by remember { mutableIntStateOf(0) }
+    var failedLocalUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var wikiImportingTitle by remember { mutableStateOf<String?>(null) }
-    var importErrorMessage by remember { mutableStateOf<String?>(null) }
+    // Errors are tracked per task so a wiki failure never lingers over local search UI (and vice versa).
+    var localImportError by remember { mutableStateOf<String?>(null) }
+    var wikiSearchError by remember { mutableStateOf<String?>(null) }
+    var wikiImportError by remember { mutableStateOf<String?>(null) }
+    var failedWikiTitle by remember { mutableStateOf<String?>(null) }
     // One-shot flag: LaunchedEffect(pendingPicker) re-ran when flipping true→false and
     // could open the SAF document picker twice on EXTRA_IMPORT startup.
     var autoOpenPickerDone by remember { mutableStateOf(false) }
@@ -187,6 +210,12 @@ private fun SearchScreen(
     var wikiSearchJob by remember { mutableStateOf<Job?>(null) }
     var wikiImportJob by remember { mutableStateOf<Job?>(null) }
     var localSearchJob by remember { mutableStateOf<Job?>(null) }
+    var localImportCancellationSignal by remember { mutableStateOf<StreamCancellationSignal?>(null) }
+    var wikiSearchCancellationSignal by remember { mutableStateOf<RemoteImportCancellationSignal?>(null) }
+    var wikiImportCancellationSignal by remember { mutableStateOf<RemoteImportCancellationSignal?>(null) }
+    val localImportSessions = remember { ImportSessionTracker() }
+    val wikiSearchSessions = remember { ImportSessionTracker() }
+    val wikiImportSessions = remember { ImportSessionTracker() }
 
     val isBusy = listState is SearchListState.WikiLoading ||
         listState is SearchListState.LocalLoading ||
@@ -203,7 +232,6 @@ private fun SearchScreen(
     val emptyLocal = stringResource(R.string.search_empty)
     val wikiHeader = stringResource(R.string.search_wikisource_header)
     val wikiNone = stringResource(R.string.search_wikisource_none)
-    val wikiFail = stringResource(R.string.search_wikisource_fail)
     val wikiLoading = stringResource(R.string.search_wikisource_loading)
     val localLoadingLabel = stringResource(R.string.search_local_loading)
     val localImportingLabel = stringResource(R.string.search_importing_local)
@@ -228,9 +256,10 @@ private fun SearchScreen(
         }
     }
 
-    fun refreshLocal() {
+    fun refreshLocal(recordTerm: Boolean = true) {
         if (localImporting || wikiImportingTitle != null || listState is SearchListState.WikiLoading) return
-        importErrorMessage = null
+        localImportError = null
+        if (recordTerm && query.isNotBlank()) recordHistory(query)
         localSearchJob?.cancel()
         val currentToken = ++searchToken
         val term = query.trim().lowercase()
@@ -269,10 +298,20 @@ private fun SearchScreen(
     fun cancelActiveWork(leave: Boolean) {
         val abortedListLoad =
             listState is SearchListState.WikiLoading || listState is SearchListState.LocalLoading
+        val abortedLocalImport = localImportJob != null
         localImportJob?.cancel()
         wikiSearchJob?.cancel()
         wikiImportJob?.cancel()
         localSearchJob?.cancel()
+        localImportCancellationSignal?.cancel()
+        wikiSearchCancellationSignal?.cancel()
+        wikiImportCancellationSignal?.cancel()
+        localImportCancellationSignal = null
+        wikiSearchCancellationSignal = null
+        wikiImportCancellationSignal = null
+        localImportSessions.invalidate()
+        wikiSearchSessions.invalidate()
+        wikiImportSessions.invalidate()
         clearBusyFlagsKeepingList()
         if (leave) {
             onClose()
@@ -281,78 +320,158 @@ private fun SearchScreen(
         // Soft cancel of an in-flight list load: restore local shelf.
         // Soft cancel of local/wiki *import* keeps the current list (e.g. WikiResults).
         if (abortedListLoad && activity.canAcceptUi()) {
-            importErrorMessage = null
-            refreshLocal()
+            localImportError = null
+            refreshLocal(recordTerm = false)
+        } else if (abortedLocalImport && activity.canAcceptUi()) {
+            // A cancelled batch can already have committed earlier files. Trigger a fresh
+            // listing without relying on the cancelled coroutine's late catch/finally.
+            libraryVersion++
         }
     }
 
-    LaunchedEffect(libraryVersion) { refreshLocal() }
+    DisposableEffect(Unit) {
+        onDispose {
+            wikiSearchCancellationSignal?.cancel()
+            wikiImportCancellationSignal?.cancel()
+            localImportCancellationSignal?.cancel()
+            localImportSessions.invalidate()
+            wikiSearchSessions.invalidate()
+            wikiImportSessions.invalidate()
+            localImportJob?.cancel()
+            wikiSearchJob?.cancel()
+            wikiImportJob?.cancel()
+            localSearchJob?.cancel()
+        }
+    }
 
-    fun importUris(uris: List<Uri>) {
+    LaunchedEffect(libraryVersion) { refreshLocal(recordTerm = false) }
+
+    fun importUris(uris: List<Uri>, isRetry: Boolean = false) {
         if (uris.isEmpty()) return
         if (localImporting || wikiImportingTitle != null || listState is SearchListState.WikiLoading) return
         localImporting = true
-        importErrorMessage = null
+        localImportError = null
+        localImportDone = 0
+        localImportTotal = uris.size
+        if (!isRetry) failedLocalUris = emptyList()
+        val sessionToken = localImportSessions.start()
+        val signal = StreamCancellationSignal()
+        localImportCancellationSignal = signal
         localImportJob = scope.launch {
-            var ok = 0
+            var added = 0
+            var existing = 0
             var fail = 0
             var lastTitle: String? = null
+            var lastBookId: String? = null
             var lastErrorOversized = false
+            val failed = ArrayList<Uri>()
             try {
                 for (uri in uris) {
                     ensureActive()
                     try {
-                        val imported = withContext(Dispatchers.IO) {
+                        val (imported, addResult) = withContext(Dispatchers.IO) {
                             val res = LocalBookImport.fromUri(
                                 context = context,
                                 uri = uri,
                                 defaultName = localDefault,
                                 authorEpub = authorEpub,
                                 authorTxt = authorTxt,
+                                cancellationSignal = signal,
                             )
-                            LibraryStore.get(context).add(
+                            // The decoder is blocking but stream-cancellable. Do not enter the
+                            // non-suspending library write after cancellation won the race.
+                            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                            val result = LibraryStore.get(context).addOrGetExisting(
                                 res.title,
                                 res.author,
                                 res.text,
                                 res.coverBytes,
+                                true,
                             )
-                            res
+                            res to result
                         }
-                        ok++
+                        if (addResult.added) added++ else existing++
                         lastTitle = imported.title
+                        lastBookId = addResult.id
+                        localImportDone = added + existing + fail
                     } catch (cancel: CancellationException) {
                         throw cancel
                     } catch (e: Exception) {
+                        // A cancelled SAF wrapper reports InterruptedIOException from the
+                        // blocking read; restore coroutine cancellation before counting/logging
+                        // it as a corrupt file.
+                        kotlinx.coroutines.currentCoroutineContext().ensureActive()
                         if (!SearchWorkOutcomes.shouldSurfaceAsFailure(e)) throw e
                         Log.e("SearchActivity", "Failed to import local book", e)
                         fail++
-                        lastErrorOversized = SearchWorkOutcomes.isOversizedImportError(e)
+                        failed.add(uri)
+                        localImportDone = added + existing + fail
+                        lastErrorOversized = lastErrorOversized || SearchWorkOutcomes.isOversizedImportError(e)
                     }
                 }
-                if (!activity.canAcceptUi()) return@launch
-                if (ok > 0) libraryVersion++
-                when (SearchWorkOutcomes.localBatchNotice(ok, fail, cancelled = false)) {
-                    SearchWorkOutcomes.LocalBatchNotice.SINGLE_OK -> {
-                        // Prefer explicit share/open-with wording when URI came from the system.
-                        val msg = if (initialUris.isNotEmpty()) {
-                            context.getString(R.string.search_share_import_ok, ok)
+                if (!activity.canAcceptUi() || !localImportSessions.owns(sessionToken)) return@launch
+                if (added > 0) libraryVersion++
+                failedLocalUris = failed.toList()
+                when (val notice = SearchWorkOutcomes.localBatchNotice(added, existing, fail, cancelled = false)) {
+                    SearchWorkOutcomes.LocalBatchNotice.SINGLE_OK,
+                    SearchWorkOutcomes.LocalBatchNotice.SINGLE_EXISTING,
+                    -> {
+                        val bookId = lastBookId
+                        if (SearchWorkOutcomes.opensDetailConfirmation(notice) && !bookId.isNullOrEmpty()) {
+                            // Same confirmation as browser / 直链 / wiki: new vs already-on-shelf.
+                            context.startActivity(
+                                AppIntents.bookDetailJustImported(
+                                    context,
+                                    bookId,
+                                    SearchWorkOutcomes.confirmationJustAdded(notice),
+                                ),
+                            )
+                        } else if (notice == SearchWorkOutcomes.LocalBatchNotice.SINGLE_OK) {
+                            val msg = if (initialUris.isNotEmpty()) {
+                                context.getString(R.string.search_share_import_ok, added)
+                            } else {
+                                context.getString(R.string.search_local_ok, lastTitle)
+                            }
+                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                         } else {
-                            context.getString(R.string.search_local_ok, lastTitle)
+                            Toast.makeText(
+                                context,
+                                context.getString(R.string.search_local_existing, lastTitle),
+                                Toast.LENGTH_SHORT,
+                            ).show()
                         }
-                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                     }
                     SearchWorkOutcomes.LocalBatchNotice.MULTI_OK -> {
                         val msg = if (initialUris.isNotEmpty()) {
-                            context.getString(R.string.search_share_import_ok, ok)
+                            context.getString(R.string.search_share_import_ok, added)
                         } else {
-                            context.getString(R.string.search_local_ok_multi, ok)
+                            context.getString(R.string.search_local_ok_multi, added)
                         }
                         Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                    }
+                    SearchWorkOutcomes.LocalBatchNotice.MULTI_WITH_EXISTING -> {
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.search_local_ok_with_existing, added, existing),
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                    SearchWorkOutcomes.LocalBatchNotice.ALL_EXISTING -> {
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.search_local_existing_multi, existing),
+                            Toast.LENGTH_SHORT,
+                        ).show()
                     }
                     SearchWorkOutcomes.LocalBatchNotice.PARTIAL -> {
                         Toast.makeText(
                             context,
-                            context.getString(R.string.search_local_ok_multi_partial, ok, fail),
+                            context.getString(
+                                R.string.search_local_result_partial,
+                                added,
+                                existing,
+                                fail,
+                            ),
                             Toast.LENGTH_LONG,
                         ).show()
                     }
@@ -362,26 +481,35 @@ private fun SearchScreen(
                         } else {
                             R.string.search_local_fail
                         }
-                        importErrorMessage = context.getString(msgRes)
+                        localImportError = context.getString(msgRes)
                     }
                     SearchWorkOutcomes.LocalBatchNotice.NONE -> Unit
                 }
             } catch (cancel: CancellationException) {
                 // User cancel / back / leave: no fail Toast; keep books already added.
-                if (activity.canAcceptUi()) {
-                    if (ok > 0) libraryVersion++
+                // Aborted run offers no retry (partial uris were never attempted).
+                if (activity.canAcceptUi() && localImportSessions.owns(sessionToken)) {
+                    if (added > 0) libraryVersion++
+                    failedLocalUris = emptyList()
                     localImporting = false
+                    localImportDone = 0
+                    localImportTotal = 0
                     localImportJob = null
+                    localImportCancellationSignal = null
                 }
                 throw cancel
             } catch (e: Exception) {
-                if (!activity.canAcceptUi()) return@launch
+                if (!activity.canAcceptUi() || !localImportSessions.owns(sessionToken)) return@launch
                 Log.e("SearchActivity", "Failed local import batch", e)
-                importErrorMessage = context.getString(R.string.search_local_fail)
+                failedLocalUris = uris.toList()
+                localImportError = context.getString(R.string.search_local_fail)
             } finally {
-                if (activity.canAcceptUi()) {
+                if (activity.canAcceptUi() && localImportSessions.owns(sessionToken)) {
                     localImporting = false
+                    localImportDone = 0
+                    localImportTotal = 0
                     localImportJob = null
+                    localImportCancellationSignal = null
                 }
             }
         }
@@ -406,7 +534,7 @@ private fun SearchScreen(
 
     fun pickLocalFile() {
         if (isBusy) return
-        openDocument.launch(arrayOf("text/plain", "application/epub+zip"))
+        openDocument.launch(LocalBookImport.OPEN_DOCUMENT_MIME_TYPES)
     }
 
     // Open SAF at most once when started with EXTRA_IMPORT (AppIntents.importLocal).
@@ -420,41 +548,51 @@ private fun SearchScreen(
 
     fun searchWiki() {
         if (isBusy) return
-        importErrorMessage = null
+        wikiSearchError = null
         val term = query.trim()
         if (term.isEmpty()) {
-            importErrorMessage = context.getString(R.string.search_query_required)
+            wikiSearchError = context.getString(R.string.search_query_required)
             return
         }
+        recordHistory(term)
         listState = SearchListState.WikiLoading
+        val sessionToken = wikiSearchSessions.start()
+        val signal = RemoteImportCancellationSignal()
+        wikiSearchCancellationSignal = signal
         wikiSearchJob = scope.launch {
             try {
                 val hits = withContext(Dispatchers.IO) {
-                    WikisourceClient.search(term, userAgent)
+                    WikisourceClient.search(term, userAgent, signal)
                 }
                 ensureActive()
-                if (!activity.canAcceptUi()) return@launch
+                if (!activity.canAcceptUi() || !wikiSearchSessions.owns(sessionToken)) return@launch
                 listState = if (hits.isEmpty()) {
                     SearchListState.Message("$wikiHeader\n$wikiNone")
                 } else {
                     SearchListState.WikiResults(hits)
                 }
                 wikiSearchJob = null
+                wikiSearchCancellationSignal = null
             } catch (cancel: CancellationException) {
-                // Cancel / back / leave: never wikiFail Toast or error liveRegion.
-                if (activity.canAcceptUi()) {
+                // Cancel / back / leave: never failure Toast or error liveRegion.
+                if (activity.canAcceptUi() && wikiSearchSessions.owns(sessionToken)) {
                     if (listState is SearchListState.WikiLoading) {
                         listState = SearchListState.LocalBooks(emptyList())
                     }
                     wikiSearchJob = null
+                    wikiSearchCancellationSignal = null
                 }
                 throw cancel
             } catch (e: Exception) {
-                if (!activity.canAcceptUi()) return@launch
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (!activity.canAcceptUi() || !wikiSearchSessions.owns(sessionToken)) return@launch
                 Log.e("SearchActivity", "Failed to search Wikisource", e)
-                importErrorMessage = wikiFail
-                listState = SearchListState.Message(wikiFail)
+                // 与导入一致：429/5xx/网络中断各有说法，其余回退通用搜索失败。
+                val searchFailure = context.downloadImportFailureMessage(e, R.string.search_wikisource_fail)
+                wikiSearchError = searchFailure
+                listState = SearchListState.Message(searchFailure)
                 wikiSearchJob = null
+                wikiSearchCancellationSignal = null
             }
         }
     }
@@ -462,7 +600,11 @@ private fun SearchScreen(
     fun importWikiPage(pageTitle: String) {
         if (isBusy) return
         wikiImportingTitle = pageTitle
-        importErrorMessage = null
+        wikiImportError = null
+        failedWikiTitle = null
+        val sessionToken = wikiImportSessions.start()
+        val signal = RemoteImportCancellationSignal()
+        wikiImportCancellationSignal = signal
         if (activity.canAcceptUi()) {
             Toast.makeText(
                 context,
@@ -472,29 +614,39 @@ private fun SearchScreen(
         }
         wikiImportJob = scope.launch {
             try {
-                withContext(Dispatchers.IO) {
-                    val page = WikisourceClient.importPage(pageTitle, userAgent, wikiAuthor)
-                    LibraryStore.get(context).add(page.title, page.author, page.text)
+                val addResult = withContext(Dispatchers.IO) {
+                    val page = WikisourceClient.importPage(pageTitle, userAgent, wikiAuthor, signal)
+                    // Cancellation can disconnect the socket on an IO thread. Check again before
+                    // entering the non-suspending library write in the same withContext block.
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    LibraryStore.get(context).addOrGetExisting(page.title, page.author, page.text, null, true)
                 }
                 ensureActive()
-                if (!activity.canAcceptUi()) return@launch
-                libraryVersion++
-                Toast.makeText(context, context.getString(R.string.search_import_ok), Toast.LENGTH_SHORT).show()
+                if (!activity.canAcceptUi() || !wikiImportSessions.owns(sessionToken)) return@launch
+                if (addResult.added) libraryVersion++
+                // 与浏览器 tab / 直链 / 网页一致：成功后落到详情页横幅确认，
+                // 不再靠 Toast 一闪而过，不用回书架翻找。
+                context.startActivity(AppIntents.bookDetailJustImported(context, addResult.id, addResult.added))
             } catch (cancel: CancellationException) {
                 // Cancel / back / leave: never search_import_fail.
-                if (activity.canAcceptUi()) {
+                if (activity.canAcceptUi() && wikiImportSessions.owns(sessionToken)) {
                     wikiImportingTitle = null
                     wikiImportJob = null
+                    wikiImportCancellationSignal = null
                 }
                 throw cancel
             } catch (e: Exception) {
-                if (!activity.canAcceptUi()) return@launch
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (!activity.canAcceptUi() || !wikiImportSessions.owns(sessionToken)) return@launch
                 Log.e("SearchActivity", "Failed to import Wikisource page", e)
-                importErrorMessage = context.getString(R.string.search_import_fail)
+                // 与直链/网页/浏览器一致：429/5xx 吃分类文案，其余回退通用提示。
+                wikiImportError = context.downloadImportFailureMessage(e, R.string.search_import_fail)
+                failedWikiTitle = pageTitle
             } finally {
-                if (activity.canAcceptUi()) {
+                if (activity.canAcceptUi() && wikiImportSessions.owns(sessionToken)) {
                     wikiImportingTitle = null
                     wikiImportJob = null
+                    wikiImportCancellationSignal = null
                 }
             }
         }
@@ -552,7 +704,9 @@ private fun SearchScreen(
                     value = query,
                     onValueChange = {
                         query = it
-                        importErrorMessage = null
+                        localImportError = null
+                        wikiSearchError = null
+                        wikiImportError = null
                     },
                     enabled = !isBusy,
                     singleLine = true,
@@ -567,8 +721,10 @@ private fun SearchScreen(
                             IconButton(
                                 onClick = {
                                     query = ""
-                                    importErrorMessage = null
-                                    refreshLocal()
+                                    localImportError = null
+                                    wikiSearchError = null
+                                    wikiImportError = null
+                                    refreshLocal(recordTerm = false)
                                 },
                                 enabled = !isBusy,
                                 modifier = Modifier
@@ -593,31 +749,186 @@ private fun SearchScreen(
                     Text(stringResource(R.string.search_action))
                 }
             }
-            if (importErrorMessage != null) {
+            if (searchHistory.isNotEmpty() && !isBusy) {
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.search_history_title),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = stringResource(R.string.search_history_clear),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .padding(horizontal = 8.dp, vertical = 8.dp)
+                            .semantics {
+                                contentDescription = context.getString(R.string.search_history_clear_cd)
+                            }
+                            .clickable(
+                                role = Role.Button,
+                                onClick = {
+                                    preferences.clearSearchHistory()
+                                    searchHistory = emptyList()
+                                },
+                            ),
+                    )
+                }
+                @OptIn(ExperimentalLayoutApi::class)
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    searchHistory.forEach { term ->
+                        SuggestionChip(
+                            onClick = {
+                                query = term
+                                localImportError = null
+                                wikiSearchError = null
+                                wikiImportError = null
+                                refreshLocal()
+                                keyboardController?.hide()
+                            },
+                            enabled = !isBusy,
+                            label = { Text(term) },
+                            modifier = Modifier.semantics {
+                                contentDescription = context.getString(R.string.search_history_cd, term)
+                            },
+                        )
+                    }
+                }
+            }
+            // Wiki import progress: which title is downloading (with cancel).
+            val importingTitle = wikiImportingTitle
+            if (importingTitle != null) {
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .semantics(mergeDescendants = true) {
+                            liveRegion = LiveRegionMode.Polite
+                        },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                    )
+                    Text(
+                        text = context.getString(
+                            R.string.search_importing_page,
+                            importingTitle,
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(
+                        onClick = { cancelActiveWork(leave = false) },
+                        modifier = Modifier.semantics {
+                            contentDescription = cancelWikiImportCd
+                        },
+                    ) {
+                        Text(cancelWikiImportLabel)
+                    }
+                }
+            }
+            // Wiki import errors show with retry next to the search row.
+            if (wikiImportError != null) {
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = wikiImportError!!,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 4.dp)
+                            .semantics {
+                                liveRegion = LiveRegionMode.Polite
+                            },
+                    )
+                    val retryTitle = failedWikiTitle
+                    if (retryTitle != null && !isBusy) {
+                        TextButton(
+                            onClick = { importWikiPage(retryTitle) },
+                            modifier = Modifier.semantics {
+                                contentDescription = context.getString(
+                                    R.string.search_import_retry_cd,
+                                    retryTitle,
+                                )
+                            },
+                        ) {
+                            Text(
+                                stringResource(
+                                    R.string.search_import_retry,
+                                    retryTitle.take(12) + if (retryTitle.length > 12) "…" else "",
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+            // Wiki search errors show under the history chips, above the local section.
+            if (wikiSearchError != null) {
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = importErrorMessage!!,
+                    text = wikiSearchError!!,
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 4.dp)
                         .semantics {
-                            contentDescription = importErrorMessage!!
                             liveRegion = LiveRegionMode.Polite
                         },
                 )
             }
+            // Local import errors sit directly above the local import button.
+            if (localImportError != null && !localImporting) {
+                Text(
+                    text = localImportError!!,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp)
+                        .semantics {
+                            liveRegion = LiveRegionMode.Polite
+                        },
+                )
+                Spacer(Modifier.height(4.dp))
+            }
             Spacer(Modifier.height(10.dp))
             if (localImporting) {
+                val importingText = if (localImportTotal > 1) {
+                    context.getString(
+                        R.string.search_importing_local_progress,
+                        (localImportDone + 1).coerceAtMost(localImportTotal),
+                        localImportTotal,
+                    )
+                } else {
+                    localImportingLabel
+                }
                 Text(
-                    text = localImportingLabel,
+                    text = importingText,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier
                         .fillMaxWidth()
                         .semantics {
-                            contentDescription = localImportingLabel
                             liveRegion = LiveRegionMode.Polite
                         },
                 )
@@ -650,6 +961,21 @@ private fun SearchScreen(
                         .semantics { contentDescription = importLocalCd },
                 ) {
                     Text(stringResource(R.string.search_import_local))
+                }
+                val retryUris = failedLocalUris
+                if (retryUris.isNotEmpty() && !isBusy) {
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = { importUris(retryUris, isRetry = true) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .semantics {
+                                contentDescription = context.getString(R.string.search_local_retry_cd)
+                            },
+                    ) {
+                        Text(stringResource(R.string.search_local_retry, retryUris.size))
+                    }
                 }
                 Text(
                     text = stringResource(R.string.search_share_import_hint),
@@ -752,8 +1078,7 @@ private fun SearchScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .padding(top = 12.dp)
-                            .semantics {
-                                contentDescription = localLoadingLabel
+                            .semantics(mergeDescendants = true) {
                                 liveRegion = LiveRegionMode.Polite
                             },
                     ) {
@@ -774,17 +1099,27 @@ private fun SearchScreen(
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.semantics {
-                            contentDescription = wikiLoading
                             liveRegion = LiveRegionMode.Polite
                         },
                     )
                 }
                 is SearchListState.Message -> {
-                    Text(
-                        text = state.text,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = state.text,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        // Only the empty-wiki-result message gets the hint; local empty
+                        // and error messages keep their single-line form.
+                        if (state.text.contains(wikiNone)) {
+                            Text(
+                                text = stringResource(R.string.search_wikisource_none_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                 }
                 is SearchListState.LocalBooks -> {
                     LazyColumn(
@@ -799,7 +1134,9 @@ private fun SearchScreen(
                                     .fillMaxWidth()
                                     .heightIn(min = 48.dp)
                                     .clickable(enabled = !isBusy) {
-                                        context.startActivity(AppIntents.bookDetail(context, book.id))
+                                        // Same as shelf/discover cards: tap reads,
+                                        // detail stays one long-press away via the reader menu.
+                                        context.startActivity(AppIntents.reader(context, book.id))
                                     }
                                     .semantics { contentDescription = cd },
                                 colors = CardDefaults.cardColors(

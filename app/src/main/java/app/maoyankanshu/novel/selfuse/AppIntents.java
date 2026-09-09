@@ -58,6 +58,13 @@ public final class AppIntents {
         return new Intent(context, BookDetailActivity.class).putExtra(BookDetailActivity.EXTRA_ID, bookId);
     }
 
+    /** Browser-tab import success: detail shows a "just added to shelf" banner. */
+    public static Intent bookDetailJustImported(Context context, String bookId, boolean added) {
+        return bookDetail(context, bookId)
+                .putExtra(BookDetailActivity.EXTRA_JUST_IMPORTED, true)
+                .putExtra(BookDetailActivity.EXTRA_JUST_ADDED, added);
+    }
+
     public static Intent bookDetailEdit(Context context, String bookId) {
         return bookDetail(context, bookId).putExtra(BookDetailActivity.EXTRA_EDIT, true);
     }
@@ -70,7 +77,31 @@ public final class AppIntents {
         return new Intent(context, RemoteImportActivity.class);
     }
 
+    /** Carry the current URL/title over to direct-link download. */
+    public static Intent remoteImport(Context context, String title, String url) {
+        return remoteImport(context)
+                .putExtra(RemoteImportActivity.EXTRA_TITLE, title)
+                .putExtra(RemoteImportActivity.EXTRA_URL, url);
+    }
+
+    public static Intent browserImport(Context context) {
+        return new Intent(context, BrowserImportActivity.class);
+    }
+
+    /** Open the in-app browser tab at a specific HTTPS page (downloads return to the shelf). */
+    public static Intent browserImport(Context context, String url) {
+        return browserImport(context)
+                .putExtra(BrowserImportActivity.EXTRA_URL, url);
+    }
+
     public static Intent webImport(Context context) {
         return new Intent(context, WebImportActivity.class);
+    }
+
+    /** Carry the current URL/title over to article import. */
+    public static Intent webImport(Context context, String title, String url) {
+        return webImport(context)
+                .putExtra(WebImportActivity.EXTRA_TITLE, title)
+                .putExtra(WebImportActivity.EXTRA_URL, url);
     }
 }

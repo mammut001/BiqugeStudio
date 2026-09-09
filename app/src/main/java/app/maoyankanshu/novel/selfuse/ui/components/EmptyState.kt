@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -32,6 +33,9 @@ fun EmptyState(
     secondaryLabel: String? = null,
     secondaryDescription: String? = null,
     onSecondary: (() -> Unit)? = null,
+    tertiaryLabel: String? = null,
+    tertiaryDescription: String? = null,
+    onTertiary: (() -> Unit)? = null,
 ) {
     Column(
         modifier = modifier
@@ -84,6 +88,20 @@ fun EmptyState(
                     },
             ) {
                 Text(secondaryLabel)
+            }
+        }
+        if (onTertiary != null && tertiaryLabel != null) {
+            Spacer(Modifier.height(4.dp))
+            TextButton(
+                onClick = onTertiary,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 48.dp)
+                    .semantics {
+                        this.contentDescription = tertiaryDescription ?: tertiaryLabel
+                    },
+            ) {
+                Text(tertiaryLabel)
             }
         }
     }

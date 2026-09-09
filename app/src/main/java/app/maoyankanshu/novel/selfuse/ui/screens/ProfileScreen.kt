@@ -47,6 +47,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -69,9 +70,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import app.maoyankanshu.novel.selfuse.BuildConfig
 import app.maoyankanshu.novel.selfuse.LibraryStore
+import app.maoyankanshu.novel.selfuse.ImportSessionTracker
 import app.maoyankanshu.novel.selfuse.ProfileBackupOutcomes
 import app.maoyankanshu.novel.selfuse.R
 import app.maoyankanshu.novel.selfuse.ReaderPreferences
+import app.maoyankanshu.novel.selfuse.StreamCancellationSignal
 import app.maoyankanshu.novel.selfuse.canAcceptUi
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -112,6 +115,10 @@ fun ProfileScreen(
     var loadingIsBackup by remember { mutableStateOf(true) }
     var backupJob by remember { mutableStateOf<Job?>(null) }
     var restoreJob by remember { mutableStateOf<Job?>(null) }
+    val backupSessions = remember { ImportSessionTracker() }
+    val restoreSessions = remember { ImportSessionTracker() }
+    var backupSignal by remember { mutableStateOf<StreamCancellationSignal?>(null) }
+    var restoreSignal by remember { mutableStateOf<StreamCancellationSignal?>(null) }
 
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
@@ -122,6 +129,7 @@ fun ProfileScreen(
     val restoreInProgress = stringResource(R.string.profile_restore_in_progress)
     val restoreInProgressCd = stringResource(R.string.profile_restore_in_progress_cd)
     val restoreEmptyFail = stringResource(R.string.profile_restore_empty_fail)
+    val restoreAllExisting = stringResource(R.string.profile_restore_all_existing)
     val restoreInvalidFormat = stringResource(R.string.profile_restore_invalid_format)
     val cancelBackupLabel = stringResource(R.string.profile_cancel_backup)
     val cancelBackupCd = stringResource(R.string.profile_cancel_backup_cd)
@@ -140,36 +148,73 @@ fun ProfileScreen(
         restoreJob = null
     }
 
-    fun cancelActiveWork() {
+    fun cancelBackupWork() {
+        backupSignal?.cancel()
+        backupSignal = null
         backupJob?.cancel()
-        restoreJob?.cancel()
-        clearBusyFlags()
+        backupSessions.invalidate()
+        if (restoreJob == null) clearBusyFlags()
         // Soft cancel: no fail Toast / error dialog (CancellationException path is silent too).
+    }
+
+    fun cancelRestoreWork() {
+        restoreSignal?.cancel()
+        restoreSignal = null
+        restoreJob?.cancel()
+        restoreSessions.invalidate()
+        if (backupJob == null) clearBusyFlags()
+        // Soft cancel: no fail Toast / error dialog (CancellationException path is silent too).
+    }
+
+    fun cancelActiveWork() {
+        cancelBackupWork()
+        cancelRestoreWork()
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            backupSignal?.cancel()
+            restoreSignal?.cancel()
+            backupSessions.invalidate()
+            restoreSessions.invalidate()
+            backupJob?.cancel()
+            restoreJob?.cancel()
+        }
     }
 
     val createBackup = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/zip"),
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        if (isLoading) return@rememberLauncherForActivityResult
+        if (backupJob != null) return@rememberLauncherForActivityResult
         errorMessage = null
         isLoading = true
         loadingIsBackup = true
         loadingText = backupInProgress
         loadingCd = backupInProgressCd
+        val sessionToken = backupSessions.start()
+        val signal = StreamCancellationSignal()
+        backupSignal = signal
         backupJob = scope.launch {
             try {
                 withContext(Dispatchers.IO) {
                     context.contentResolver.openOutputStream(uri)?.use { stream ->
-                        LibraryStore.get(context).exportTo(stream)
+                        LibraryStore.get(context).exportTo(signal.output(stream))
                     } ?: throw IllegalStateException("openOutputStream returned null")
                 }
                 ensureActive()
-                if (!activity.canAcceptUi()) return@launch
+                if (!activity.canAcceptUi() || !backupSessions.owns(sessionToken)) return@launch
                 when (ProfileBackupOutcomes.backupNotice(cancelled = false, hardError = false)) {
                     ProfileBackupOutcomes.BackupNotice.SUCCESS -> {
-                        isLoading = false
                         backupJob = null
+                        backupSignal = null
+                        if (restoreJob == null) {
+                            isLoading = false
+                        } else {
+                            loadingIsBackup = false
+                            loadingText = restoreInProgress
+                            loadingCd = restoreInProgressCd
+                        }
                         Toast.makeText(context, backupOk, Toast.LENGTH_SHORT).show()
                     }
                     ProfileBackupOutcomes.BackupNotice.NONE,
@@ -178,16 +223,19 @@ fun ProfileScreen(
                 }
             } catch (cancel: CancellationException) {
                 // User cancel / leave composition: never backup_fail dialog.
-                if (activity.canAcceptUi()) {
-                    clearBusyFlags()
+                if (activity.canAcceptUi() && backupSessions.owns(sessionToken)) {
+                    backupJob = null
+                    backupSignal = null
+                    if (restoreJob == null) clearBusyFlags()
                 }
                 throw cancel
             } catch (e: Exception) {
-                if (!activity.canAcceptUi()) return@launch
+                if (!activity.canAcceptUi() || !backupSessions.owns(sessionToken)) return@launch
                 if (!ProfileBackupOutcomes.shouldSurfaceAsFailure(e)) throw e
                 Log.e("YueJianProfile", "Unable to export library backup", e)
-                isLoading = false
                 backupJob = null
+                backupSignal = null
+                if (restoreJob == null) isLoading = false
                 errorMessage = ProfileBackupOutcomes.failMessage(backupFail, e)
             }
         }
@@ -197,41 +245,86 @@ fun ProfileScreen(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        if (isLoading) return@rememberLauncherForActivityResult
+        if (restoreJob != null) return@rememberLauncherForActivityResult
         errorMessage = null
         isLoading = true
         loadingIsBackup = false
         loadingText = restoreInProgress
         loadingCd = restoreInProgressCd
+        val sessionToken = restoreSessions.start()
+        val signal = StreamCancellationSignal()
+        restoreSignal = signal
         restoreJob = scope.launch {
             try {
-                val count = withContext(Dispatchers.IO) {
+                val result = withContext(Dispatchers.IO) {
                     context.contentResolver.openInputStream(uri)?.use { stream ->
-                        LibraryStore.get(context).importFrom(stream)
-                    } ?: 0
+                        LibraryStore.get(context).importFromDetailed(signal.input(stream))
+                    }
                 }
                 ensureActive()
-                if (!activity.canAcceptUi()) return@launch
+                if (!activity.canAcceptUi() || !restoreSessions.owns(sessionToken)) return@launch
                 when (
-                    ProfileBackupOutcomes.restoreNotice(
+                    ProfileBackupOutcomes.restoreNoticeDetailed(
                         cancelled = false,
-                        count = count,
+                        added = result?.added ?: 0,
+                        existing = result?.existing ?: 0,
                         hardError = false,
                     )
                 ) {
                     ProfileBackupOutcomes.RestoreNotice.SUCCESS -> {
-                        isLoading = false
                         restoreJob = null
+                        restoreSignal = null
+                        if (backupJob == null) {
+                            isLoading = false
+                        } else {
+                            loadingIsBackup = true
+                            loadingText = backupInProgress
+                            loadingCd = backupInProgressCd
+                        }
+                        val added = result?.added ?: 0
+                        val skipped = result?.existing ?: 0
                         Toast.makeText(
                             context,
-                            context.getString(R.string.profile_restore_ok, count),
+                            if (skipped > 0) {
+                                context.getString(
+                                    R.string.profile_restore_ok_with_existing,
+                                    added,
+                                    skipped,
+                                )
+                            } else {
+                                context.getString(R.string.profile_restore_ok, added)
+                            },
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                        onLibraryRestored()
+                    }
+                    ProfileBackupOutcomes.RestoreNotice.ALL_EXISTING -> {
+                        restoreJob = null
+                        restoreSignal = null
+                        if (backupJob == null) {
+                            isLoading = false
+                        } else {
+                            loadingIsBackup = true
+                            loadingText = backupInProgress
+                            loadingCd = backupInProgressCd
+                        }
+                        Toast.makeText(
+                            context,
+                            restoreAllExisting.format(result?.existing ?: 0),
                             Toast.LENGTH_SHORT,
                         ).show()
                         onLibraryRestored()
                     }
                     ProfileBackupOutcomes.RestoreNotice.EMPTY -> {
-                        isLoading = false
                         restoreJob = null
+                        restoreSignal = null
+                        if (backupJob == null) {
+                            isLoading = false
+                        } else {
+                            loadingIsBackup = true
+                            loadingText = backupInProgress
+                            loadingCd = backupInProgressCd
+                        }
                         errorMessage = restoreEmptyFail
                     }
                     ProfileBackupOutcomes.RestoreNotice.NONE,
@@ -240,16 +333,19 @@ fun ProfileScreen(
                 }
             } catch (cancel: CancellationException) {
                 // User cancel / leave: never restore fail dialog.
-                if (activity.canAcceptUi()) {
-                    clearBusyFlags()
+                if (activity.canAcceptUi() && restoreSessions.owns(sessionToken)) {
+                    restoreJob = null
+                    restoreSignal = null
+                    if (backupJob == null) clearBusyFlags()
                 }
                 throw cancel
             } catch (e: Exception) {
-                if (!activity.canAcceptUi()) return@launch
+                if (!activity.canAcceptUi() || !restoreSessions.owns(sessionToken)) return@launch
                 if (!ProfileBackupOutcomes.shouldSurfaceAsFailure(e)) throw e
                 Log.e("YueJianProfile", "Unable to restore library backup", e)
-                isLoading = false
                 restoreJob = null
+                restoreSignal = null
+                if (backupJob == null) isLoading = false
                 errorMessage = ProfileBackupOutcomes.failMessage(restoreInvalidFormat, e)
             }
         }
@@ -348,9 +444,15 @@ fun ProfileScreen(
                             icon = Icons.Filled.Backup,
                             title = stringResource(R.string.profile_backup_title),
                             subtitle = stringResource(R.string.profile_backup_subtitle),
-                            enabled = !isLoading,
+                            enabled = backupJob == null,
                             onClick = {
-                                createBackup.launch(context.getString(R.string.backup_file_name, appName))
+                                val stamp = java.text.SimpleDateFormat(
+                                    "yyyyMMdd-HHmm",
+                                    java.util.Locale.getDefault(),
+                                ).format(java.util.Date())
+                                createBackup.launch(
+                                    context.getString(R.string.backup_file_name, appName, stamp)
+                                )
                             },
                             contentDescription = stringResource(R.string.profile_backup),
                         )
@@ -359,7 +461,7 @@ fun ProfileScreen(
                             icon = Icons.Filled.Restore,
                             title = stringResource(R.string.profile_restore_title),
                             subtitle = stringResource(R.string.profile_restore_subtitle),
-                            enabled = !isLoading,
+                            enabled = restoreJob == null,
                             onClick = {
                                 restoreBackup.launch(arrayOf("application/zip", "*/*"))
                             },
@@ -416,14 +518,36 @@ fun ProfileScreen(
         }
 
         if (isLoading) {
-            // Back / outside tap soft-cancels the Job (no fail Toast / dialog).
-            Dialog(onDismissRequest = { cancelActiveWork() }) {
+            // Back / outside tap soft-cancels the visible Job only (no fail Toast / dialog).
+            // Backup and restore run independently; cancelling one never touches the other.
+            // When both run at once, the overlay names each active task and offers a
+            // cancel button per task, so neither state is hidden behind the other.
+            // Each active Job gets its own row + cancel button. The no-Job fallback
+            // (transitional frame) shows the last loading text with no cancel target.
+            data class BusyRow(val text: String, val cd: String, val onCancel: (() -> Unit)?)
+            val activeTasks = buildList {
+                if (backupJob != null) add(
+                    BusyRow(backupInProgress, backupInProgressCd, ::cancelBackupWork),
+                )
+                if (restoreJob != null) add(
+                    BusyRow(restoreInProgress, restoreInProgressCd, ::cancelRestoreWork),
+                )
+                if (isEmpty()) add(BusyRow(loadingText, loadingCd, null))
+            }
+            val overlayCd = activeTasks.joinToString("；") { it.cd }
+            Dialog(
+                onDismissRequest = {
+                    if (backupJob != null && restoreJob == null) cancelBackupWork()
+                    else if (restoreJob != null && backupJob == null) cancelRestoreWork()
+                    // Both active: outside tap does nothing (avoid killing the wrong task).
+                },
+            ) {
                 Surface(
                     shape = MaterialTheme.shapes.medium,
                     color = MaterialTheme.colorScheme.surface,
                     tonalElevation = 6.dp,
                     modifier = Modifier.semantics {
-                        contentDescription = loadingCd
+                        contentDescription = overlayCd
                         liveRegion = LiveRegionMode.Polite
                     },
                 ) {
@@ -431,32 +555,46 @@ fun ProfileScreen(
                         modifier = Modifier.padding(24.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(36.dp),
-                                strokeWidth = 3.dp,
-                            )
-                            Spacer(Modifier.width(16.dp))
-                            Text(
-                                text = loadingText,
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.semantics {
-                                    contentDescription = loadingCd
-                                    liveRegion = LiveRegionMode.Polite
-                                },
-                            )
-                        }
-                        val cancelLabel = if (loadingIsBackup) cancelBackupLabel else cancelRestoreLabel
-                        val cancelCd = if (loadingIsBackup) cancelBackupCd else cancelRestoreCd
-                        OutlinedButton(
-                            onClick = { cancelActiveWork() },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 48.dp)
-                                .semantics { contentDescription = cancelCd },
-                        ) {
-                            Text(cancelLabel)
+                        activeTasks.forEachIndexed { index, row ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(36.dp),
+                                    strokeWidth = 3.dp,
+                                )
+                                Spacer(Modifier.width(16.dp))
+                                Text(
+                                    text = row.text,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .semantics {
+                                            contentDescription = row.cd
+                                            liveRegion = LiveRegionMode.Polite
+                                        },
+                                )
+                            }
+                            val cancel = row.onCancel
+                            if (cancel != null) {
+                                val label =
+                                    if (row.text == backupInProgress) cancelBackupLabel
+                                    else cancelRestoreLabel
+                                val cdText =
+                                    if (row.text == backupInProgress) cancelBackupCd
+                                    else cancelRestoreCd
+                                OutlinedButton(
+                                    onClick = cancel,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 48.dp)
+                                        .semantics { contentDescription = cdText },
+                                ) {
+                                    Text(label)
+                                }
+                            }
+                            if (index < activeTasks.lastIndex) {
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                            }
                         }
                     }
                 }
@@ -469,12 +607,7 @@ fun ProfileScreen(
             onDismissRequest = { showAbout = false },
             title = { Text("$appName ${BuildConfig.VERSION_NAME}") },
             text = {
-                Text(
-                    text = stringResource(R.string.about_body, appName),
-                    modifier = Modifier.semantics {
-                        contentDescription = context.getString(R.string.privacy_summary_cd)
-                    },
-                )
+                Text(text = stringResource(R.string.about_body, appName))
             },
             confirmButton = {
                 TextButton(
@@ -499,7 +632,6 @@ fun ProfileScreen(
                 Text(
                     text = msg,
                     modifier = Modifier.semantics {
-                        contentDescription = msg
                         liveRegion = LiveRegionMode.Polite
                     },
                 )

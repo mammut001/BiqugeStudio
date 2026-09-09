@@ -163,7 +163,7 @@ fun BiqugeApp(
                     when {
                         currentTab == MainTab.Shelf -> {
                             val searchCd = stringResource(R.string.search_shelf_cd)
-                            val importCd = stringResource(R.string.toolbar_import_cd)
+                            val importCd = stringResource(R.string.import_browser_download_cd)
                             IconButton(
                                 onClick = {
                                     context.startActivity(AppIntents.search(context))
@@ -176,7 +176,7 @@ fun BiqugeApp(
                             }
                             IconButton(
                                 onClick = {
-                                    context.startActivity(AppIntents.importLocal(context))
+                                    context.startActivity(AppIntents.browserImport(context))
                                 },
                                 modifier = Modifier
                                     .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)

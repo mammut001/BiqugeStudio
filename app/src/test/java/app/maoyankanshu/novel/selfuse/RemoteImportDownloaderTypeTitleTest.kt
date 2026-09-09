@@ -151,6 +151,109 @@ class RemoteImportDownloaderTypeTitleTest {
         )
     }
 
+    @Test
+    fun detectIsEpub_contentDispositionSupportsSignedDownloadUrl() {
+        assertTrue(
+            RemoteImportDownloader.detectIsEpub(
+                finalUrl = "https://cdn.example.com/download?token=123",
+                contentType = "application/octet-stream",
+                contentDisposition = "attachment; filename*=UTF-8''%E4%B8%89%E5%9B%BD.epub",
+            ),
+        )
+    }
+
+    @Test
+    fun detectIsEpub_queryFilenameSupportsOpaqueSignedUrl() {
+        assertTrue(
+            RemoteImportDownloader.detectIsEpub(
+                finalUrl = "https://cdn.example.com/get?token=123&download=%E4%B8%89%E5%9B%BD.EPUB",
+                contentType = "application/octet-stream",
+                contentDisposition = null,
+            ),
+        )
+        assertFalse(
+            RemoteImportDownloader.detectIsEpub(
+                finalUrl = "https://cdn.example.com/get?filename=notes.txt",
+                contentType = "application/octet-stream",
+                contentDisposition = null,
+            ),
+        )
+    }
+
+    @Test
+    fun fallbackTitle_prefersQueryFilenameOverOpaqueEndpointPath() {
+        assertEquals(
+            "三国演义",
+            RemoteImportDownloader.resolveFallbackTitle(
+                contentDisposition = null,
+                finalUrl = "https://cdn.example.com/get?filename=%E4%B8%89%E5%9B%BD%E6%BC%94%E4%B9%89.epub",
+                fallback = "远程书籍",
+            ),
+        )
+    }
+
+    @Test
+    fun payloadSniffingRejectsWebAndBinaryDocumentsButKeepsPlainText() {
+        assertTrue(
+            RemoteImportDownloader.isClearlyUnsupportedPayload(
+                "text/plain",
+                " <!DOCTYPE html><html><body>login</body></html>".toByteArray(),
+            ),
+        )
+        assertTrue(
+            RemoteImportDownloader.isClearlyUnsupportedPayload(
+                "application/json; charset=utf-8",
+                "{\"error\":\"login required\"}".toByteArray(),
+            ),
+        )
+        assertTrue(
+            RemoteImportDownloader.isClearlyUnsupportedPayload(
+                "application/octet-stream",
+                "%PDF-1.7".toByteArray(),
+            ),
+        )
+        assertTrue(
+            RemoteImportDownloader.isClearlyUnsupportedPayload(
+                "application/octet-stream",
+                byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a),
+            ),
+        )
+        assertTrue(
+            RemoteImportDownloader.isClearlyUnsupportedPayload(
+                "application/octet-stream",
+                "{\"error\":\"login required\"}".toByteArray(),
+            ),
+        )
+        assertFalse(
+            RemoteImportDownloader.isClearlyUnsupportedPayload(
+                "text/plain; charset=utf-8",
+                "第一章 开始\n这是正文。".toByteArray(),
+            ),
+        )
+    }
+
+    @Test
+    fun zipMagicRoutesPoorlyLabelledEpubToEpubParser() {
+        assertTrue(RemoteImportDownloader.looksLikeZip(byteArrayOf(0x50, 0x4b, 0x03, 0x04)))
+        assertTrue(RemoteImportDownloader.looksLikeZip(byteArrayOf(0x50, 0x4b, 0x05, 0x06)))
+        assertTrue(RemoteImportDownloader.looksLikeZip(byteArrayOf(0x50, 0x4b, 0x07, 0x08)))
+        assertFalse(RemoteImportDownloader.looksLikeZip(byteArrayOf(0x50, 0x4b, 0x03, 0x06)))
+        assertFalse(RemoteImportDownloader.looksLikeZip(byteArrayOf(0x50, 0x4b, 0x07, 0x04)))
+        assertFalse(RemoteImportDownloader.looksLikeZip("plain text".toByteArray()))
+    }
+
+    @Test
+    fun genericMimeBinaryMagicIsRejectedButUtf16TextIsNot() {
+        assertTrue(RemoteImportDownloader.looksLikeKnownBinaryPayload(byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte())))
+        assertTrue(RemoteImportDownloader.looksLikeKnownBinaryPayload("RIFF1234WEBP".toByteArray()))
+        assertTrue(RemoteImportDownloader.looksLikeKnownBinaryPayload("0000ftypisom".toByteArray()))
+        assertFalse(
+            RemoteImportDownloader.looksLikeKnownBinaryPayload(
+                byteArrayOf(0xff.toByte(), 0xfe.toByte(), 0x2d, 0x4e, 0x87.toByte(), 0x65),
+            ),
+        )
+    }
+
     // --- URL path filename ---
 
     @Test
@@ -233,9 +336,9 @@ class RemoteImportDownloaderTypeTitleTest {
                 "attachment; filename=\"bad\nname.epub\"",
             ),
         )
-        // Path-like values collapse to basename only (no directory text exposed).
-        assertEquals(
-            "passwd",
+        // Path-like values collapse to basename only (no directory text exposed),
+        // and non-book names are skipped so the real URL filename wins downstream.
+        assertNull(
             RemoteImportDownloader.parseSafeFilenameFromContentDisposition(
                 "attachment; filename=\"../../../etc/passwd\"",
             ),
@@ -331,6 +434,53 @@ class RemoteImportDownloaderTypeTitleTest {
             RemoteImportDownloader.resolveFallbackTitle(
                 contentDisposition = "attachment; filename=\"x\"\r\nEvil: 1",
                 finalUrl = "https://cdn.example.com/real.epub",
+                fallback = "Fallback",
+            ),
+        )
+    }
+
+    @Test
+    fun parseSafeFilenameFromContentDisposition_needsBookExtension() {
+        // `filename="cover.jpg"` must not shadow the real path filename.
+        assertNull(
+            RemoteImportDownloader.parseSafeFilenameFromContentDisposition(
+                "attachment; filename=\"cover.jpg\"",
+            ),
+        )
+        assertEquals(
+            "real",
+            RemoteImportDownloader.resolveFallbackTitle(
+                contentDisposition = "attachment; filename=\"cover.jpg\"",
+                finalUrl = "https://cdn.example.com/real.txt",
+                fallback = "Fallback",
+            ),
+        )
+        assertEquals(
+            "From Header",
+            RemoteImportDownloader.resolveFallbackTitle(
+                contentDisposition = "attachment; filename=\"From Header.epub\"",
+                finalUrl = "https://cdn.example.com/real.txt",
+                fallback = "Fallback",
+            ),
+        )
+    }
+
+    @Test
+    fun resolveFallbackTitle_queryNameNeedsBookExtension() {
+        // `?name=cover.jpg` must not shadow the real path filename.
+        assertEquals(
+            "real",
+            RemoteImportDownloader.resolveFallbackTitle(
+                contentDisposition = null,
+                finalUrl = "https://cdn.example.com/real.txt?name=cover.jpg",
+                fallback = "Fallback",
+            ),
+        )
+        assertEquals(
+            "signed",
+            RemoteImportDownloader.resolveFallbackTitle(
+                contentDisposition = null,
+                finalUrl = "https://cdn.example.com/dl?name=signed.epub&id=1",
                 fallback = "Fallback",
             ),
         )

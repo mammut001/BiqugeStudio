@@ -127,7 +127,7 @@ class ShelfFiltersTest {
     }
 
     @Test
-    fun groupByAuthor_preservesOrderAndFirstSeenAuthors() {
+    fun groupByAuthor_sortsAuthorsButPreservesBookOrderWithinGroup() {
         val books = listOf(
             book("1", "A1", 0, author = "Bob"),
             book("2", "A2", 0, author = "Alice"),
@@ -135,9 +135,20 @@ class ShelfFiltersTest {
             book("4", "A4", 0, author = "Alice"),
         )
         val groups = ShelfFilters.groupByAuthor(books, unknownAuthorLabel = "未知作者")
-        assertEquals(listOf("Bob", "Alice"), groups.map { it.authorLabel })
-        assertEquals(listOf("A1", "A3"), groups[0].books.map { it.title })
-        assertEquals(listOf("A2", "A4"), groups[1].books.map { it.title })
+        assertEquals(listOf("Alice", "Bob"), groups.map { it.authorLabel })
+        assertEquals(listOf("A2", "A4"), groups[0].books.map { it.title })
+        assertEquals(listOf("A1", "A3"), groups[1].books.map { it.title })
+    }
+
+    @Test
+    fun groupByAuthor_unknownAuthorSortsLast() {
+        val books = listOf(
+            book("1", "T1", 0, author = "  "),
+            book("2", "T2", 0, author = "Zed"),
+            book("3", "T3", 0, author = "Amy"),
+        )
+        val groups = ShelfFilters.groupByAuthor(books, unknownAuthorLabel = "未知作者")
+        assertEquals(listOf("Amy", "Zed", "未知作者"), groups.map { it.authorLabel })
     }
 
     @Test
@@ -149,10 +160,10 @@ class ShelfFiltersTest {
         )
         val groups = ShelfFilters.groupByAuthor(books, unknownAuthorLabel = "未知作者")
         assertEquals(2, groups.size)
-        assertEquals("未知作者", groups[0].authorLabel)
-        assertEquals(listOf("T1", "T2"), groups[0].books.map { it.title })
-        assertEquals("Named", groups[1].authorLabel)
-        assertEquals(listOf("T3"), groups[1].books.map { it.title })
+        assertEquals("Named", groups[0].authorLabel)
+        assertEquals(listOf("T3"), groups[0].books.map { it.title })
+        assertEquals("未知作者", groups[1].authorLabel)
+        assertEquals(listOf("T1", "T2"), groups[1].books.map { it.title })
     }
 
     @Test
@@ -173,10 +184,10 @@ class ShelfFiltersTest {
             ShelfProgressFilter.ALL,
             ShelfSortOrder.TITLE,
         )
-        // Title order: Apple, Berry, Mango, Zebra — first-seen authors: B then A
+        // Title order: Apple, Berry, Mango, Zebra — authors sorted A then B.
         val groups = ShelfFilters.groupByAuthor(flat, "未知作者")
-        assertEquals(listOf("B", "A"), groups.map { it.authorLabel })
-        assertEquals(listOf("Apple", "Berry"), groups[0].books.map { it.title })
-        assertEquals(listOf("Mango", "Zebra"), groups[1].books.map { it.title })
+        assertEquals(listOf("A", "B"), groups.map { it.authorLabel })
+        assertEquals(listOf("Mango", "Zebra"), groups[0].books.map { it.title })
+        assertEquals(listOf("Apple", "Berry"), groups[1].books.map { it.title })
     }
 }

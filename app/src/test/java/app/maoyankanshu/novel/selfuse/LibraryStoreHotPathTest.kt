@@ -171,8 +171,13 @@ class LibraryStoreHotPathTest {
 
         val blockedFilesDir = tempFolder.newFolder()
         assertTrue(File(blockedFilesDir, "books").createNewFile())
+        val blockedPrefs = TestSharedPreferences().also {
+            // Mark metadata initialized so construction does not try to persist the welcome book;
+            // this test targets the restore write below.
+            it.edit().putString("books_v2", "").commit()
+        }
         val target = LibraryStore(
-            TestSharedPreferences(),
+            blockedPrefs,
             blockedFilesDir,
             "App",
             "Welcome",

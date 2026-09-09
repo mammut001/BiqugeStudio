@@ -31,6 +31,10 @@ public final class ReaderPreferences {
     private static final String CUSTOM_FONT_NAME = "reader_custom_font_name";
     /** Auto page-turn interval in seconds; 0 = off. */
     private static final String AUTO_PAGE_TURN_SEC = "reader_auto_page_turn_sec";
+    /** TTS sleep timer in minutes; 0 = off. Not persisted across launches (session choice). */
+    private static final String TTS_SLEEP_MIN = "reader_tts_sleep_min";
+    /** Recent search terms (local shelf + wikisource), newest first, capped. */
+    private static final String SEARCH_HISTORY = "search_history_terms";
 
     // ── Themes (stable ints — never reorder existing values) ───────────────
     public static final int THEME_PAPER = 0;
@@ -188,6 +192,174 @@ public final class ReaderPreferences {
 
     public void setAutoPageTurnSec(int seconds) {
         prefs.edit().putInt(AUTO_PAGE_TURN_SEC, Math.max(0, Math.min(300, seconds))).apply();
+    }
+
+    /**
+     * TTS sleep timer in minutes (0 = off). Session-scoped choice, clamped 0…180.
+     */
+    public int ttsSleepMin() {
+        if (!prefs.contains(TTS_SLEEP_MIN)) return 0;
+        return Math.max(0, Math.min(180, prefs.getInt(TTS_SLEEP_MIN, 0)));
+    }
+
+    public void setTtsSleepMin(int minutes) {
+        prefs.edit().putInt(TTS_SLEEP_MIN, Math.max(0, Math.min(180, minutes))).apply();
+    }
+
+    /** Max retained search terms. */
+    public static final int SEARCH_HISTORY_MAX = 8;
+
+    /**
+     * Recent search terms, newest first. Plain newline-joined storage; terms are
+     * single-line UI input trimmed to 60 chars.
+     */
+    public java.util.List<String> searchHistory() {
+        String raw = prefs.getString(SEARCH_HISTORY, "");
+        java.util.List<String> out = new java.util.ArrayList<>();
+        if (raw == null || raw.isEmpty()) return out;
+        for (String row : raw.split("\n", -1)) {
+            String term = row == null ? "" : row.trim();
+            if (!term.isEmpty()) out.add(term);
+        }
+        return out;
+    }
+
+    /** Record a term as most-recent; dedupe case-insensitively, cap at [SEARCH_HISTORY_MAX]. */
+    public void pushSearchHistory(String term) {
+        String clean = term == null ? "" : term.trim().replaceAll("[\r\n\t]+", " ");
+        if (clean.length() > 60) clean = clean.substring(0, 60).trim();
+        if (clean.isEmpty()) return;
+        java.util.List<String> kept = new java.util.ArrayList<>(SEARCH_HISTORY_MAX);
+        kept.add(clean);
+        for (String old : searchHistory()) {
+            if (kept.size() >= SEARCH_HISTORY_MAX) break;
+            if (old.equalsIgnoreCase(clean)) continue;
+            kept.add(old);
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < kept.size(); i++) {
+            if (i > 0) sb.append('\n');
+            sb.append(kept.get(i));
+        }
+        prefs.edit().putString(SEARCH_HISTORY, sb.toString()).apply();
+    }
+
+    public void clearSearchHistory() {
+        prefs.edit().remove(SEARCH_HISTORY).apply();
+    }
+
+    /** Max retained per-book find terms. */
+    public static final int FIND_HISTORY_MAX = 8;
+
+    private static String findHistoryKey(String bookId) {
+        return "find_history_" + (bookId == null ? "" : bookId);
+    }
+
+    /**
+     * Recent in-book find terms for one book, newest first. Same shape as
+     * [searchHistory] but keyed per book so histories do not leak across books.
+     */
+    public java.util.List<String> findHistory(String bookId) {
+        if (bookId == null || bookId.isEmpty()) return new java.util.ArrayList<>();
+        String raw = prefs.getString(findHistoryKey(bookId), "");
+        java.util.List<String> out = new java.util.ArrayList<>();
+        if (raw == null || raw.isEmpty()) return out;
+        for (String row : raw.split("\n", -1)) {
+            String term = row == null ? "" : row.trim();
+            if (!term.isEmpty()) out.add(term);
+        }
+        return out;
+    }
+
+    /** Record a find term as most-recent for one book; dedupe case-insensitively, cap. */
+    public void pushFindHistory(String bookId, String term) {
+        if (bookId == null || bookId.isEmpty()) return;
+        String clean = term == null ? "" : term.trim().replaceAll("[\r\n\t]+", " ");
+        if (clean.length() > 60) clean = clean.substring(0, 60).trim();
+        if (clean.isEmpty()) return;
+        java.util.List<String> kept = new java.util.ArrayList<>(FIND_HISTORY_MAX);
+        kept.add(clean);
+        for (String old : findHistory(bookId)) {
+            if (kept.size() >= FIND_HISTORY_MAX) break;
+            if (old.equalsIgnoreCase(clean)) continue;
+            kept.add(old);
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < kept.size(); i++) {
+            if (i > 0) sb.append('\n');
+            sb.append(kept.get(i));
+        }
+        prefs.edit().putString(findHistoryKey(bookId), sb.toString()).apply();
+    }
+
+    public void clearFindHistory(String bookId) {
+        if (bookId == null || bookId.isEmpty()) return;
+        prefs.edit().remove(findHistoryKey(bookId)).apply();
+    }
+
+    /** Max retained in-app browser recent URLs. */
+    public static final int BROWSER_HISTORY_MAX = 8;
+
+    private static final String BROWSER_HISTORY = "browser_history_urls";
+
+    /**
+     * Recent in-app browser URLs, newest first. Only normalized HTTPS page URLs
+     * are recorded (never raw address-bar input), capped at [BROWSER_HISTORY_MAX].
+     */
+    public java.util.List<String> browserHistory() {
+        String raw = prefs.getString(BROWSER_HISTORY, "");
+        java.util.List<String> out = new java.util.ArrayList<>();
+        if (raw == null || raw.isEmpty()) return out;
+        for (String row : raw.split("\n", -1)) {
+            String url = row == null ? "" : row.trim();
+            if (!url.isEmpty()) out.add(url);
+        }
+        return out;
+    }
+
+    /** Record a browser URL as most-recent; exact-dedupe, cap at [BROWSER_HISTORY_MAX]. */
+    public void pushBrowserHistory(String url) {
+        String clean = url == null ? "" : url.trim();
+        if (clean.isEmpty()) return;
+        java.util.List<String> kept = new java.util.ArrayList<>(BROWSER_HISTORY_MAX);
+        kept.add(clean);
+        for (String old : browserHistory()) {
+            if (kept.size() >= BROWSER_HISTORY_MAX) break;
+            if (old.equals(clean)) continue;
+            kept.add(old);
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < kept.size(); i++) {
+            if (i > 0) sb.append('\n');
+            sb.append(kept.get(i));
+        }
+        prefs.edit().putString(BROWSER_HISTORY, sb.toString()).apply();
+    }
+
+    public void clearBrowserHistory() {
+        prefs.edit().remove(BROWSER_HISTORY).apply();
+    }
+
+    /** Remove one URL from browser history; no-op when absent. */
+    public void removeBrowserHistory(String url) {
+        String clean = url == null ? "" : url.trim();
+        if (clean.isEmpty()) return;
+        java.util.List<String> kept = new java.util.ArrayList<>();
+        for (String old : browserHistory()) {
+            if (old.equals(clean)) continue;
+            kept.add(old);
+        }
+        if (kept.size() == browserHistory().size()) return;
+        if (kept.isEmpty()) {
+            prefs.edit().remove(BROWSER_HISTORY).apply();
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < kept.size(); i++) {
+            if (i > 0) sb.append('\n');
+            sb.append(kept.get(i));
+        }
+        prefs.edit().putString(BROWSER_HISTORY, sb.toString()).apply();
     }
 
     /**

@@ -82,6 +82,30 @@ class ProfileBackupOutcomesTest {
     }
 
     @Test
+    fun restoreNoticeDetailed_allExistingPartialAndEmpty() {
+        assertEquals(
+            ProfileBackupOutcomes.RestoreNotice.SUCCESS,
+            ProfileBackupOutcomes.restoreNoticeDetailed(cancelled = false, added = 2, existing = 1, hardError = false),
+        )
+        assertEquals(
+            ProfileBackupOutcomes.RestoreNotice.ALL_EXISTING,
+            ProfileBackupOutcomes.restoreNoticeDetailed(cancelled = false, added = 0, existing = 3, hardError = false),
+        )
+        assertEquals(
+            ProfileBackupOutcomes.RestoreNotice.EMPTY,
+            ProfileBackupOutcomes.restoreNoticeDetailed(cancelled = false, added = 0, existing = 0, hardError = false),
+        )
+        assertEquals(
+            ProfileBackupOutcomes.RestoreNotice.NONE,
+            ProfileBackupOutcomes.restoreNoticeDetailed(cancelled = true, added = 0, existing = 3, hardError = false),
+        )
+        assertEquals(
+            ProfileBackupOutcomes.RestoreNotice.INVALID,
+            ProfileBackupOutcomes.restoreNoticeDetailed(cancelled = false, added = 1, existing = 1, hardError = true),
+        )
+    }
+
+    @Test
     fun backupNotice_cancelledAndMatrix() {
         assertEquals(
             ProfileBackupOutcomes.BackupNotice.NONE,

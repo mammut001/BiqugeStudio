@@ -53,6 +53,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.SuggestionChip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
@@ -99,18 +104,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -129,6 +135,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -215,8 +223,8 @@ fun ReaderScreen(
     }
     var ttsEngines by remember { mutableStateOf<List<TtsEngineOption>>(emptyList()) }
     var ttsVoices by remember { mutableStateOf<List<TtsVoiceOption>>(emptyList()) }
-    var showTtsRateDialog by remember { mutableStateOf(false) }
     var showVoiceManagerSheet by remember { mutableStateOf(false) }
+    var ttsSleepMin by remember { mutableIntStateOf(preferences.ttsSleepMin()) }
     var autoPageTurnSec by remember { mutableIntStateOf(preferences.autoPageTurnSec()) }
     var batteryPercent by remember { mutableIntStateOf(-1) }
     var batteryCharging by remember { mutableStateOf(false) }
@@ -259,6 +267,9 @@ fun ReaderScreen(
         mutableIntStateOf(ProgressMath.clampProgress(book.position))
     }
     var currentChapter by remember { mutableIntStateOf(0) }
+    // Chapter step pressed while the large-book scan is still deferred: remember the
+    // direction and apply it once chapters land, so 上一章/下一章 never feel dead.
+    var pendingChapterStep by remember(book.id) { mutableIntStateOf(0) }
     var clock by remember { mutableStateOf(formatTime()) }
     // False until full-book pager sits on pageForProgress(saved). Blocks leave-save clobber.
     var restoreApplied by remember(book.id, textFullyLoaded) { mutableStateOf(false) }
@@ -444,6 +455,10 @@ fun ReaderScreen(
             val duration = ReaderLeaveSave.elapsedReadingMs(started, ended)
             val finalProgress = ProgressMath.clampProgress(latestProgress)
             ReaderLeaveSave.persistAsync(appContext, bookId, finalProgress, duration)
+            // Bump recent-reading order: opening records entry, leaving refreshes it
+            // so “最近阅读” sorts by when reading ended, not when it started.
+            // Cheap prefs write on the main thread — same cost as the open record.
+            ReadingHistory.get(appContext).record(bookId)
         }
     }
 
@@ -902,6 +917,22 @@ fun ReaderScreen(
         }
     }
 
+    // Queued 上一章/下一章 pressed while the chapter scan was still running:
+    // applied once chapters land, then cleared so later scans never replay it.
+    // Placed after jumpToOffset (Kotlin local funs must be declared before use).
+    LaunchedEffect(chaptersLoaded) {
+        if (!chaptersLoaded) return@LaunchedEffect
+        val step = pendingChapterStep
+        if (step == 0) return@LaunchedEffect
+        pendingChapterStep = 0
+        val anchor = ChapterIndex.chapterAtOffset(chapters, anchorOffset)
+        currentChapter = anchor
+        val target = (anchor + step).coerceIn(0, chapters.lastIndex)
+        if (target != anchor) {
+            jumpToOffset(chapters[target].start)
+        }
+    }
+
     // In-page system TTS — stays on Compose reader (no jump to legacy chrome).
     // Large TXT opens in two passes (window → full body). Do not bind TTS during the
     // window pass: replacing the reader body can otherwise create two TextToSpeech
@@ -972,6 +1003,23 @@ fun ReaderScreen(
 
     // Clear follow highlight when reading truly ends — keep it during Preparing
     // engine failover so the current paragraph does not blink off mid-session.
+    // Sleep timer: stop TTS when the countdown elapses. Restarting playback
+    // re-arms it; stopping or changing the selection cancels the pending stop.
+    LaunchedEffect(ttsState, ttsSleepMin, book.id) {
+        if (ttsState != ReaderTtsState.Speaking || !TtsSleepTimer.isEnabled(ttsSleepMin)) return@LaunchedEffect
+        delay(TtsSleepTimer.delayMs(ttsSleepMin))
+        if (ttsState == ReaderTtsState.Speaking) {
+            ttsController?.stop()
+            ttsSleepMin = TtsSleepTimer.OFF_MIN
+            preferences.setTtsSleepMin(TtsSleepTimer.OFF_MIN)
+            Toast.makeText(
+                context,
+                context.getString(R.string.reader_tts_sleep_done),
+                Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
+
     LaunchedEffect(ttsState) {
         if (ttsState != ReaderTtsState.Speaking) {
             // Playback has stopped or the engine is rebinding; stale timed turns must die.
@@ -993,15 +1041,20 @@ fun ReaderScreen(
         ttsState,
         useApproxPaging,
         approxCharsPerPage,
+        approxLocalStarts,
         pageStarts,
         book.text.length,
     ) {
         val playback = ttsChunkPlayback ?: return@LaunchedEffect
         if (ttsState != ReaderTtsState.Speaking) return@LaunchedEffect
         val cues = if (useApproxPaging) {
-            TtsPageFollow.cuesForApproximatePages(
+            // Prefer locally measured page starts (what the user actually sees) over
+            // the uniform char grid; falls back to grid pages with no measurements yet.
+            TtsPageFollow.cuesForMeasuredApproxPages(
+                startOverrides = approxLocalStarts,
                 textLength = book.text.length,
                 charsPerPage = approxCharsPerPage,
+                pageCount = PageIndex.approximatePageCount(book.text.length, approxCharsPerPage),
                 chunkStart = playback.start,
                 chunkEndExclusive = playback.endExclusive,
                 durationMs = playback.durationMs,
@@ -1076,16 +1129,23 @@ fun ReaderScreen(
         }
     }
 
-    // Timed auto page-turn (paused when chrome open or TTS is speaking).
-    LaunchedEffect(autoPageTurnSec, menuVisible, ttsState, pageCount) {
+    // Timed auto page-turn: pauses with chrome/TTS, idles on the last page instead of
+    // exiting (survives menu open/close without a relaunch), and stops counting while
+    // the user is scrubbing the progress slider. Keyed on the settled page so any
+    // manual turn restarts the interval — a fresh page always gets its full time
+    // instead of auto-turning one second after you just turned it yourself.
+    // (Our own auto tick also changes the page and restarts an identical interval.)
+    val autoTurnPage by rememberUpdatedState(pagerState.currentPage)
+    LaunchedEffect(autoPageTurnSec, menuVisible, ttsState, pageCount, sliderScrubbing, autoTurnPage) {
         val delayMs = AutoPageTurn.delayMs(autoPageTurnSec)
         if (delayMs <= 0L) return@LaunchedEffect
         while (true) {
             delay(delayMs)
             if (menuVisible) continue
+            if (sliderScrubbing) continue
             if (ttsState == ReaderTtsState.Speaking) continue
-            val next = PageIndex.stepPage(pagerState.currentPage, pageCount, 1)
-            if (next == pagerState.currentPage) break
+            val next = AutoPageTurn.nextPageOrNull(pagerState.currentPage, pageCount)
+                ?: continue
             animateToPage(next)
         }
     }
@@ -1472,7 +1532,6 @@ fun ReaderScreen(
                                     showBookmarks,
                                     showFind,
                                     showAppearance,
-                                    showTtsRateDialog,
                                     showVoiceManagerSheet,
                                 ) {
                                     SelectionContainer(modifier = bodyModifier) {
@@ -1520,7 +1579,7 @@ fun ReaderScreen(
                     .padding(horizontal = 16.dp, vertical = 6.dp)
                     .graphicsLayer { alpha = if (menuVisible) 0f else 1f }
                     .then(footerSemantics),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -1529,28 +1588,32 @@ fun ReaderScreen(
                     style = MaterialTheme.typography.labelMedium,
                     maxLines = 1,
                 )
-                // Kindle-style page location + explicit percent.
                 Text(
                     text = "$pageLocation · $percent%",
                     color = palette.muted,
                     style = MaterialTheme.typography.labelMedium,
                     maxLines = 1,
                 )
-                val chapterTitle = chapters.getOrNull(currentChapter)?.title.orEmpty()
-                Text(
-                    text = if (chapterTitle.isNotEmpty()) {
-                        buildString {
-                            append(chapterTitle.take(12))
-                            if (chapterTitle.length > 12) append('…')
-                        }
-                    } else {
-                        ""
-                    },
-                    color = palette.muted,
-                    style = MaterialTheme.typography.labelMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                val chapterTitle = if (chaptersLoaded) {
+                    chapters.getOrNull(currentChapter)?.title.orEmpty()
+                } else {
+                    fullTextChapterLabel
+                }
+                if (chapterTitle.isNotEmpty()) {
+                    Text(
+                        text = buildString {
+                            append(chapterTitle.take(18))
+                            if (chapterTitle.length > 18) append('…')
+                        },
+                        color = palette.muted,
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = true),
+                    )
+                } else {
+                    Spacer(modifier = Modifier.weight(1f, fill = true))
+                }
             }
         }
 
@@ -1627,7 +1690,16 @@ fun ReaderScreen(
                                 } else {
                                     ttsCd
                                 }
-                                contentDescription = "$actionLabel，长按打开$voiceManagerCd"
+                                val hint = if (ttsState == ReaderTtsState.Speaking) {
+                                    context.getString(R.string.reader_tts_stop_hint)
+                                } else {
+                                    null
+                                }
+                                contentDescription = if (hint != null) {
+                                    "$actionLabel。$hint，长按打开$voiceManagerCd"
+                                } else {
+                                    "$actionLabel，长按打开$voiceManagerCd"
+                                }
                             },
                         contentAlignment = Alignment.Center,
                     ) {
@@ -1670,6 +1742,68 @@ fun ReaderScreen(
                     val sliderDisplayProgress = sliderPreviewProgress ?: progress
                     val sliderPercent = ProgressMath.percentOfProgress(sliderDisplayProgress)
                     val sliderProgressCd = stringResource(R.string.reader_progress_cd, sliderPercent)
+                    // Tomato-style preview bubble: chapter · percent · page, only while scrubbing.
+                    if (sliderScrubbing && sliderPreviewProgress != null) {
+                        val previewProgress = sliderPreviewProgress!!
+                        val previewOffset = ((previewProgress / 1000f) * book.text.length)
+                            .roundToInt().coerceIn(0, book.text.length.coerceAtLeast(0))
+                        val previewChapterIdx = if (chaptersLoaded) {
+                            ChapterIndex.chapterAtOffset(chapters, previewOffset)
+                        } else {
+                            0
+                        }
+                        val previewChapterTitle = if (chaptersLoaded) {
+                            chapters.getOrNull(previewChapterIdx)?.title
+                                ?.takeIf { it != fullTextChapterLabel }?.take(22)
+                        } else {
+                            null
+                        }
+                        val previewPageLoc = if (pageCount > 0) {
+                            val p = PageIndex.pageForProgress(previewProgress, pageCount) + 1
+                            "$p / $pageCount"
+                        } else ""
+                        val untitledChapter = stringResource(
+                            R.string.reader_preview_chapter_untitled,
+                            previewChapterIdx + 1,
+                        )
+                        val bubbleTitle = when {
+                            !chaptersLoaded -> fullTextChapterLabel
+                            previewChapterTitle.isNullOrEmpty() -> untitledChapter
+                            else -> previewChapterTitle
+                        }
+                        Box(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Surface(
+                                color = palette.background,
+                                shape = RoundedCornerShape(12.dp),
+                                shadowElevation = 6.dp,
+                                tonalElevation = 2.dp,
+                                modifier = Modifier.shadow(8.dp, RoundedCornerShape(12.dp)),
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                ) {
+                                    Text(
+                                        text = bubbleTitle,
+                                        color = palette.onBackground,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = if (previewPageLoc.isNotEmpty()) "$previewPageLoc · $sliderPercent%" else "$sliderPercent%",
+                                        color = palette.muted,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        maxLines = 1,
+                                    )
+                                }
+                            }
+                        }
+                    }
                     // Percent label + slider on one row so progress is never “bar only”.
                     Row(
                         modifier = Modifier
@@ -1723,9 +1857,13 @@ fun ReaderScreen(
                         ) {
                             ControlLabel(
                                 text = stringResource(R.string.reader_prev_chapter),
-                                enabled = currentChapter > 0,
+                                enabled = if (!chaptersLoaded) true else currentChapter > 0,
                                 color = palette.onBar,
                                 onClick = {
+                                    if (!chaptersLoaded) {
+                                        pendingChapterStep = -1
+                                        return@ControlLabel
+                                    }
                                     if (currentChapter > 0) {
                                         jumpToOffset(chapters[currentChapter - 1].start)
                                     }
@@ -1775,9 +1913,13 @@ fun ReaderScreen(
                             )
                             ControlLabel(
                                 text = stringResource(R.string.reader_next_chapter),
-                                enabled = currentChapter < chapters.lastIndex,
+                                enabled = if (!chaptersLoaded) true else currentChapter < chapters.lastIndex,
                                 color = palette.onBar,
                                 onClick = {
+                                    if (!chaptersLoaded) {
+                                        pendingChapterStep = 1
+                                        return@ControlLabel
+                                    }
                                     if (currentChapter < chapters.lastIndex) {
                                         jumpToOffset(chapters[currentChapter + 1].start)
                                     }
@@ -1791,6 +1933,8 @@ fun ReaderScreen(
     }
 
     if (showToc) {
+        // While the large-book scan is still deferred, the list shows the single 全文
+        // placeholder (initial chapters value) — never an empty sheet.
         val currentSuffix = stringResource(R.string.reader_chapter_current_suffix)
         val tocJumpLabel = stringResource(R.string.reader_toc_jump_current)
         val tocJumpCd = stringResource(R.string.reader_toc_jump_current_cd)
@@ -1809,6 +1953,16 @@ fun ReaderScreen(
             onDismissRequest = { showToc = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         ) {
+            var tocFilter by remember(showToc) { mutableStateOf("") }
+            val tocVisible = remember(chapters, tocFilter) {
+                val needle = tocFilter.trim()
+                if (needle.isEmpty()) {
+                    chapters.mapIndexed { index, chapter -> index to chapter }
+                } else {
+                    chapters.mapIndexed { index, chapter -> index to chapter }
+                        .filter { (_, chapter) -> chapter.title.contains(needle, ignoreCase = true) }
+                }
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1826,6 +1980,9 @@ fun ReaderScreen(
                 )
                 TextButton(
                     onClick = {
+                        // Clear an active filter first: the current chapter may be
+                        // hidden by it, and scrolling to a filtered-out row is a no-op.
+                        tocFilter = ""
                         scope.launch {
                             val index = ChapterIndex.tocScrollIndex(currentChapter, chapters.size)
                             scrubIndex = index
@@ -1848,20 +2005,51 @@ fun ReaderScreen(
                     Text(tocJumpLabel)
                 }
             }
+            OutlinedTextField(
+                value = tocFilter,
+                onValueChange = { tocFilter = it },
+                singleLine = true,
+                label = { Text(stringResource(R.string.reader_toc_filter_hint)) },
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Text,
+                    imeAction = ImeAction.Search,
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .semantics {
+                        contentDescription = context.getString(R.string.reader_toc_filter_cd)
+                    },
+            )
             // List + right-edge fast scrub: drag 1 → 20 → 30 instantly (not slow fling).
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(max = 420.dp),
             ) {
+                val filtering = tocFilter.trim().isNotEmpty()
                 LazyColumn(
                     state = tocListState,
                     contentPadding = PaddingValues(bottom = 32.dp, end = 36.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    itemsIndexed(chapters) { index, chapter ->
+                    if (tocVisible.isEmpty()) {
+                        item {
+                            Text(
+                                text = stringResource(R.string.reader_toc_filter_none),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(16.dp),
+                            )
+                        }
+                    }
+                    items(
+                        count = tocVisible.size,
+                        key = { i -> "toc-${tocVisible[i].first}" },
+                    ) { i ->
+                        val (index, chapter) = tocVisible[i]
                         val selected = index == currentChapter
-                        val highlight = scrubbing && index == scrubIndex
+                        val highlight = !filtering && scrubbing && index == scrubIndex
                         val chapterCd = chapter.title + if (selected) currentSuffix else ""
                         ListItem(
                             headlineContent = {
@@ -1900,7 +2088,7 @@ fun ReaderScreen(
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
                 }
-                if (chapters.size > 1) {
+                if (!filtering && chapters.size > 1) {
                     TocScrubRail(
                         chapterCount = chapters.size,
                         scrubIndex = scrubIndex,
@@ -1949,12 +2137,13 @@ fun ReaderScreen(
             )
             TextButton(
                 onClick = {
-                    val label = chapters.getOrNull(currentChapter)?.title
+                    val label = (if (chaptersLoaded) chapters.getOrNull(currentChapter)?.title else fullTextChapterLabel)
                         ?: context.getString(R.string.reader_current_position)
                     BookmarkStore.get(context).add(
                         book.id,
                         ProgressMath.clampProgress(progress),
                         label,
+                        currentReadingOffset(),
                     )
                     bookmarkVersion++
                     Toast.makeText(
@@ -1981,10 +2170,69 @@ fun ReaderScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 16.dp)
-                        .semantics { contentDescription = bookmarksEmpty },
+                        .padding(horizontal = 20.dp, vertical = 16.dp),
                 )
             } else {
+                var showClearBookmarks by remember(book.id) { mutableStateOf(false) }
+                TextButton(
+                    onClick = { showClearBookmarks = true },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                        .padding(horizontal = 8.dp)
+                        .semantics {
+                            contentDescription = context.getString(R.string.reader_bookmarks_clear_cd)
+                            role = Role.Button
+                        },
+                ) {
+                    Text(
+                        stringResource(R.string.reader_bookmarks_clear),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                if (showClearBookmarks) {
+                    AlertDialog(
+                        onDismissRequest = { showClearBookmarks = false },
+                        title = { Text(stringResource(R.string.reader_bookmarks_clear_title)) },
+                        text = {
+                            Text(
+                                stringResource(
+                                    R.string.reader_bookmarks_clear_body,
+                                    bookmarks.size,
+                                ),
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    val count = bookmarks.size
+                                    BookmarkStore.get(context).clear(book.id)
+                                    bookmarkVersion++
+                                    showClearBookmarks = false
+                                    Toast.makeText(
+                                        context,
+                                        context.getString(R.string.reader_bookmarks_cleared, count),
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                },
+                                modifier = Modifier.heightIn(min = 48.dp),
+                            ) {
+                                Text(
+                                    stringResource(R.string.reader_delete),
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(
+                                onClick = { showClearBookmarks = false },
+                                modifier = Modifier.heightIn(min = 48.dp),
+                            ) {
+                                Text(stringResource(R.string.reader_cancel))
+                            }
+                        },
+                    )
+                }
                 LazyColumn(
                     contentPadding = PaddingValues(bottom = 32.dp),
                     modifier = Modifier.heightIn(max = 360.dp),
@@ -1996,6 +2244,9 @@ fun ReaderScreen(
                             mark.label,
                             pct,
                         )
+                        val excerpt = remember(book.text, mark.offset) {
+                            BookmarkStore.excerpt(book.text, mark.offset)
+                        }
                         val itemCd = stringResource(
                             R.string.reader_bookmark_item_cd,
                             mark.label,
@@ -2015,6 +2266,17 @@ fun ReaderScreen(
                                     overflow = TextOverflow.Ellipsis,
                                 )
                             },
+                            supportingContent = if (excerpt.isNotEmpty()) {
+                                {
+                                    Text(
+                                        text = excerpt,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            } else null,
                             trailingContent = {
                                 TextButton(
                                     onClick = {
@@ -2055,6 +2317,7 @@ fun ReaderScreen(
 
     if (showFind) {
         FindDialog(
+            bookId = book.id,
             bookText = book.text,
             onDismiss = { showFind = false },
             onJump = { offset ->
@@ -2069,7 +2332,8 @@ fun ReaderScreen(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        val name = ReaderCustomFont.importFromUri(context, uri, uri.lastPathSegment)
+        val outcome = ReaderCustomFont.importFromUriDetailed(context, uri, uri.lastPathSegment)
+        val name = (outcome as? ReaderCustomFont.ImportOutcome.Ok)?.fileName
         if (name != null) {
             // Drop previous custom file if renamed differently.
             val previous = preferences.customFontName()
@@ -2086,9 +2350,16 @@ fun ReaderScreen(
                 Toast.LENGTH_SHORT,
             ).show()
         } else {
+            val reason = (outcome as? ReaderCustomFont.ImportOutcome.Failed)?.reason
             Toast.makeText(
                 context,
-                context.getString(R.string.reader_font_import_fail),
+                context.getString(
+                    when (reason) {
+                        ReaderCustomFont.ImportFailure.UNSUPPORTED_TYPE ->
+                            R.string.reader_font_import_wrong_type
+                        else -> R.string.reader_font_import_unreadable
+                    },
+                ),
                 Toast.LENGTH_SHORT,
             ).show()
         }
@@ -2240,49 +2511,15 @@ fun ReaderScreen(
         )
     }
 
-    if (showTtsRateDialog) {
-        AlertDialog(
-            onDismissRequest = { showTtsRateDialog = false },
-            title = { Text(stringResource(R.string.reader_tts_rate_dialog_title)) },
-            text = {
-                Column {
-                    TtsRate.PRESETS.forEach { preset ->
-                        val selected = TtsRate.isPresetSelected(ttsRate, preset)
-                        val label = TtsRate.label(preset)
-                        Text(
-                            text = if (selected) "● $label" else "○ $label",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .defaultMinSize(minHeight = 48.dp)
-                                .clickable {
-                                    val clamped = TtsRate.clamp(preset)
-                                    ttsRate = clamped
-                                    preferences.setTtsRate(clamped)
-                                    ttsController?.setSpeechRate(clamped)
-                                    showTtsRateDialog = false
-                                }
-                                .padding(vertical = 12.dp),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = if (selected) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            },
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showTtsRateDialog = false }) {
-                    Text(stringResource(R.string.reader_close))
-                }
-            },
-        )
-    }
-
     if (showVoiceManagerSheet) {
         VoiceManagerSheet(
             ttsState = ttsState,
+            ttsSleepMin = ttsSleepMin,
+            onTtsSleepMin = { min ->
+                val clamped = TtsSleepTimer.clampMin(min)
+                ttsSleepMin = clamped
+                preferences.setTtsSleepMin(clamped)
+            },
             ttsRate = ttsRate,
             ttsEnginePackage = ttsEnginePackage,
             ttsEngines = ttsEngines,
@@ -2491,53 +2728,84 @@ private fun ControlLabel(
 
 @Composable
 private fun FindDialog(
+    bookId: String,
     bookText: String,
     onDismiss: () -> Unit,
     onJump: (Int) -> Unit,
 ) {
     val context = LocalContext.current
+    val preferences = remember { ReaderPreferences.get(context) }
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<Pair<Int, String>>>(emptyList()) }
     var searched by remember { mutableStateOf(false) }
+    var findHistory: List<String> by remember(bookId) {
+        mutableStateOf(preferences.findHistory(bookId).toList())
+    }
 
-    fun runSearch() {
-        val keyword = query.trim()
+    // Total hits for the current keyword (may exceed the rendered window below).
+    var totalHits by remember { mutableIntStateOf(0) }
+    // Rendered window into the full hit list; grows as the user scrolls.
+    var visibleCount by remember { mutableIntStateOf(0) }
+    // Full hit offsets for the current search; snippets are built lazily per window
+    // so a common single-char query in a long book does not allocate hundreds of strings.
+    var allPositions by remember { mutableStateOf<List<Int>>(emptyList()) }
+
+    fun snippetFor(at: Int, keyword: String): Pair<Int, String> {
+        val start = (at - 20).coerceAtLeast(0)
+        val end = (at + keyword.length + 36).coerceAtMost(bookText.length)
+        val snippet = buildString {
+            append(bookText.substring(start, at).replace('\n', ' '))
+            append('【')
+            append(bookText.substring(at, at + keyword.length))
+            append('】')
+            append(bookText.substring(at + keyword.length, end).replace('\n', ' '))
+        }
+        return at to snippet
+    }
+
+    fun runSearch(term: String = query) {
+        val keyword = term.trim()
         if (keyword.isEmpty()) {
             Toast.makeText(context, context.getString(R.string.reader_find_empty), Toast.LENGTH_SHORT).show()
             return
         }
+        query = keyword
+        preferences.pushFindHistory(bookId, keyword)
+        findHistory = preferences.findHistory(bookId).toList()
         val content = bookText.lowercase(Locale.ROOT)
         val needle = keyword.lowercase(Locale.ROOT)
+        // Cap total scan work: 2000 hits is plenty for navigation; beyond that the
+        // count label reports 2000+ and the list pages through the first 2000.
         val positions = ArrayList<Int>()
         var from = 0
-        while (positions.size < 50) {
+        while (positions.size < 2000) {
             val at = content.indexOf(needle, from)
             if (at < 0) break
             positions.add(at)
             from = at + needle.length.coerceAtLeast(1)
+            if (from >= content.length) break
         }
         searched = true
         if (positions.isEmpty()) {
+            // No toast: the dialog already shows 未找到“关键词” inline below the
+            // input; a second floating message is redundant and hides the history.
             results = emptyList()
-            Toast.makeText(
-                context,
-                context.getString(R.string.reader_find_none, keyword),
-                Toast.LENGTH_SHORT,
-            ).show()
+            allPositions = emptyList()
+            totalHits = 0
+            visibleCount = 0
             return
         }
-        results = positions.map { at ->
-            val start = (at - 20).coerceAtLeast(0)
-            val end = (at + keyword.length + 36).coerceAtMost(bookText.length)
-            val snippet = buildString {
-                append(bookText.substring(start, at).replace('\n', ' '))
-                append('【')
-                append(bookText.substring(at, at + keyword.length))
-                append('】')
-                append(bookText.substring(at + keyword.length, end).replace('\n', ' '))
-            }
-            at to snippet
-        }
+        allPositions = positions
+        totalHits = positions.size
+        visibleCount = 50.coerceAtMost(positions.size)
+        results = positions.take(visibleCount).map { at -> snippetFor(at, keyword) }
+    }
+
+    fun loadMoreResults() {
+        if (visibleCount >= allPositions.size) return
+        val keyword = query.trim()
+        visibleCount = (visibleCount + 50).coerceAtMost(allPositions.size)
+        results = allPositions.take(visibleCount).map { at -> snippetFor(at, keyword) }
     }
 
     AlertDialog(
@@ -2550,20 +2818,52 @@ private fun FindDialog(
                     onValueChange = { query = it },
                     singleLine = true,
                     label = { Text(stringResource(R.string.reader_find_hint)) },
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Text,
+                        imeAction = ImeAction.Search,
+                    ),
+                    keyboardActions = KeyboardActions(onSearch = { runSearch() }),
                     modifier = Modifier.fillMaxWidth(),
                 )
+                if (findHistory.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    @OptIn(ExperimentalLayoutApi::class)
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        findHistory.forEach { term ->
+                            SuggestionChip(
+                                onClick = { runSearch(term) },
+                                label = { Text(term) },
+                                modifier = Modifier.semantics {
+                                    contentDescription = context.getString(
+                                        R.string.search_history_cd,
+                                        term,
+                                    )
+                                },
+                            )
+                        }
+                    }
+                }
                 if (results.isNotEmpty()) {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = if (results.size >= 50) {
-                            stringResource(R.string.reader_find_results_capped, query.trim(), 50)
+                        text = if (totalHits >= 2000) {
+                            stringResource(R.string.reader_find_results_capped, query.trim(), 2000)
                         } else {
-                            stringResource(R.string.reader_find_results, query.trim(), results.size)
+                            stringResource(R.string.reader_find_results, query.trim(), totalHits)
                         },
                         style = MaterialTheme.typography.labelLarge,
                     )
                     LazyColumn(modifier = Modifier.heightIn(max = 280.dp)) {
-                        itemsIndexed(results) { _, item ->
+                        itemsIndexed(results) { index, item ->
+                            if (index >= results.size - 5) {
+                                LaunchedEffect(index, visibleCount, totalHits) {
+                                    loadMoreResults()
+                                }
+                            }
                             Text(
                                 text = item.second,
                                 modifier = Modifier
@@ -2582,6 +2882,18 @@ private fun FindDialog(
                                 overflow = TextOverflow.Ellipsis,
                             )
                             HorizontalDivider()
+                        }
+                        if (visibleCount < totalHits) {
+                            item {
+                                Text(
+                                    text = stringResource(R.string.reader_find_loading),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 10.dp),
+                                )
+                            }
                         }
                     }
                 } else if (searched) {
@@ -2617,6 +2929,8 @@ private fun FindDialog(
 @Composable
 private fun VoiceManagerSheet(
     ttsState: ReaderTtsState,
+    ttsSleepMin: Int,
+    onTtsSleepMin: (Int) -> Unit,
     ttsRate: Float,
     ttsEnginePackage: String,
     ttsEngines: List<TtsEngineOption>,
@@ -2846,6 +3160,46 @@ private fun VoiceManagerSheet(
                     ) {
                         Text(
                             text = TtsRate.label(preset),
+                            color = if (selected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
+                }
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            Text(
+                text = stringResource(R.string.reader_tts_sleep_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = if (TtsSleepTimer.isEnabled(ttsSleepMin)) {
+                    stringResource(R.string.reader_tts_rate_label, TtsSleepTimer.label(ttsSleepMin))
+                } else {
+                    stringResource(R.string.reader_tts_sleep_off)
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                TtsSleepTimer.PRESETS_MIN.forEach { preset ->
+                    val selected = TtsSleepTimer.isPresetSelected(ttsSleepMin, preset)
+                    TextButton(
+                        onClick = { onTtsSleepMin(preset) },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(
+                            text = if (preset <= 0) {
+                                stringResource(R.string.reader_tts_sleep_off)
+                            } else {
+                                TtsSleepTimer.label(preset)
+                            },
                             color = if (selected) {
                                 MaterialTheme.colorScheme.primary
                             } else {
@@ -3148,6 +3502,11 @@ private fun AppearanceDialog(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     TextButton(
+                        onClick = { onFontSize((fontSize - 5).coerceAtLeast(14)) },
+                        enabled = fontSize > 14,
+                        modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
+                    ) { Text(stringResource(R.string.reader_font_smaller5)) }
+                    TextButton(
                         onClick = { onFontSize((fontSize - 1).coerceAtLeast(14)) },
                         enabled = fontSize > 14,
                         modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
@@ -3157,6 +3516,11 @@ private fun AppearanceDialog(
                         enabled = fontSize < 30,
                         modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
                     ) { Text(stringResource(R.string.reader_font_larger)) }
+                    TextButton(
+                        onClick = { onFontSize((fontSize + 5).coerceAtMost(30)) },
+                        enabled = fontSize < 30,
+                        modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
+                    ) { Text(stringResource(R.string.reader_font_larger5)) }
                 }
 
                 Spacer(Modifier.height(8.dp))

@@ -68,7 +68,6 @@
             android:name=".SearchActivity"
             android:exported="true"
             android:launchMode="singleTop"
-            android:label="@string/app_name"
             android:theme="@style/Theme.BiqugeStudio"
             android:windowSoftInputMode="adjustResize">
             <!-- ACTION_VIEW content:// (SAF / Downloads / DocumentsUI) -->
@@ -86,10 +85,14 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="content" android:host="*" android:mimeType="*/*" android:pathPattern=".*\\.txt" />
-                <data android:scheme="content" android:host="*" android:mimeType="*/*" android:pathPattern=".*\\.epub" />
-                <data android:scheme="content" android:host="*" android:mimeType="*/*" android:pathPattern=".*\\.TXT" />
-                <data android:scheme="content" android:host="*" android:mimeType="*/*" android:pathPattern=".*\\.EPUB" />
+                <!-- Attributes inside one filter combine globally; spell out each axis once. -->
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:mimeType="*/*" />
+                <data android:pathPattern=".*\\.txt" />
+                <data android:pathPattern=".*\\.epub" />
+                <data android:pathPattern=".*\\.TXT" />
+                <data android:pathPattern=".*\\.EPUB" />
             </intent-filter>
             <!-- ACTION_VIEW file:// (legacy paths; minSdk 23 still sees some providers) -->
             <intent-filter android:label="@string/import_share_target_label">
@@ -105,10 +108,12 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="file" android:host="*" android:pathPattern=".*\\.txt" />
-                <data android:scheme="file" android:host="*" android:pathPattern=".*\\.epub" />
-                <data android:scheme="file" android:host="*" android:pathPattern=".*\\.TXT" />
-                <data android:scheme="file" android:host="*" android:pathPattern=".*\\.EPUB" />
+                <data android:scheme="file" />
+                <data android:host="*" />
+                <data android:pathPattern=".*\\.txt" />
+                <data android:pathPattern=".*\\.epub" />
+                <data android:pathPattern=".*\\.TXT" />
+                <data android:pathPattern=".*\\.EPUB" />
             </intent-filter>
             <!-- ACTION_SEND share sheet: EXTRA_STREAM content URI (+ MIME) -->
             <intent-filter android:label="@string/import_share_target_label">
@@ -134,9 +139,16 @@
             android:exported="false" />
         <activity
             android:name=".RemoteImportActivity"
-            android:exported="false" />
+            android:exported="false"
+            android:configChanges="keyboardHidden|orientation|screenSize" />
+        <activity
+            android:name=".BrowserImportActivity"
+            android:exported="false"
+            android:configChanges="keyboardHidden|orientation|screenSize"
+            android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".WebImportActivity"
-            android:exported="false" />
+            android:exported="false"
+            android:configChanges="keyboardHidden|orientation|screenSize" />
     </application>
 </manifest>

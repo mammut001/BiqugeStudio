@@ -1,6 +1,5 @@
 package app.maoyankanshu.novel.selfuse
 
-import java.net.HttpURLConnection
 import java.net.URL
 import java.util.regex.Pattern
 
@@ -61,26 +60,23 @@ object WebImportFetcher {
         preferredTitle: String,
         userAgent: String,
         defaultTitle: String,
+        cancellationSignal: RemoteImportCancellationSignal? = null,
     ): Result {
         val cleanUrl = rawUrl.trim()
         if (!cleanUrl.startsWith("https://", ignoreCase = true)) {
             throw IllegalArgumentException("HTTPS URL required")
         }
-        val connection = (URL(cleanUrl).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 15_000
-            readTimeout = 30_000
-            instanceFollowRedirects = true
-            setRequestProperty("User-Agent", userAgent)
-            setRequestProperty("Accept", "text/html,application/xhtml+xml")
-        }
+        val connection = RemoteImportDownloader.openFollowingHttpsRedirects(
+            initialUrl = URL(cleanUrl),
+            userAgent = userAgent,
+            cookie = null,
+            referer = null,
+            cancellationSignal = cancellationSignal,
+            requestHeaders = mapOf("Accept" to "text/html,application/xhtml+xml"),
+        )
         try {
-            val code = connection.responseCode
-            if (code !in 200..299) throw IllegalStateException("HTTP $code")
-            val finalProtocol = connection.url.protocol
-            if (!"https".equals(finalProtocol, ignoreCase = true)) {
-                throw IllegalArgumentException("HTTPS protocol required")
-            }
-            // Capture the post-redirect address after verifying it is still HTTPS. The imported
+            // Capture the post-redirect address. The shared connection opener has already
+            // verified every hop is HTTPS, not only the final destination. The imported
             // source footer should describe the page we actually downloaded, not a stale short/
             // redirect URL the user happened to paste.
             val finalUrl = connection.url.toString()
@@ -99,6 +95,7 @@ object WebImportFetcher {
             if (name.isEmpty()) name = defaultTitle
             return Result(title = name, body = body, sourceUrl = finalUrl)
         } finally {
+            cancellationSignal?.detach(connection)
             connection.disconnect()
         }
     }

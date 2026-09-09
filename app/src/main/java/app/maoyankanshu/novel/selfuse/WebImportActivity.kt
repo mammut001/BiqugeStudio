@@ -35,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,6 +43,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -73,32 +76,52 @@ class WebImportActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        val suggestedTitle = intent.getStringExtra(EXTRA_TITLE).orEmpty()
+        val suggestedUrl = intent.getStringExtra(EXTRA_URL).orEmpty()
         setContent {
             BiqugeTheme(darkTheme = ReaderPreferences.get(this).nightMode()) {
                 WebImportScreen(
+                    initialTitle = suggestedTitle,
+                    initialUrl = suggestedUrl,
                     onClose = { finish() },
-                    onImported = { finish() },
+                    onImported = { bookId, added ->
+                        startActivity(AppIntents.bookDetailJustImported(this, bookId, added))
+                        finish()
+                    },
                 )
             }
         }
+    }
+
+    companion object {
+        const val EXTRA_TITLE: String = "title"
+        const val EXTRA_URL: String = "url"
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun WebImportScreen(
+    initialTitle: String = "",
+    initialUrl: String = "",
     onClose: () -> Unit,
-    onImported: () -> Unit,
+    onImported: (String, Boolean) -> Unit,
 ) {
     val context = LocalContext.current
     val activity = context as? Activity
     val scope = rememberCoroutineScope()
-    var title by remember { mutableStateOf("") }
-    var url by remember { mutableStateOf("") }
+    var title by remember { mutableStateOf(initialTitle) }
+    var url by remember { mutableStateOf(initialUrl) }
     var loading by remember { mutableStateOf(false) }
     var importJob by remember { mutableStateOf<Job?>(null) }
+    var cancellationSignal by remember { mutableStateOf<RemoteImportCancellationSignal?>(null) }
+    val importSessions = remember { ImportSessionTracker() }
     var urlError by remember { mutableStateOf<String?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var lastFailureDetail by remember { mutableStateOf<DownloadImportFailure.Detail?>(null) }
+    // Same 429 window as the direct-link page: extra taps replay remaining time
+    // and must not extend the cooldown or fire another request.
+    val rateLimitThrottle = remember { RateLimitThrottle() }
 
     val backCd = stringResource(R.string.web_back_cd)
     val titleCd = stringResource(R.string.web_title_cd)
@@ -111,22 +134,51 @@ private fun WebImportScreen(
     val authorPrefix = stringResource(R.string.web_author_prefix)
 
     fun cancelImport(leave: Boolean) {
+        cancellationSignal?.cancel()
+        importSessions.invalidate()
+        cancellationSignal = null
         importJob?.cancel()
         importJob = null
         loading = false
         if (leave) onClose()
     }
 
+    DisposableEffect(Unit) {
+        onDispose {
+            cancellationSignal?.cancel()
+            importJob?.cancel()
+        }
+    }
+
     fun startImport() {
         if (loading) return
         urlError = null
         errorMessage = null
+        lastFailureDetail = null
         val rawUrl = url.trim()
+        val nowMs = android.os.SystemClock.elapsedRealtime()
+        val cooldownRemainingMs = rateLimitThrottle.remainingMs(rawUrl, nowMs)
+        if (cooldownRemainingMs > 0L) {
+            val remainingSeconds = (cooldownRemainingMs + 999L) / 1_000L
+            errorMessage = context.getString(
+                R.string.download_import_rate_limited_wait,
+                remainingSeconds,
+            )
+            lastFailureDetail = DownloadImportFailure.Detail(
+                DownloadImportFailure.Kind.RATE_LIMITED,
+                httpStatus = 429,
+                retryAfterSeconds = remainingSeconds,
+            )
+            return
+        }
         if (!ProgressMath.isHttpsUrl(rawUrl)) {
             urlError = context.getString(R.string.https_url_required)
             return
         }
         loading = true
+        val sessionToken = importSessions.start()
+        val signal = RemoteImportCancellationSignal()
+        cancellationSignal = signal
         importJob = scope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
@@ -135,6 +187,7 @@ private fun WebImportScreen(
                         preferredTitle = title,
                         userAgent = userAgent,
                         defaultTitle = defaultTitle,
+                        cancellationSignal = signal,
                     )
                 }
                 ensureActive()
@@ -144,34 +197,47 @@ private fun WebImportScreen(
                 // Large article concatenation and library persistence are storage/allocation work;
                 // keep both away from Compose/main so a successful download does not end in a
                 // noticeable UI freeze while the book is being saved.
-                withContext(Dispatchers.IO) {
-                    LibraryStore.get(context).add(
+                val addResult = withContext(Dispatchers.IO) {
+                    LibraryStore.get(context).addOrGetExisting(
                         result.title,
                         author,
                         result.body + footer,
+                        null,
+                        true,
                     )
                 }
                 ensureActive()
                 if (!activity.canAcceptUi()) return@launch
-                Toast.makeText(
-                    context,
-                    context.getString(R.string.web_import_ok, result.title),
-                    Toast.LENGTH_SHORT,
-                ).show()
-                onImported()
+                rateLimitThrottle.clear(rawUrl)
+                onImported(addResult.id, addResult.added)
             } catch (cancel: CancellationException) {
                 // User cancel, back, or leave composition: never treat as web_import_fail.
-                if (activity.canAcceptUi()) {
+                if (activity.canAcceptUi() && importSessions.owns(sessionToken)) {
                     loading = false
                     importJob = null
+                    cancellationSignal = null
                 }
                 throw cancel
             } catch (error: Exception) {
-                if (!activity.canAcceptUi()) return@launch
+                // A disconnected socket can surface as IOException before the coroutine
+                // resumes; convert it back to silent cancellation when the Job was cancelled.
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (!activity.canAcceptUi() || !importSessions.owns(sessionToken)) return@launch
                 Log.e("YueJianWebImport", "Unable to import web page", error)
-                errorMessage = context.getString(R.string.web_import_fail)
+                // 与直链页一致：429/5xx 吃分类文案，其余回退通用提示。
+                val failure = DownloadImportFailure.classify(error)
+                errorMessage = context.downloadImportFailureMessage(failure, R.string.web_import_fail)
+                lastFailureDetail = failure
+                if (failure.kind == DownloadImportFailure.Kind.RATE_LIMITED) {
+                    rateLimitThrottle.record(
+                        rawUrl,
+                        android.os.SystemClock.elapsedRealtime(),
+                        DownloadImportFailure.rateLimitCooldownMs(failure),
+                    )
+                }
                 loading = false
                 importJob = null
+                cancellationSignal = null
             }
         }
     }
@@ -222,7 +288,6 @@ private fun WebImportScreen(
                 value = title,
                 onValueChange = {
                     title = it
-                    errorMessage = null
                 },
                 enabled = !loading,
                 singleLine = true,
@@ -231,16 +296,37 @@ private fun WebImportScreen(
                     .fillMaxWidth()
                     .semantics { contentDescription = titleCd },
             )
+            val clipboard = LocalClipboardManager.current
+            val pasteEmpty = stringResource(R.string.remote_paste_empty)
             OutlinedTextField(
                 value = url,
                 onValueChange = {
                     url = it
                     urlError = null
                     errorMessage = null
+                    lastFailureDetail = DownloadImportFailure.detailAfterUrlEdited(lastFailureDetail)
                 },
-                enabled = !loading,
-                singleLine = true,
-                label = { Text(stringResource(R.string.https_hint_web)) },
+                trailingIcon = {
+                    TextButton(
+                        onClick = {
+                            val clip = clipboard.getText()?.text?.trim().orEmpty()
+                            if (clip.isEmpty()) {
+                                Toast.makeText(context, pasteEmpty, Toast.LENGTH_SHORT).show()
+                            } else {
+                                url = clip
+                                urlError = null
+                                errorMessage = null
+                                lastFailureDetail = DownloadImportFailure.detailAfterUrlEdited(lastFailureDetail)
+                            }
+                        },
+                        enabled = !loading,
+                        modifier = Modifier.semantics {
+                            contentDescription = context.getString(R.string.remote_paste_cd)
+                        },
+                    ) {
+                        Text(stringResource(R.string.remote_paste))
+                    }
+                },
                 isError = urlError != null,
                 supportingText = if (urlError != null) {
                     {
@@ -248,7 +334,6 @@ private fun WebImportScreen(
                             text = urlError!!,
                             color = MaterialTheme.colorScheme.error,
                             modifier = Modifier.semantics {
-                                contentDescription = urlError!!
                                 liveRegion = LiveRegionMode.Polite
                             },
                         )
@@ -267,7 +352,6 @@ private fun WebImportScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .semantics {
-                            contentDescription = errorMessage!!
                             liveRegion = LiveRegionMode.Polite
                         },
                 )
@@ -306,14 +390,72 @@ private fun WebImportScreen(
                     }
                 }
             } else {
-                Button(
-                    onClick = { startImport() },
+                val failed = errorMessage != null
+                val retryUseful = DownloadImportFailure.isRetryEnabled(lastFailureDetail)
+                OutlinedButton(
+                    onClick = {
+                        val seed = url.trim().takeIf { ProgressMath.isHttpsUrl(it) } ?: return@OutlinedButton
+                        context.startActivity(AppIntents.browserImport(context, seed))
+                    },
+                    enabled = !loading && ProgressMath.isHttpsUrl(url.trim()),
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 48.dp)
-                        .semantics { contentDescription = importCd },
+                        .semantics {
+                            contentDescription = context.getString(R.string.web_to_browser_cd)
+                        },
                 ) {
-                    Text(stringResource(R.string.web_import_action))
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(stringResource(R.string.web_to_browser_action))
+                        Text(
+                            stringResource(R.string.web_to_browser_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                OutlinedButton(
+                    onClick = {
+                        context.startActivity(AppIntents.remoteImport(context, title, url))
+                    },
+                    enabled = !loading,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .semantics {
+                            contentDescription = context.getString(R.string.web_to_remote_cd)
+                        },
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(stringResource(R.string.web_to_remote_action))
+                        Text(
+                            stringResource(R.string.web_to_remote_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Button(
+                    onClick = { startImport() },
+                    enabled = retryUseful,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .semantics {
+                            contentDescription = if (failed) {
+                                context.getString(R.string.remote_retry_download_cd)
+                            } else {
+                                importCd
+                            }
+                        },
+                ) {
+                    Text(
+                        stringResource(
+                            if (failed) R.string.remote_retry_download else R.string.web_import_action
+                        )
+                    )
                 }
             }
         }

@@ -10,6 +10,8 @@ import java.net.HttpURLConnection
  * when the header is missing or wrong. Pure helpers are unit-testable on the JVM.
  */
 internal object HttpsBodyLimits {
+    /** First useful feedback arrives quickly on slow mobile links; still <=400 events at 50 MiB. */
+    private const val PROGRESS_STEP_BYTES: Int = 128 * 1024
     /** Remote TXT/EPUB direct download (matches [RemoteImportDownloader]). */
     const val REMOTE_MAX_BYTES: Int = 50 * 1024 * 1024
 
@@ -43,16 +45,26 @@ internal object HttpsBodyLimits {
         }
     }
 
-    fun readAll(input: InputStream, maxBytes: Int): ByteArray {
+    fun readAll(
+        input: InputStream,
+        maxBytes: Int,
+        onProgress: ((Long) -> Unit)? = null,
+    ): ByteArray {
         val out = ByteArrayOutputStream()
         val buffer = ByteArray(8192)
+        var nextProgress = PROGRESS_STEP_BYTES.toLong()
         var n: Int
         while (input.read(buffer).also { n = it } != -1) {
             if (out.size().toLong() + n > maxBytes.toLong()) {
                 throw IllegalStateException("too large")
             }
             out.write(buffer, 0, n)
+            if (out.size().toLong() >= nextProgress) {
+                onProgress?.invoke(out.size().toLong())
+                nextProgress = out.size().toLong() + PROGRESS_STEP_BYTES
+            }
         }
+        onProgress?.invoke(out.size().toLong())
         return out.toByteArray()
     }
 }

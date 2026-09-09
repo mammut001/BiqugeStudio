@@ -76,6 +76,39 @@ class TtsPageFollowTest {
     }
 
     @Test
+    fun measuredApprox_prefersLocalStartsOverGrid() {
+        // Grid would put page 1 at 200; measured start says the page really begins at 260.
+        val cues = TtsPageFollow.cuesForMeasuredApproxPages(
+            startOverrides = mapOf(0 to 0, 1 to 260, 2 to 480),
+            textLength = 1_000,
+            charsPerPage = 200,
+            pageCount = 5,
+            chunkStart = 100,
+            chunkEndExclusive = 500,
+            durationMs = 20_000,
+        )
+        assertEquals(listOf(260, 480), cues.map { it.boundaryOffset })
+        assertEquals(listOf(1, 2), cues.map { it.page })
+        assertTrue(cues[0].atMillis in 1L until 20_000L)
+        assertTrue(cues[0].atMillis < cues[1].atMillis)
+    }
+
+    @Test
+    fun measuredApprox_emptyOverrides_fallsBackToGrid() {
+        val cues = TtsPageFollow.cuesForMeasuredApproxPages(
+            startOverrides = emptyMap(),
+            textLength = 1_000,
+            charsPerPage = 200,
+            pageCount = 5,
+            chunkStart = 120,
+            chunkEndExclusive = 320,
+            durationMs = 10_000,
+        )
+        assertEquals(1, cues.size)
+        assertEquals(200, cues[0].boundaryOffset)
+    }
+
+    @Test
     fun invalidOrUnknownDuration_hasNoCue() {
         assertTrue(
             TtsPageFollow.cuesForApproximatePages(1_000, 200, 100, 400, 0).isEmpty(),

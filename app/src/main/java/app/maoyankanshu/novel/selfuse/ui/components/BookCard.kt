@@ -67,9 +67,11 @@ private val CoverHeight = 74.dp
 fun BookCard(
     book: Book,
     onClick: () -> Unit,
-    onLongClick: (() -> Unit)? = null,
-    onContinueReading: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null,
+    /** TalkBack hint for the long-press action; shelf shows a menu, elsewhere opens details. */
+    longClickHint: String? = null,
+    onContinueReading: (() -> Unit)? = null,
     subtitle: String? = null,
     showContinueReading: Boolean = true,
 ) {
@@ -90,7 +92,8 @@ fun BookCard(
         append(subtitle ?: progressLabel)
         append("，进度 ")
         append(percentLabel)
-        if (onLongClick != null) append("。长按打开更多操作")
+        val hint = longClickHint?.takeIf { it.isNotBlank() }
+        if (onLongClick != null && hint != null) append("。" + hint)
         if (showContinueReading && onContinueReading != null) {
             append("。可")
             append(actionLabel)

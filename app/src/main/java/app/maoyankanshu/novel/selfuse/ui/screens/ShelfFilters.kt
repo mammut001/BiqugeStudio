@@ -87,9 +87,11 @@ object ShelfFilters {
 
     /**
      * Group an already-filtered/sorted list by author for display.
-     * - Preserves relative book order within each group and first-seen author order.
-     * - Blank/whitespace authors use [unknownAuthorLabel] (localized by UI).
-     * Does not re-sort or re-filter; call after [sectionAll].
+     * - Preserves relative book order within each group (the caller's sort wins).
+     * - Author headings are sorted by name (case-insensitive) so the group order is
+     *   stable across shelf refreshes instead of jumping with first-seen order.
+     * - Blank/whitespace authors use [unknownAuthorLabel] (localized by UI) and sort last.
+     * Does not re-sort or re-filter books; call after [sectionAll].
      */
     fun groupByAuthor(
         books: List<Book>,
@@ -103,5 +105,15 @@ object ShelfFilters {
             groups.getOrPut(label) { ArrayList() }.add(book)
         }
         return groups.map { (label, list) -> ShelfAuthorGroup(label, list) }
+            .sortedWith { a, b ->
+                val aUnknown = a.authorLabel == fallback
+                val bUnknown = b.authorLabel == fallback
+                if (aUnknown != bUnknown) {
+                    if (aUnknown) 1 else -1
+                } else {
+                    val name = a.authorLabel.lowercase().compareTo(b.authorLabel.lowercase())
+                    if (name != 0) name else a.authorLabel.compareTo(b.authorLabel)
+                }
+            }
     }
 }

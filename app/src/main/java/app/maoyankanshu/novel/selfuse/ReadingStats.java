@@ -1,5 +1,6 @@
 package app.maoyankanshu.novel.selfuse;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.SharedPreferences;
 
@@ -34,6 +35,7 @@ public final class ReadingStats {
     private ReadingStats() { }
 
     /** Adds a duration to the current local calendar day. Kept for legacy callers. */
+    @SuppressLint("ApplySharedPref") // synchronous commit is part of the locked read-modify-write
     public static void add(Context context, long millis) {
         if (millis <= 0) return;
         synchronized (LOCK) {
@@ -51,6 +53,7 @@ public final class ReadingStats {
      * {@code startedWallTimeMillis} is only used to decide which local calendar day owns each
      * slice. This keeps duration stable even if wall-clock time changes while reading.
      */
+    @SuppressLint("ApplySharedPref") // one locked commit atomically publishes every day slice
     public static void addInterval(Context context, long startedWallTimeMillis, long durationMillis) {
         if (durationMillis <= 0L) return;
         List<DayEntry> slices = splitInterval(
@@ -65,6 +68,8 @@ public final class ReadingStats {
             for (DayEntry slice : slices) {
                 editor.putLong(slice.dayKey, prefs.getLong(slice.dayKey, 0L) + slice.millis);
             }
+            // Keep synchronous inside ReaderLeaveSave's IO scope so its pending-write
+            // counter reaches idle only after the complete interval is durable on disk.
             editor.commit();
         }
     }

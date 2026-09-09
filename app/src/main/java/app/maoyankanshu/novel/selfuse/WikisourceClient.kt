@@ -1,9 +1,6 @@
 package app.maoyankanshu.novel.selfuse
 
 import org.json.JSONObject
-import java.io.ByteArrayOutputStream
-import java.io.InputStream
-import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
@@ -14,11 +11,15 @@ object WikisourceClient {
 
     data class ImportedPage(val title: String, val author: String, val text: String)
 
-    fun search(term: String, userAgent: String): List<Hit> {
+    fun search(
+        term: String,
+        userAgent: String,
+        cancellationSignal: RemoteImportCancellationSignal? = null,
+    ): List<Hit> {
         val api =
             "https://zh.wikisource.org/w/api.php?action=query&list=search&format=json&srlimit=10&srsearch=" +
                 URLEncoder.encode(term, "UTF-8")
-        val response = JSONObject(readUrl(api, userAgent))
+        val response = JSONObject(readUrl(api, userAgent, cancellationSignal))
         val items = response.getJSONObject("query").getJSONArray("search")
         val found = ArrayList<Hit>()
         for (i in 0 until items.length()) {
@@ -29,11 +30,16 @@ object WikisourceClient {
         return found
     }
 
-    fun importPage(pageTitle: String, userAgent: String, authorLabel: String): ImportedPage {
+    fun importPage(
+        pageTitle: String,
+        userAgent: String,
+        authorLabel: String,
+        cancellationSignal: RemoteImportCancellationSignal? = null,
+    ): ImportedPage {
         val api =
             "https://zh.wikisource.org/w/api.php?action=parse&prop=text&format=json&page=" +
                 URLEncoder.encode(pageTitle, "UTF-8")
-        val parsed = JSONObject(readUrl(api, userAgent))
+        val parsed = JSONObject(readUrl(api, userAgent, cancellationSignal))
         val html = parsed.getJSONObject("parse").getJSONObject("text").getString("*")
         val body = html
             .replace(Regex("(?is)<script[^>]*>.*?</script>"), "")
@@ -52,26 +58,29 @@ object WikisourceClient {
         return ImportedPage(title = pageTitle, author = authorLabel, text = body + attribution)
     }
 
-    private fun readUrl(address: String, userAgent: String): String {
-        val connection = (URL(address).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 15_000
-            readTimeout = 30_000
-            setRequestProperty("User-Agent", userAgent)
-        }
+    private fun readUrl(
+        address: String,
+        userAgent: String,
+        cancellationSignal: RemoteImportCancellationSignal?,
+    ): String {
+        val connection = RemoteImportDownloader.openFollowingHttpsRedirects(
+            initialUrl = URL(address),
+            userAgent = userAgent,
+            cookie = null,
+            referer = null,
+            cancellationSignal = cancellationSignal,
+            requestHeaders = mapOf("Accept" to "application/json"),
+        )
         try {
-            connection.inputStream.use { return readAllAsString(it) }
+            val contentLength = HttpsBodyLimits.contentLengthOf(connection)
+            HttpsBodyLimits.rejectIfDeclaredTooLarge(contentLength, HttpsBodyLimits.WEB_MAX_BYTES)
+            val data = connection.inputStream.use {
+                HttpsBodyLimits.readAll(it, HttpsBodyLimits.WEB_MAX_BYTES)
+            }
+            return String(data, StandardCharsets.UTF_8)
         } finally {
+            cancellationSignal?.detach(connection)
             connection.disconnect()
         }
-    }
-
-    private fun readAllAsString(stream: InputStream): String {
-        val output = ByteArrayOutputStream()
-        val buffer = ByteArray(8192)
-        var count: Int
-        while (stream.read(buffer).also { count = it } != -1) {
-            output.write(buffer, 0, count)
-        }
-        return String(output.toByteArray(), StandardCharsets.UTF_8)
     }
 }

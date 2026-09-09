@@ -6,8 +6,60 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayInputStream
+import java.net.URL
 
 class RemoteAndWebImportHttpsTest {
+
+    @Test
+    fun remoteRedirectPolicyRecognizesOnlyHttpRedirectStatuses() {
+        listOf(301, 302, 303, 307, 308).forEach {
+            assertTrue(RemoteImportDownloader.isRedirectStatus(it))
+        }
+        listOf(200, 204, 300, 304, 305, 306, 400, 500).forEach {
+            assertTrue(!RemoteImportDownloader.isRedirectStatus(it))
+        }
+    }
+
+    @Test
+    fun retryAfterParsesDeltaSecondsAndHttpDate() {
+        assertEquals(120L, RemoteImportDownloader.parseRetryAfterSeconds(" 120 "))
+        assertEquals(0L, RemoteImportDownloader.parseRetryAfterSeconds("0"))
+        assertEquals(null, RemoteImportDownloader.parseRetryAfterSeconds("-1"))
+        // Wed, 21 Oct 2015 07:28:00 GMT, observed exactly one minute earlier.
+        assertEquals(
+            60L,
+            RemoteImportDownloader.parseRetryAfterSeconds(
+                "Wed, 21 Oct 2015 07:28:00 GMT",
+                nowEpochMs = 1_445_412_420_000L,
+            ),
+        )
+        assertEquals(
+            0L,
+            RemoteImportDownloader.parseRetryAfterSeconds(
+                "Wed, 21 Oct 2015 07:28:00 GMT",
+                nowEpochMs = 1_445_412_480_001L,
+            ),
+        )
+        assertEquals(null, RemoteImportDownloader.parseRetryAfterSeconds("not a date"))
+        assertEquals(
+            null,
+            RemoteImportDownloader.parseRetryAfterSeconds(
+                "Wed, 21 Oct 2015 07:28:00 GMT trailing",
+                nowEpochMs = 1_445_412_420_000L,
+            ),
+        )
+        assertEquals(null, RemoteImportDownloader.parseRetryAfterSeconds(null))
+    }
+
+    @Test
+    fun remoteCookieOriginMatchesHostSchemeAndEffectivePort() {
+        val origin = URL("https://Books.Example.com/file.txt")
+        assertTrue(RemoteImportDownloader.sameOrigin(origin, URL("https://books.example.com/next")))
+        assertTrue(RemoteImportDownloader.sameOrigin(origin, URL("https://books.example.com:443/next")))
+        assertTrue(!RemoteImportDownloader.sameOrigin(origin, URL("https://cdn.example.com/next")))
+        assertTrue(!RemoteImportDownloader.sameOrigin(origin, URL("https://books.example.com:8443/next")))
+        assertTrue(!RemoteImportDownloader.sameOrigin(origin, URL("http://books.example.com/next")))
+    }
 
     @Test
     fun remoteImportDownloader_rejectsHttpUrl() {
@@ -176,6 +228,23 @@ class RemoteAndWebImportHttpsTest {
             HttpsBodyLimits.readAll(ByteArrayInputStream(payload), maxBytes = 50)
         }
         assertTrue(ex.message?.contains("too large") == true)
+    }
+
+    @Test
+    fun readAll_reportsThrottledProgressAndFinalByteCount() {
+        val payload = ByteArray(1_300_000) { 7 }
+        val reports = mutableListOf<Long>()
+
+        val result = HttpsBodyLimits.readAll(
+            ByteArrayInputStream(payload),
+            maxBytes = 2_000_000,
+            onProgress = reports::add,
+        )
+
+        assertEquals(payload.size, result.size)
+        assertEquals(payload.size.toLong(), reports.last())
+        assertTrue(reports.zipWithNext().all { (first, second) -> second >= first })
+        assertTrue(reports.size in 9..12)
     }
 
     @Test

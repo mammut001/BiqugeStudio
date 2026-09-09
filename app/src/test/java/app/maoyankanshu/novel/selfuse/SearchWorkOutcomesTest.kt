@@ -29,15 +29,15 @@ class SearchWorkOutcomesTest {
     fun localBatchNotice_cancelledNeverToasts() {
         assertEquals(
             SearchWorkOutcomes.LocalBatchNotice.NONE,
-            SearchWorkOutcomes.localBatchNotice(ok = 0, fail = 0, cancelled = true),
+            SearchWorkOutcomes.localBatchNotice(added = 0, existing = 0, fail = 0, cancelled = true),
         )
         assertEquals(
             SearchWorkOutcomes.LocalBatchNotice.NONE,
-            SearchWorkOutcomes.localBatchNotice(ok = 2, fail = 1, cancelled = true),
+            SearchWorkOutcomes.localBatchNotice(added = 1, existing = 1, fail = 1, cancelled = true),
         )
         assertEquals(
             SearchWorkOutcomes.LocalBatchNotice.NONE,
-            SearchWorkOutcomes.localBatchNotice(ok = 0, fail = 3, cancelled = true),
+            SearchWorkOutcomes.localBatchNotice(added = 0, existing = 0, fail = 3, cancelled = true),
         )
     }
 
@@ -45,23 +45,73 @@ class SearchWorkOutcomesTest {
     fun localBatchNotice_successAndFailureMatrix() {
         assertEquals(
             SearchWorkOutcomes.LocalBatchNotice.NONE,
-            SearchWorkOutcomes.localBatchNotice(ok = 0, fail = 0, cancelled = false),
+            SearchWorkOutcomes.localBatchNotice(added = 0, existing = 0, fail = 0, cancelled = false),
         )
         assertEquals(
             SearchWorkOutcomes.LocalBatchNotice.SINGLE_OK,
-            SearchWorkOutcomes.localBatchNotice(ok = 1, fail = 0, cancelled = false),
+            SearchWorkOutcomes.localBatchNotice(added = 1, existing = 0, fail = 0, cancelled = false),
         )
         assertEquals(
             SearchWorkOutcomes.LocalBatchNotice.MULTI_OK,
-            SearchWorkOutcomes.localBatchNotice(ok = 3, fail = 0, cancelled = false),
+            SearchWorkOutcomes.localBatchNotice(added = 3, existing = 0, fail = 0, cancelled = false),
+        )
+        assertEquals(
+            SearchWorkOutcomes.LocalBatchNotice.SINGLE_EXISTING,
+            SearchWorkOutcomes.localBatchNotice(added = 0, existing = 1, fail = 0, cancelled = false),
+        )
+        assertEquals(
+            SearchWorkOutcomes.LocalBatchNotice.MULTI_WITH_EXISTING,
+            SearchWorkOutcomes.localBatchNotice(added = 2, existing = 1, fail = 0, cancelled = false),
+        )
+        assertEquals(
+            SearchWorkOutcomes.LocalBatchNotice.ALL_EXISTING,
+            SearchWorkOutcomes.localBatchNotice(added = 0, existing = 3, fail = 0, cancelled = false),
         )
         assertEquals(
             SearchWorkOutcomes.LocalBatchNotice.PARTIAL,
-            SearchWorkOutcomes.localBatchNotice(ok = 2, fail = 1, cancelled = false),
+            SearchWorkOutcomes.localBatchNotice(added = 1, existing = 1, fail = 1, cancelled = false),
         )
         assertEquals(
             SearchWorkOutcomes.LocalBatchNotice.ALL_FAIL,
-            SearchWorkOutcomes.localBatchNotice(ok = 0, fail = 2, cancelled = false),
+            SearchWorkOutcomes.localBatchNotice(added = 0, existing = 0, fail = 2, cancelled = false),
+        )
+    }
+
+    @Test
+    fun opensDetailConfirmation_onlySingleNewOrExisting() {
+        assertTrue(
+            SearchWorkOutcomes.opensDetailConfirmation(
+                SearchWorkOutcomes.LocalBatchNotice.SINGLE_OK,
+            ),
+        )
+        assertTrue(
+            SearchWorkOutcomes.opensDetailConfirmation(
+                SearchWorkOutcomes.LocalBatchNotice.SINGLE_EXISTING,
+            ),
+        )
+        for (
+            notice in listOf(
+                SearchWorkOutcomes.LocalBatchNotice.NONE,
+                SearchWorkOutcomes.LocalBatchNotice.MULTI_OK,
+                SearchWorkOutcomes.LocalBatchNotice.MULTI_WITH_EXISTING,
+                SearchWorkOutcomes.LocalBatchNotice.ALL_EXISTING,
+                SearchWorkOutcomes.LocalBatchNotice.PARTIAL,
+                SearchWorkOutcomes.LocalBatchNotice.ALL_FAIL,
+            )
+        ) {
+            assertFalse(notice.name, SearchWorkOutcomes.opensDetailConfirmation(notice))
+        }
+        assertEquals("just_imported", BookDetailActivity.EXTRA_JUST_IMPORTED)
+        assertEquals("just_added", BookDetailActivity.EXTRA_JUST_ADDED)
+        assertTrue(
+            SearchWorkOutcomes.confirmationJustAdded(
+                SearchWorkOutcomes.LocalBatchNotice.SINGLE_OK,
+            ),
+        )
+        assertFalse(
+            SearchWorkOutcomes.confirmationJustAdded(
+                SearchWorkOutcomes.LocalBatchNotice.SINGLE_EXISTING,
+            ),
         )
     }
 

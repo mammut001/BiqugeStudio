@@ -60,6 +60,54 @@ object TtsPageFollow {
         return out
     }
 
+    /**
+     * Same as [cuesForExactPages] but the caller supplies locally measured page starts
+     * (large-book sequential reading). [startOverrides] maps page index to raw offset;
+     * [pageCount] caps the walk so virtual pages past the last measured start still cue.
+     * Pure for JVM tests — no Compose.
+     */
+    fun cuesForMeasuredApproxPages(
+        startOverrides: Map<Int, Int>,
+        textLength: Int,
+        charsPerPage: Int,
+        pageCount: Int,
+        chunkStart: Int,
+        chunkEndExclusive: Int,
+        durationMs: Long,
+    ): List<TtsPageCue> {
+        val length = textLength.coerceAtLeast(0)
+        if (length <= 0 || durationMs <= 1L || pageCount <= 1) return emptyList()
+        val size = charsPerPage.coerceAtLeast(PageIndex.MIN_APPROX_CHARS_PER_PAGE)
+        val start = chunkStart.coerceIn(0, length)
+        val end = chunkEndExclusive.coerceIn(start, length)
+        if (end - start <= 1) return emptyList()
+        // Dense measured starts near the chunk; uniform grid beyond them.
+        val starts = ArrayList<Int>(pageCount + 1)
+        var page = 0
+        while (page < pageCount) {
+            val raw = startOverrides[page]
+                ?: PageIndex.approximateOffsetForPage(page, size, length)
+            starts += raw.coerceIn(0, length)
+            page++
+        }
+        starts += length
+        val out = ArrayList<TtsPageCue>()
+        for (target in 1 until starts.size) {
+            val boundary = starts[target]
+            if (boundary <= start) continue
+            if (boundary >= end) break
+            val fromPage = target - 1
+            if (fromPage < 0 || target >= pageCount) continue
+            out += TtsPageCue(
+                fromPage = fromPage,
+                page = target,
+                boundaryOffset = boundary,
+                atMillis = cueTime(start, end, boundary, durationMs),
+            )
+        }
+        return out
+    }
+
     fun cuesForExactPages(
         pageStarts: List<Int>,
         textLength: Int,

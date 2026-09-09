@@ -103,6 +103,23 @@ class PlainTextDecoderTest {
     }
 
     @Test
+    fun utf16LeAndBe_withoutBom_detectedByNulInterleave() {
+        val body = "这是无BOM的UTF16中文测试文本内容足够长一些避免阈值问题"
+        val le = body.toByteArray(Charset.forName("UTF-16LE"))
+        val be = body.toByteArray(Charset.forName("UTF-16BE"))
+        assertEquals(body, PlainTextDecoder.decode(le))
+        assertEquals(body, PlainTextDecoder.decode(be))
+    }
+
+    @Test
+    fun utf16BomLess_shortAsciiBytes_notMisdetected() {
+        // Plain UTF-8/GBK without NULs must never route to UTF-16.
+        val body = "纯中文无NUL内容测试"
+        assertEquals(body, PlainTextDecoder.decode(body.toByteArray(StandardCharsets.UTF_8)))
+        assertEquals(body, PlainTextDecoder.decode(body.toByteArray(Charset.forName("GB18030"))))
+    }
+
+    @Test
     fun gb18030_whenUtf8IsActuallyMalformed() {
         val body = "这是 GB18030 简体中文"
         val bytes = body.toByteArray(Charset.forName("GB18030"))

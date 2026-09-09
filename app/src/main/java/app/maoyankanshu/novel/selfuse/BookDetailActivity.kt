@@ -42,12 +42,14 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,6 +59,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -86,6 +89,8 @@ class BookDetailActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val bookId = intent.getStringExtra(EXTRA_ID)
         val openEdit = intent.getBooleanExtra(EXTRA_EDIT, false)
+        val justImported = intent.getBooleanExtra(EXTRA_JUST_IMPORTED, false)
+        val justAdded = intent.getBooleanExtra(EXTRA_JUST_ADDED, true)
         if (bookId.isNullOrEmpty()) {
             finish()
             return
@@ -95,6 +100,8 @@ class BookDetailActivity : ComponentActivity() {
                 BookDetailRoute(
                     bookId = bookId,
                     openEditOnStart = openEdit,
+                    justImported = justImported,
+                    justAdded = justAdded,
                     onClose = { finish() },
                 )
             }
@@ -104,6 +111,10 @@ class BookDetailActivity : ComponentActivity() {
     companion object {
         const val EXTRA_ID: String = "book_id"
         const val EXTRA_EDIT: String = "edit_book"
+        /** True when launched right after a successful import (shows banner). */
+        const val EXTRA_JUST_IMPORTED: String = "just_imported"
+        /** False when the import was an exact duplicate of a shelf book. */
+        const val EXTRA_JUST_ADDED: String = "just_added"
     }
 }
 
@@ -115,6 +126,8 @@ class BookDetailActivity : ComponentActivity() {
 private fun BookDetailRoute(
     bookId: String,
     openEditOnStart: Boolean,
+    justImported: Boolean = false,
+    justAdded: Boolean = true,
     onClose: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -148,6 +161,8 @@ private fun BookDetailRoute(
     BookDetailScreen(
         initialBook = loaded,
         openEditOnStart = openEditOnStart,
+        justImportedBanner = justImported,
+        justAddedBanner = justAdded,
         onClose = onClose,
     )
 }
@@ -157,6 +172,8 @@ private fun BookDetailRoute(
 private fun BookDetailScreen(
     initialBook: Book,
     openEditOnStart: Boolean,
+    justImportedBanner: Boolean = false,
+    justAddedBanner: Boolean = true,
     onClose: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -166,9 +183,14 @@ private fun BookDetailScreen(
     var book by remember { mutableStateOf(initialBook) }
     var showEdit by remember { mutableStateOf(openEditOnStart) }
     var showDelete by remember { mutableStateOf(false) }
+    // Dismissable confirmation that this detail was opened straight from a download.
+    // Save dismissal through Activity recreation as well as ordinary recomposition.
+    var showImportBanner by rememberSaveable(book.id) { mutableStateOf(justImportedBanner) }
 
     var isExporting by remember { mutableStateOf(false) }
     var exportJob by remember { mutableStateOf<Job?>(null) }
+    val exportSessions = remember { ImportSessionTracker() }
+    var exportCancellationSignal by remember { mutableStateOf<StreamCancellationSignal?>(null) }
 
     // Chapter scanning is linear over the full book. Keep it off Compose/main for large TXT.
     var chapters by remember(book.id) { mutableIntStateOf(1) }
@@ -191,6 +213,7 @@ private fun BookDetailScreen(
     val editCd = stringResource(R.string.detail_edit_cd)
     val exportCd = stringResource(R.string.detail_export_cd)
     val deleteCd = stringResource(R.string.detail_delete_cd)
+    val pinCd = stringResource(R.string.detail_pin_cd)
     val previewCd = stringResource(R.string.detail_preview_cd)
     val exportOk = stringResource(R.string.detail_export_ok)
     val exportFail = stringResource(R.string.detail_export_fail)
@@ -211,9 +234,20 @@ private fun BookDetailScreen(
     }
 
     fun cancelExportWork() {
+        exportCancellationSignal?.cancel()
+        exportCancellationSignal = null
         exportJob?.cancel()
+        exportSessions.invalidate()
         clearExportBusy()
         // Soft cancel: no fail Toast (CancellationException path is silent too).
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            exportCancellationSignal?.cancel()
+            exportSessions.invalidate()
+            exportJob?.cancel()
+        }
     }
 
     val exportLauncher = rememberLauncherForActivityResult(
@@ -223,15 +257,18 @@ private fun BookDetailScreen(
         if (isExporting) return@rememberLauncherForActivityResult
         val bookId = book.id
         isExporting = true
+        val sessionToken = exportSessions.start()
+        val signal = StreamCancellationSignal()
+        exportCancellationSignal = signal
         exportJob = scope.launch {
             try {
                 withContext(Dispatchers.IO) {
                     context.contentResolver.openOutputStream(uri)?.use { stream ->
-                        LibraryStore.get(context).exportBook(bookId, stream)
+                        LibraryStore.get(context).exportBook(bookId, signal.output(stream))
                     } ?: throw IllegalStateException("openOutputStream returned null")
                 }
                 ensureActive()
-                if (!activity.canAcceptUi()) return@launch
+                if (!activity.canAcceptUi() || !exportSessions.owns(sessionToken)) return@launch
                 when (
                     BookDetailExportOutcomes.exportNotice(
                         cancelled = false,
@@ -240,6 +277,7 @@ private fun BookDetailScreen(
                 ) {
                     BookDetailExportOutcomes.ExportNotice.SUCCESS -> {
                         clearExportBusy()
+                        exportCancellationSignal = null
                         Toast.makeText(context, exportOk, Toast.LENGTH_SHORT).show()
                     }
                     BookDetailExportOutcomes.ExportNotice.NONE,
@@ -248,15 +286,17 @@ private fun BookDetailScreen(
                 }
             } catch (cancel: CancellationException) {
                 // User cancel / leave composition: never export_fail Toast.
-                if (activity.canAcceptUi()) {
+                if (activity.canAcceptUi() && exportSessions.owns(sessionToken)) {
                     clearExportBusy()
+                    exportCancellationSignal = null
                 }
                 throw cancel
             } catch (e: Exception) {
-                if (!activity.canAcceptUi()) return@launch
+                if (!activity.canAcceptUi() || !exportSessions.owns(sessionToken)) return@launch
                 if (!BookDetailExportOutcomes.shouldSurfaceAsFailure(e)) throw e
                 Log.e("YueJianDetail", "Unable to export book TXT", e)
                 clearExportBusy()
+                exportCancellationSignal = null
                 Toast.makeText(context, exportFail, Toast.LENGTH_SHORT).show()
             }
         }
@@ -300,6 +340,50 @@ private fun BookDetailScreen(
                     .padding(horizontal = 18.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                if (showImportBanner) {
+                    val bannerText = stringResource(
+                        if (justAddedBanner) R.string.detail_just_added
+                        else R.string.detail_just_existing,
+                    )
+                    val bannerCd = stringResource(
+                        if (justAddedBanner) R.string.detail_just_added_cd
+                        else R.string.detail_just_existing_cd,
+                    )
+                    val dismissCd = stringResource(R.string.detail_dismiss_banner_cd)
+                    Surface(
+                        shape = MaterialTheme.shapes.medium,
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .semantics {
+                                contentDescription = bannerCd
+                                liveRegion = LiveRegionMode.Polite
+                            },
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                text = bannerText,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clearAndSetSemantics { },
+                            )
+                            TextButton(
+                                onClick = { showImportBanner = false },
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .semantics { contentDescription = dismissCd },
+                            ) {
+                                Text(stringResource(R.string.detail_banner_got_it))
+                            }
+                        }
+                    }
+                }
                 Text(
                     text = book.title,
                     style = MaterialTheme.typography.headlineMedium,
@@ -347,8 +431,38 @@ private fun BookDetailScreen(
                 OutlinedButton(
                     onClick = {
                         if (isExporting) return@OutlinedButton
-                        val safe = book.title.replace(Regex("[\\\\/:*?\"<>|]"), "_")
-                        exportLauncher.launch("$safe.txt")
+                        val pinnedTitle = book.title
+                        val pinnedId = book.id
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                LibraryStore.get(context).moveToTop(pinnedId)
+                            }
+                            if (!activity.canAcceptUi()) return@launch
+                            Toast.makeText(
+                                context,
+                                context.getString(R.string.detail_pinned, pinnedTitle),
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        }
+                    },
+                    enabled = !isExporting,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .semantics { contentDescription = pinCd },
+                ) {
+                    Text(stringResource(R.string.detail_pin))
+                }
+                OutlinedButton(
+                    onClick = {
+                        if (isExporting) return@OutlinedButton
+                        val rawSafe = book.title.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim()
+                        val safe = rawSafe.takeIf { it.isNotEmpty() } ?: context.getString(R.string.app_name)
+                        val stamp = java.text.SimpleDateFormat(
+                            "yyyyMMdd",
+                            java.util.Locale.getDefault(),
+                        ).format(java.util.Date())
+                        exportLauncher.launch("${safe}_${stamp}.txt")
                     },
                     enabled = !isExporting,
                     modifier = Modifier
@@ -479,14 +593,21 @@ private fun BookDetailScreen(
                     onClick = {
                         showEdit = false
                         val bookId = book.id
+                        val savedTitle = cleanTitle
                         scope.launch {
                             val updated = withContext(Dispatchers.IO) {
                                 val store = LibraryStore.get(context)
                                 store.updateMetadata(bookId, cleanTitle, cleanAuthor)
                                 store.byId(bookId)
                             }
-                            if (updated != null && activity.canAcceptUi()) {
+                            if (!activity.canAcceptUi()) return@launch
+                            if (updated != null) {
                                 book = updated
+                                Toast.makeText(
+                                    context,
+                                    context.getString(R.string.detail_edit_saved, savedTitle),
+                                    Toast.LENGTH_SHORT,
+                                ).show()
                             }
                         }
                     },
@@ -532,12 +653,18 @@ private fun BookDetailScreen(
                     onClick = {
                         showDelete = false
                         val bookId = book.id
+                        val deletedTitle = book.title
                         scope.launch {
                             withContext(Dispatchers.IO) {
-                                LibraryStore.get(context).remove(bookId)
-                                ReadingHistory.get(context).remove(bookId)
+                                BookDataDeletion.remove(context, bookId)
                             }
-                            if (activity.canAcceptUi()) onClose()
+                            if (!activity.canAcceptUi()) return@launch
+                            Toast.makeText(
+                                context,
+                                context.getString(R.string.delete_book_done, deletedTitle),
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                            onClose()
                         }
                     },
                     modifier = Modifier

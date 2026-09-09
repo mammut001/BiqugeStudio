@@ -30,15 +30,44 @@ object ReaderCustomFont {
         return if (file.isFile && file.length() > 0) file else null
     }
 
+    /** Why a font import failed — shown as distinct user guidance. */
+    enum class ImportFailure {
+        /** Not a .ttf/.otf file (checked before any IO). */
+        UNSUPPORTED_TYPE,
+        /** Too big, unreadable, or not a loadable typeface. */
+        UNREADABLE,
+    }
+
+    sealed interface ImportOutcome {
+        data class Ok(val fileName: String) : ImportOutcome
+        data class Failed(val reason: ImportFailure) : ImportOutcome
+    }
+
     /**
      * Copy [uri] into app-private fonts and return the stored file name, or null on failure.
      */
-    fun importFromUri(context: Context, uri: Uri, displayNameHint: String?): String? {
+    fun importFromUri(context: Context, uri: Uri, displayNameHint: String?): String? =
+        when (val outcome = importFromUriDetailed(context, uri, displayNameHint)) {
+            is ImportOutcome.Ok -> outcome.fileName
+            is ImportOutcome.Failed -> null
+        }
+
+    /**
+     * Same as [importFromUri] but reports *why* it failed so the UI can say
+     * “选错文件了” vs “文件太大或已损坏” instead of one generic failure.
+     */
+    fun importFromUriDetailed(context: Context, uri: Uri, displayNameHint: String?): ImportOutcome {
         val app = context.applicationContext
         val resolver = app.contentResolver
         val rawName = displayNameHint?.takeIf { it.isNotBlank() }
             ?: uri.lastPathSegment
             ?: "custom.ttf"
+        // Fail fast on type: a .pdf/.txt picked by accident should say so
+        // without any storage IO. Display-name-less providers fall back to sniffing
+        // the stream header below (callers may still pass lastPathSegment).
+        if (!isSupportedFontName(rawName) && !isSupportedFontName(uri.lastPathSegment.orEmpty())) {
+            return ImportOutcome.Failed(ImportFailure.UNSUPPORTED_TYPE)
+        }
         val base = sanitizeFileName(rawName).ifEmpty { "custom.ttf" }
         val name = ensureFontExtension(base)
         val dest = File(fontsDirectory(app), name)
@@ -53,25 +82,25 @@ object ReaderCustomFont {
                         total += read
                         if (total > MAX_FONT_BYTES) {
                             dest.delete()
-                            return null
+                            return ImportOutcome.Failed(ImportFailure.UNREADABLE)
                         }
                         output.write(buffer, 0, read)
                     }
                 }
-            } ?: return null
+            } ?: return ImportOutcome.Failed(ImportFailure.UNREADABLE)
             if (!dest.isFile || dest.length() <= 0) {
                 dest.delete()
-                return null
+                return ImportOutcome.Failed(ImportFailure.UNREADABLE)
             }
             // Validate typeface can load.
             if (loadTypeface(dest) == null) {
                 dest.delete()
-                return null
+                return ImportOutcome.Failed(ImportFailure.UNREADABLE)
             }
-            name
+            ImportOutcome.Ok(name)
         } catch (_: Exception) {
             dest.delete()
-            null
+            ImportOutcome.Failed(ImportFailure.UNREADABLE)
         }
     }
 

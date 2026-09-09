@@ -37,6 +37,9 @@ internal object ProfileBackupOutcomes {
         /** Stream opened but zero books. */
         EMPTY,
 
+        /** All books in the backup already exist; nothing new, but not a failure. */
+        ALL_EXISTING,
+
         /** Hard failure (invalid zip, IO, etc.). */
         INVALID,
     }
@@ -51,6 +54,18 @@ internal object ProfileBackupOutcomes {
         if (cancelled) return RestoreNotice.NONE
         if (hardError) return RestoreNotice.INVALID
         return if (count > 0) RestoreNotice.SUCCESS else RestoreNotice.EMPTY
+    }
+
+    /**
+     * Detailed variant: backup parsed fine but every book was an exact duplicate.
+     * Callers pass [added] new books and [existing] skipped duplicates.
+     */
+    fun restoreNoticeDetailed(cancelled: Boolean, added: Int, existing: Int, hardError: Boolean): RestoreNotice {
+        if (cancelled) return RestoreNotice.NONE
+        if (hardError) return RestoreNotice.INVALID
+        if (added > 0) return RestoreNotice.SUCCESS
+        if (existing > 0) return RestoreNotice.ALL_EXISTING
+        return RestoreNotice.EMPTY
     }
 
     /** UI choice after a backup export attempt. */
