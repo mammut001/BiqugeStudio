@@ -7,3 +7,5 @@ keystore/
 .idea/
 *.iml
 .kotlin/
+test-artifacts/
+.DS_Store

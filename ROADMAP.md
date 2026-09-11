@@ -57,7 +57,7 @@
 | **TTS → Compose** | **已完成**（`ReaderTtsController` + 阅读页喇叭；`LegacyReaderActivity` 已删除） | 语速 UI / 自动滚动可再增强 |
 | 翻页动画 | 已有基础 3D 翻页 | 可再细化 |
 
-| 更多文本编码检测 | 部分 BOM/XML 已有 | 在现有 UTF-32 BOM 等基础上扩展 |
+| 更多文本编码检测 | UTF-8/16/32 BOM + GB18030 回退 + 无 BOM UTF-16 启发式 | 已覆盖常见中文 TXT 来源，无明确缺口暂缓 |
 
 **已完成、勿再当缺口：** Compose 主阅读（`ReaderActivity` / `ReaderScreen`）、离开进度与时长安全落库（`ReaderLeaveSave`）、详情 / 搜索 / 远程·网页导入 / 个人备份的 Job 取消与 `canAcceptUi` 约定。
 
