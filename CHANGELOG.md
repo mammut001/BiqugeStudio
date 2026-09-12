@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## [1.0.5] — versionCode 6 — 2026-09-12
+
+GitHub public release tag **`v1.0.5`**.
+
+### Improved
+
+- 阅读离开即保存进度：暂停/退出立刻写入当前已确认进度，不等 500ms 防抖；打开阶段未还原前不会把第 0 页写成 0%。
+- 上一章/下一章按当前阅读位置跳转，不必先打开目录；超 20 万字同样有效；没有上一章/下一章时停在原地。
+- 渐进打开先窗口后全文：窗口内翻页跟着当前页走（窗口本身已在进度附近），换成全文后才按已保存进度分页，避免先闪全书第 0 页。
 - 本地单文件导入成功直达详情确认：新书与书架已有书用不同横幅，不再靠 Toast 一闪而过；多文件仍用汇总提示。
 - 网页导入对齐直链失败动作：429 冷却期内连点只重播剩余秒数、不发请求也不续期；登录失效/链接过期/超限不再提供无意义重试；改地址或粘贴后会清掉旧失败，导入按钮重新可点。
 - 浏览器 `http://` 与 `javascript:` 不再导航或下载：主 frame、子 frame、DownloadListener 一律拦截；`about:blank` 子 frame 仍可加载。
@@ -173,8 +182,6 @@ aligned with `versionName` / `versionCode` in `app/build.gradle`.
 
 Dates and bullets below are derived from **git history** in this repository.
 They do **not** assert a Google Play ship date, store listing URL, or remote CI status.
-
-## [Unreleased]
 
 ## [1.0.4] — versionCode 5 — 2026-08-16
 

@@ -359,6 +359,10 @@ fun ReaderScreen(
 
     // Latest progress for leave-save: DisposableEffect keys only on book.id.
     val latestProgress by rememberUpdatedState(progress)
+    val latestTextFullyLoaded by rememberUpdatedState(textFullyLoaded)
+    val latestRestoreApplied by rememberUpdatedState(restoreApplied)
+    val latestPagerPage by rememberUpdatedState(pagerState.currentPage)
+    val latestPageCount by rememberUpdatedState(pageCount)
 
     // The first body can be laid out while restore is still gated, so its onTextLayout callback
     // intentionally skips calibration. Trigger one fresh layout as soon as restore completes;
@@ -442,7 +446,13 @@ fun ReaderScreen(
                 ReaderLeaveSave.persistAsync(
                     appContext,
                     bookId,
-                    ProgressMath.clampProgress(latestProgress),
+                    ReaderLeaveSave.progressToFlushOnPause(
+                        committedProgress = latestProgress,
+                        textFullyLoaded = latestTextFullyLoaded,
+                        restoreApplied = latestRestoreApplied,
+                        pagerPage = latestPagerPage,
+                        pageCount = latestPageCount,
+                    ),
                     0L,
                 )
             }
@@ -453,7 +463,13 @@ fun ReaderScreen(
             // Do not use rememberCoroutineScope here — composition is leaving.
             val ended = android.os.SystemClock.elapsedRealtime()
             val duration = ReaderLeaveSave.elapsedReadingMs(started, ended)
-            val finalProgress = ProgressMath.clampProgress(latestProgress)
+            val finalProgress = ReaderLeaveSave.progressToFlushOnPause(
+                committedProgress = latestProgress,
+                textFullyLoaded = latestTextFullyLoaded,
+                restoreApplied = latestRestoreApplied,
+                pagerPage = latestPagerPage,
+                pageCount = latestPageCount,
+            )
             ReaderLeaveSave.persistAsync(appContext, bookId, finalProgress, duration)
             // Bump recent-reading order: opening records entry, leaving refreshes it
             // so “最近阅读” sorts by when reading ended, not when it started.
@@ -920,16 +936,16 @@ fun ReaderScreen(
     // Queued 上一章/下一章 pressed while the chapter scan was still running:
     // applied once chapters land, then cleared so later scans never replay it.
     // Placed after jumpToOffset (Kotlin local funs must be declared before use).
-    LaunchedEffect(chaptersLoaded) {
+    LaunchedEffect(chaptersLoaded, chapters) {
         if (!chaptersLoaded) return@LaunchedEffect
+        val from = currentReadingOffset()
+        currentChapter = ChapterIndex.chapterAtOffset(chapters, from)
         val step = pendingChapterStep
         if (step == 0) return@LaunchedEffect
         pendingChapterStep = 0
-        val anchor = ChapterIndex.chapterAtOffset(chapters, anchorOffset)
-        currentChapter = anchor
-        val target = (anchor + step).coerceIn(0, chapters.lastIndex)
-        if (target != anchor) {
-            jumpToOffset(chapters[target].start)
+        val target = ChapterIndex.chapterStartForStep(chapters, from, step)
+        if (target != from) {
+            jumpToOffset(target)
         }
     }
 
@@ -1280,7 +1296,6 @@ fun ReaderScreen(
 
     // Volume keys → page turn when enabled (common CN novel-reader gesture).
     val volumeTurnEnabled by rememberUpdatedState(volumePageTurn)
-    val latestPageCount by rememberUpdatedState(pageCount)
     DisposableEffect(activity, pagerState) {
         val readerActivity = activity as? ReaderActivity
         if (readerActivity != null) {
@@ -1352,17 +1367,16 @@ fun ReaderScreen(
                     userScrollEnabled = true,
                     beyondViewportPageCount = 1,
                 ) { page ->
-                    // Before restore, map the *current* pager slot through the gate so a
-                    // stale index 0 never paints page-0 body (or indent) at mid-book progress.
-                    val bodyPage = if (useApproxPaging && page == pagerState.currentPage) {
-                        OpenProgressGate.displayPageForApprox(
+                    // Window: follow the pager (window text is already around saved progress).
+                    // Full body before restore: map the current slot so a stale index 0
+                    // never paints page-0 of the whole book at mid-book progress.
+                    val bodyPage = if (page == pagerState.currentPage) {
+                        OpenProgressGate.displayPageForOpen(
+                            textFullyLoaded = textFullyLoaded,
                             restoreApplied = restoreApplied,
                             pagerPage = page,
                             savedProgress = book.position,
-                            pageCount = PageIndex.approximatePageCount(
-                                book.text.length,
-                                approxCharsPerPage,
-                            ),
+                            pageCount = pageCount,
                         )
                     } else {
                         page
@@ -1857,16 +1871,21 @@ fun ReaderScreen(
                         ) {
                             ControlLabel(
                                 text = stringResource(R.string.reader_prev_chapter),
-                                enabled = if (!chaptersLoaded) true else currentChapter > 0,
+                                enabled = if (!chaptersLoaded) {
+                                    true
+                                } else {
+                                    val from = currentReadingOffset()
+                                    ChapterIndex.chapterStartForStep(chapters, from, -1) != from
+                                },
                                 color = palette.onBar,
                                 onClick = {
                                     if (!chaptersLoaded) {
                                         pendingChapterStep = -1
                                         return@ControlLabel
                                     }
-                                    if (currentChapter > 0) {
-                                        jumpToOffset(chapters[currentChapter - 1].start)
-                                    }
+                                    val from = currentReadingOffset()
+                                    val target = ChapterIndex.chapterStartForStep(chapters, from, -1)
+                                    if (target != from) jumpToOffset(target)
                                 },
                             )
                             ControlLabel(
@@ -1913,16 +1932,21 @@ fun ReaderScreen(
                             )
                             ControlLabel(
                                 text = stringResource(R.string.reader_next_chapter),
-                                enabled = if (!chaptersLoaded) true else currentChapter < chapters.lastIndex,
+                                enabled = if (!chaptersLoaded) {
+                                    true
+                                } else {
+                                    val from = currentReadingOffset()
+                                    ChapterIndex.chapterStartForStep(chapters, from, 1) != from
+                                },
                                 color = palette.onBar,
                                 onClick = {
                                     if (!chaptersLoaded) {
                                         pendingChapterStep = 1
                                         return@ControlLabel
                                     }
-                                    if (currentChapter < chapters.lastIndex) {
-                                        jumpToOffset(chapters[currentChapter + 1].start)
-                                    }
+                                    val from = currentReadingOffset()
+                                    val target = ChapterIndex.chapterStartForStep(chapters, from, 1)
+                                    if (target != from) jumpToOffset(target)
                                 },
                             )
                         }

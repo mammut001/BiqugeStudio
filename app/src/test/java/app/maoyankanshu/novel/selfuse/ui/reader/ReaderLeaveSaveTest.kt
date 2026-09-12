@@ -41,6 +41,43 @@ class ReaderLeaveSaveTest {
     }
 
     @Test
+    fun progressToFlushOnPause_usesCommittedPagerPageWithoutDebounce() {
+        val pageCount = 11
+        val page = 5
+        val expected = PageIndex.progressForPage(page, pageCount)
+        val flushed = ReaderLeaveSave.progressToFlushOnPause(
+            committedProgress = 100,
+            textFullyLoaded = true,
+            restoreApplied = true,
+            pagerPage = page,
+            pageCount = pageCount,
+        )
+        assertEquals(expected, flushed)
+        assertTrue(flushed != 100)
+    }
+
+    @Test
+    fun progressToFlushOnPause_holdsSavedProgressBeforeRestore() {
+        val saved = 640
+        val flushed = ReaderLeaveSave.progressToFlushOnPause(
+            committedProgress = saved,
+            textFullyLoaded = false,
+            restoreApplied = false,
+            pagerPage = 0,
+            pageCount = 5000,
+        )
+        assertEquals(saved, flushed)
+        val afterSwapBeforeRestore = ReaderLeaveSave.progressToFlushOnPause(
+            committedProgress = saved,
+            textFullyLoaded = true,
+            restoreApplied = false,
+            pagerPage = 0,
+            pageCount = 5000,
+        )
+        assertEquals(saved, afterSwapBeforeRestore)
+    }
+
+    @Test
     fun hasPendingWrites_idleByDefault() {
         // Unit tests never call persistAsync; the process-lifetime counter starts at 0.
         assertFalse(ReaderLeaveSave.hasPendingWrites())

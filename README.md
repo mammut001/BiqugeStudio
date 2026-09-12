@@ -14,7 +14,7 @@
 | **仓库名** | [BiqugeStudio](https://github.com/mammut001/BiqugeStudio) |
 | **包名** | `app.maoyankanshu.novel.selfuse` |
 | **许可证** | [**GNU GPL v3.0**](./LICENSE)（强 copyleft） |
-| **最新安装包** | [Releases · v1.0.4](https://github.com/mammut001/BiqugeStudio/releases/tag/v1.0.4)（`yuejian-1.0.4-release.apk`） |
+| **最新安装包** | [Releases · v1.0.5](https://github.com/mammut001/BiqugeStudio/releases/tag/v1.0.5)（`yuejian-1.0.5-release.apk`） |
 | **关键词** | 本地阅读器 · TXT · EPUB · 离线 · 大 TXT 秒开 · 开源 · Android · Compose · 无广告 |
 
 ### 适合 / 不适合
@@ -74,7 +74,11 @@ GPL 的出发点是：
 
 ## 截图
 
-模拟器截图（Medium Phone 1080×2400，当前 Debug 构建）：
+模拟器截图（Medium Phone 1080×2400，1.0.5 Debug 构建）：
+
+| 书架 → 导入 → 内置浏览 |
+|:---:|
+| ![从书架进入导入并打开内置浏览](docs/screenshots/import-browser.gif) |
 
 | 书架 | 导入书籍 |
 |:---:|:---:|

@@ -50,6 +50,8 @@ object OpenProgressGate {
      *
      * Before restore is applied, ignore [pagerPage] (often still 0 from the progressive
      * window) and use [savedProgress] → page so body and footer agree on the first frames.
+     * Used for both approximate and exact paging so a full-body swap never paints page 0
+     * of the book at mid-book progress.
      */
     fun displayPageForApprox(
         restoreApplied: Boolean,
@@ -62,6 +64,29 @@ object OpenProgressGate {
             return restoreTargetPage(savedProgress, pageCount)
         }
         return PageIndex.clampPageIndex(pagerPage, pageCount)
+    }
+
+    /**
+     * Page body for the open-phase pager slot.
+     *
+     * The first-window preview is already sliced around saved progress; its pager
+     * pages are local to that window. Remapping [savedProgress] onto [pageCount]
+     * would freeze the current slot on a mid-window page and ignore swipes.
+     * After the full body is in, [displayPageForApprox] still maps saved progress
+     * until restore lands so a stale page 0 does not flash.
+     */
+    fun displayPageForOpen(
+        textFullyLoaded: Boolean,
+        restoreApplied: Boolean,
+        pagerPage: Int,
+        savedProgress: Int,
+        pageCount: Int,
+    ): Int {
+        if (pageCount <= 0) return 0
+        if (!textFullyLoaded) {
+            return PageIndex.clampPageIndex(pagerPage, pageCount)
+        }
+        return displayPageForApprox(restoreApplied, pagerPage, savedProgress, pageCount)
     }
 
     /**

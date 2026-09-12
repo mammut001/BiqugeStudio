@@ -223,6 +223,50 @@ class ChapterIndexTest {
     }
 
     @Test
+    fun stepChapterFromOffset_nextPrevWithoutOpeningToc() {
+        val chapters = listOf(
+            Chapter("第一章", 0),
+            Chapter("第二章", 100),
+            Chapter("第三章", 200),
+        )
+        // Mid-book, TOC never opened: next/prev from the raw offset.
+        assertEquals(1, ChapterIndex.chapterAtOffset(chapters, 150))
+        assertEquals(2, ChapterIndex.stepChapterIndex(chapters, 150, 1))
+        assertEquals(0, ChapterIndex.stepChapterIndex(chapters, 150, -1))
+        assertEquals(200, ChapterIndex.chapterStartForStep(chapters, 150, 1))
+        assertEquals(0, ChapterIndex.chapterStartForStep(chapters, 150, -1))
+        val longBook = listOf(
+            Chapter("第一章", 0),
+            Chapter("第二章", PageIndex.MAX_EXACT_MEASURE_CHARS / 2),
+            Chapter("第三章", PageIndex.MAX_EXACT_MEASURE_CHARS + 40_000),
+        )
+        val mid = PageIndex.MAX_EXACT_MEASURE_CHARS / 2 + 10
+        assertEquals(
+            PageIndex.MAX_EXACT_MEASURE_CHARS + 40_000,
+            ChapterIndex.chapterStartForStep(longBook, mid, 1),
+        )
+        assertEquals(0, ChapterIndex.chapterStartForStep(longBook, mid, -1))
+    }
+
+    @Test
+    fun stepChapterFromOffset_lastAndFirstAreNoOps() {
+        val chapters = listOf(
+            Chapter("第一章", 0),
+            Chapter("第二章", 100),
+            Chapter("第三章", 200),
+        )
+        assertEquals(250, ChapterIndex.chapterStartForStep(chapters, 250, 1))
+        assertEquals(2, ChapterIndex.stepChapterIndex(chapters, 250, 1))
+        assertEquals(0, ChapterIndex.chapterStartForStep(chapters, 0, -1))
+        assertEquals(0, ChapterIndex.stepChapterIndex(chapters, 0, -1))
+        val fullTextOnly = listOf(Chapter("全文", 0))
+        assertEquals(40, ChapterIndex.chapterStartForStep(fullTextOnly, 40, 1))
+        assertEquals(40, ChapterIndex.chapterStartForStep(fullTextOnly, 40, -1))
+        assertEquals(0, ChapterIndex.stepChapterIndex(emptyList(), 10, 1))
+        assertEquals(10, ChapterIndex.chapterStartForStep(emptyList(), 10, 1))
+    }
+
+    @Test
     fun chapterAtOffset_emptyList_returnsZero() {
         assertEquals(0, ChapterIndex.chapterAtOffset(emptyList(), 42))
     }

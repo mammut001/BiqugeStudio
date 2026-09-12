@@ -122,6 +122,76 @@ class OpenProgressGateTest {
                 pageCount = pageCount,
             ),
         )
+        // Exact-measure swap: same helper, same held progress, still not page 0.
+        val exactCount = 80
+        val exactPage = OpenProgressGate.displayPageForApprox(
+            restoreApplied = false,
+            pagerPage = 0,
+            savedProgress = saved,
+            pageCount = exactCount,
+        )
+        assertEquals(PageIndex.pageForProgress(saved, exactCount), exactPage)
+        assertTrue(exactPage > 0)
+    }
+
+    @Test
+    fun displayPageForOpen_windowPhaseFollowsPagerNotSavedProgress() {
+        val saved = 750
+        val windowCount = 8
+        val remapped = PageIndex.pageForProgress(saved, windowCount)
+        // A naive pageForProgress(saved, windowCount) lands mid-window, not on the swipe.
+        assertTrue(remapped != 2)
+        assertEquals(
+            2,
+            OpenProgressGate.displayPageForOpen(
+                textFullyLoaded = false,
+                restoreApplied = false,
+                pagerPage = 2,
+                savedProgress = saved,
+                pageCount = windowCount,
+            ),
+        )
+        assertEquals(
+            0,
+            OpenProgressGate.displayPageForOpen(
+                textFullyLoaded = false,
+                restoreApplied = true,
+                pagerPage = 0,
+                savedProgress = saved,
+                pageCount = windowCount,
+            ),
+        )
+        assertTrue(
+            OpenProgressGate.displayPageForOpen(
+                textFullyLoaded = false,
+                restoreApplied = false,
+                pagerPage = 2,
+                savedProgress = saved,
+                pageCount = windowCount,
+            ) != remapped,
+        )
+        // Full body before restore still uses saved progress, not stale pager 0.
+        val fullCount = 101
+        assertEquals(
+            PageIndex.pageForProgress(saved, fullCount),
+            OpenProgressGate.displayPageForOpen(
+                textFullyLoaded = true,
+                restoreApplied = false,
+                pagerPage = 0,
+                savedProgress = saved,
+                pageCount = fullCount,
+            ),
+        )
+        assertEquals(
+            12,
+            OpenProgressGate.displayPageForOpen(
+                textFullyLoaded = true,
+                restoreApplied = true,
+                pagerPage = 12,
+                savedProgress = saved,
+                pageCount = fullCount,
+            ),
+        )
     }
 
     @Test

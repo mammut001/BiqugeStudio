@@ -36,6 +36,26 @@ object ReaderLeaveSave {
     fun hasPendingWrites(): Boolean = pendingWrites.get() > 0
 
     /**
+     * Progress to flush on ON_PAUSE / leave. Uses the pager's current page when
+     * commits are allowed so a just-finished page-turn is saved even if the 500 ms
+     * debounce collector has not run. Before restore, keeps [committedProgress]
+     * so a stale page-0 pager cannot write 0%.
+     */
+    fun progressToFlushOnPause(
+        committedProgress: Int,
+        textFullyLoaded: Boolean,
+        restoreApplied: Boolean,
+        pagerPage: Int,
+        pageCount: Int,
+    ): Int = OpenProgressGate.progressAfterPageTurn(
+        textFullyLoaded = textFullyLoaded,
+        restoreApplied = restoreApplied,
+        heldProgress = committedProgress,
+        page = pagerPage,
+        pageCount = pageCount,
+    )
+
+    /**
      * Suspend until in-flight reader writes finish, or [timeoutMs] elapses.
      * Used by the main shell so ON_RESUME refresh sees latest progress/stats.
      */

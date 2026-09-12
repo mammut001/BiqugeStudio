@@ -84,6 +84,29 @@ object ChapterIndex {
     }
 
     /**
+     * Next/prev chapter index from [offset], without wrapping.
+     * [delta] of +1 is 下一章, -1 is 上一章. Stays on the current chapter
+     * when there is no neighbor (first/last / single 全文 placeholder).
+     */
+    fun stepChapterIndex(chapters: List<Chapter>, offset: Int, delta: Int): Int {
+        if (chapters.isEmpty()) return 0
+        val current = chapterAtOffset(chapters, offset)
+        return (current + delta).coerceIn(0, chapters.lastIndex)
+    }
+
+    /**
+     * Character offset to jump to for 上一章/下一章.
+     * Returns [offset] unchanged when the step is a no-op so the reader stays put.
+     */
+    fun chapterStartForStep(chapters: List<Chapter>, offset: Int, delta: Int): Int {
+        if (chapters.isEmpty()) return offset.coerceAtLeast(0)
+        val current = chapterAtOffset(chapters, offset)
+        val target = stepChapterIndex(chapters, offset, delta)
+        if (target == current) return offset.coerceAtLeast(0)
+        return chapters[target].start
+    }
+
+    /**
      * Lazy list index to scroll to when opening the TOC (current chapter).
      * Empty list → 0; out-of-range [currentChapter] is clamped.
      */
