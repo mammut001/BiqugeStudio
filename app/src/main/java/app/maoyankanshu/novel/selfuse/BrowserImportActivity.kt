@@ -172,6 +172,9 @@ private data class BrowserDownload(
     val userAgent: String,
     val cookie: String?,
     val referer: String?,
+    val suggestedFilename: String? = null,
+    val mimeType: String? = null,
+    val contentLength: Long = -1L,
 )
 
 private data class FailedBrowserDownload(
@@ -348,7 +351,13 @@ internal object BrowserDownloadPolicy {
 
     private fun hasBookExtension(value: String): Boolean {
         val path = value.lowercase().trimEnd('/')
-        return path.endsWith(".txt") || path.endsWith(".epub")
+        if (path.endsWith(".txt") || path.endsWith(".epub")) return true
+        if (value.contains('%')) {
+            val decoded = runCatching { URLDecoder.decode(value, StandardCharsets.UTF_8.name()) }
+                .getOrDefault(value).lowercase().trimEnd('/')
+            if (decoded.endsWith(".txt") || decoded.endsWith(".epub")) return true
+        }
+        return false
     }
 
     /**
@@ -581,14 +590,14 @@ private fun BrowserImportScreen(
         val signal = RemoteImportCancellationSignal()
         cancellationSignal = signal
         bytesRead = 0L
-        totalBytes = -1L
+        totalBytes = request.contentLength.takeIf { it > 0L } ?: -1L
         resetEta()
         downloadJob = scope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
                     RemoteImportDownloader.download(
                         rawUrl = request.url,
-                        preferredTitle = "",
+                        preferredTitle = request.suggestedFilename.orEmpty(),
                         userAgent = request.userAgent.ifBlank { fallbackUserAgent },
                         defaultEpubTitle = defaultEpub,
                         defaultTxtTitle = defaultTxt,
@@ -597,6 +606,8 @@ private fun BrowserImportScreen(
                         cookie = request.cookie,
                         referer = request.referer,
                         cancellationSignal = signal,
+                        fallbackContentType = request.mimeType,
+                        fallbackContentDisposition = request.suggestedFilename?.let { "attachment; filename=\"$it\"" },
                         onProgress = { downloaded, total ->
                             activity?.runOnUiThread {
                                 if (activity.canAcceptUi() && cancellationSignal === signal) {
@@ -1008,7 +1019,7 @@ private fun BrowserImportScreen(
                         return true
                     }
                 }
-                transport.setDownloadListener { url, userAgent, _, _, _ ->
+                transport.setDownloadListener { url, userAgent, contentDisposition, mimetype, contentLength ->
                     destroyTransportOnce()
                     val target = url.orEmpty()
                     if (!BrowserDownloadPolicy.allowsDownload(target)) {
@@ -1021,6 +1032,9 @@ private fun BrowserImportScreen(
                             userAgent = userAgent.orEmpty(),
                             cookie = url?.let { CookieManager.getInstance().getCookie(it) },
                             referer = browser.url,
+                            suggestedFilename = RemoteImportDownloader.parseSafeFilenameFromContentDisposition(contentDisposition),
+                            mimeType = mimetype?.takeIf { it.isNotBlank() },
+                            contentLength = contentLength,
                         ),
                     )
                 }
@@ -1035,7 +1049,7 @@ private fun BrowserImportScreen(
             }
         }
         browser.webViewClient = browserClient()
-        browser.setDownloadListener { url, userAgent, _, _, _ ->
+        browser.setDownloadListener { url, userAgent, contentDisposition, mimetype, contentLength ->
             val target = url.orEmpty()
             if (!BrowserDownloadPolicy.allowsDownload(target)) {
                 error = httpsOnly
@@ -1048,6 +1062,9 @@ private fun BrowserImportScreen(
                     userAgent = userAgent.orEmpty(),
                     cookie = CookieManager.getInstance().getCookie(target),
                     referer = source,
+                    suggestedFilename = RemoteImportDownloader.parseSafeFilenameFromContentDisposition(contentDisposition),
+                    mimeType = mimetype?.takeIf { it.isNotBlank() },
+                    contentLength = contentLength,
                 ),
             )
         }

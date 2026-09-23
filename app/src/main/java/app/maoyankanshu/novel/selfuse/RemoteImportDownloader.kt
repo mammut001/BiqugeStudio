@@ -103,6 +103,8 @@ object RemoteImportDownloader {
         cookie: String? = null,
         referer: String? = null,
         cancellationSignal: RemoteImportCancellationSignal? = null,
+        fallbackContentType: String? = null,
+        fallbackContentDisposition: String? = null,
         onProgress: ((bytesRead: Long, totalBytes: Long) -> Unit)? = null,
     ): Result {
         val cleanUrl = rawUrl.trim()
@@ -140,8 +142,10 @@ object RemoteImportDownloader {
             reportProgress(0L)
             // Prefer post-redirect URL + response headers for type/title (not the request URL).
             val finalUrl = connection.url.toString()
-            val contentType = connection.contentType
-            val contentDisposition = connection.getHeaderField("Content-Disposition")
+            val rawContentType = connection.contentType
+            val rawContentDisposition = connection.getHeaderField("Content-Disposition")
+            val contentType = rawContentType?.takeIf { it.isNotBlank() } ?: fallbackContentType
+            val contentDisposition = rawContentDisposition?.takeIf { it.isNotBlank() } ?: fallbackContentDisposition
             val data = connection.inputStream.use { input ->
                 HttpsBodyLimits.readAll(input, MAX_BYTES) { bytesRead ->
                     reportProgress(bytesRead)
@@ -150,7 +154,9 @@ object RemoteImportDownloader {
             // A fast or unknown-length response may have had its last ordinary sample
             // coalesced. Always hand the exact completed count to the UI before decode.
             reportProgress(data.size.toLong(), completed = true)
-            val epub = detectIsEpub(finalUrl, contentType, contentDisposition) || looksLikeZip(data)
+            val epub = detectIsEpub(finalUrl, contentType, contentDisposition) ||
+                LocalBookImport.isEpub(preferredTitle, contentType) ||
+                looksLikeZip(data)
             if (!epub && isClearlyUnsupportedPayload(contentType, data)) {
                 // Login wall after a cross-origin hop: the session cookie was deliberately
                 // withheld, so the file host saw an anonymous request and returned HTML.
@@ -388,22 +394,27 @@ object RemoteImportDownloader {
 
     /**
      * File name carried by common opaque/signed download URL query parameters.
-     * Covers `filename=` / `download=` plus the shorter aliases (`file=`, `name=`,
-     * `attachment=`, `fname=`) some stations use for the same purpose.
+     * Covers `filename=` / `download=` plus aliases (`file=`, `name=`, `attachment=`, `fname=`,
+     * `book=`, `novel=`, `down=`).
      */
     internal fun rawFilenameFromUrlQuery(url: String?): String? {
         if (url.isNullOrBlank()) return null
         val query = runCatching { URL(url).query }.getOrNull().orEmpty()
+        if (query.isEmpty()) return null
         for (pair in query.split('&')) {
             val separator = pair.indexOf('=')
             if (separator <= 0) continue
-            val name = pair.substring(0, separator).lowercase()
+            val name = pair.substring(0, separator).trim().lowercase()
             if (name != "filename" && name != "download" && name != "file" &&
-                name != "name" && name != "attachment" && name != "fname"
+                name != "name" && name != "attachment" && name != "fname" &&
+                name != "book" && name != "novel" && name != "down"
             ) continue
-            val encoded = pair.substring(separator + 1)
-            val decoded = percentDecode(encoded).trim()
-            if (decoded.isNotEmpty()) return decoded
+            val encoded = pair.substring(separator + 1).trim()
+            if (encoded.contains("://")) continue
+            val decoded = cleanAndDecodeFilenameToken(encoded)
+            if (decoded.isNotEmpty() && !decoded.contains("://")) {
+                return decoded
+            }
         }
         return null
     }
@@ -504,7 +515,7 @@ object RemoteImportDownloader {
     }
 
     /** Filename token with its extension retained for format detection. */
-    private fun rawFilenameFromContentDisposition(header: String?): String? {
+    internal fun rawFilenameFromContentDisposition(header: String?): String? {
         if (header.isNullOrBlank()) return null
         // Never process multi-line / CR-LF injection payloads as a single header value.
         if (header.indexOf('\r') >= 0 || header.indexOf('\n') >= 0) return null
@@ -512,21 +523,18 @@ object RemoteImportDownloader {
         val star = FILENAME_STAR_REGEX.find(header)
         if (star != null) {
             val encoded = star.groupValues[1].trim()
-            return percentDecode(encoded).takeIf { it.isNotBlank() }
+            return cleanAndDecodeFilenameToken(encoded).takeIf { it.isNotBlank() }
         }
 
         val quoted = FILENAME_QUOTED_REGEX.find(header)
         if (quoted != null) {
-            return quoted.groupValues[1].takeIf { it.isNotBlank() }
+            val token = cleanAndDecodeFilenameToken(quoted.groupValues[1])
+            return token.takeIf { it.isNotBlank() }
         }
 
         val bare = FILENAME_BARE_REGEX.find(header)
         if (bare != null) {
-            var token = bare.groupValues[1].trim()
-            // Strip optional surrounding single quotes some servers emit.
-            if (token.length >= 2 && token.startsWith('\'') && token.endsWith('\'')) {
-                token = token.substring(1, token.length - 1)
-            }
+            val token = cleanAndDecodeFilenameToken(bare.groupValues[1])
             return token.takeIf { it.isNotBlank() }
         }
         return null
@@ -537,7 +545,8 @@ object RemoteImportDownloader {
      */
     internal fun parseSafeFilenameFromUrl(url: String?): String? {
         val name = urlPathFileName(url) ?: return null
-        return sanitizeToTitle(name)
+        val decoded = if (name.contains('%')) percentDecode(name) else name
+        return sanitizeToTitle(decoded)
     }
 
     /** Last path segment without query/fragment; may still include an extension. */
@@ -580,12 +589,51 @@ object RemoteImportDownloader {
         return name
     }
 
+    internal fun cleanAndDecodeFilenameToken(rawToken: String): String {
+        var token = rawToken.trim()
+        if (token.length >= 2 && token.startsWith('\'') && token.endsWith('\'')) {
+            token = token.substring(1, token.length - 1)
+        }
+        if (token.contains('%')) {
+            token = percentDecode(token)
+        }
+        token = fixLatin1Mojibake(token)
+        return token.trim()
+    }
+
     private fun percentDecode(value: String): String {
         return try {
-            URLDecoder.decode(value.replace("+", "%2B"), StandardCharsets.UTF_8.name())
+            val decoded = URLDecoder.decode(value.replace("+", "%2B"), StandardCharsets.UTF_8.name())
+            if (decoded.contains('\uFFFD')) {
+                try {
+                    URLDecoder.decode(value.replace("+", "%2B"), "GB18030")
+                } catch (_: Exception) {
+                    decoded
+                }
+            } else {
+                decoded
+            }
         } catch (_: Exception) {
-            value
+            try {
+                URLDecoder.decode(value.replace("+", "%2B"), "GB18030")
+            } catch (_: Exception) {
+                value
+            }
         }
+    }
+
+    private fun fixLatin1Mojibake(value: String): String {
+        if (value.any { it.code in 0x0080..0x00FF }) {
+            try {
+                val bytes = value.toByteArray(StandardCharsets.ISO_8859_1)
+                val candidate = String(bytes, StandardCharsets.UTF_8)
+                if (!candidate.contains('\uFFFD') && candidate.length < value.length) {
+                    return candidate
+                }
+            } catch (_: Exception) {
+            }
+        }
+        return value
     }
 
     /**

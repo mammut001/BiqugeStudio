@@ -46,6 +46,9 @@ class BrowserDownloadPolicyTest {
         assertTrue(BrowserDownloadPolicy.isDirectBookUrl("https://example.com/get?name=book.epub&id=1"))
         assertTrue(BrowserDownloadPolicy.isDirectBookUrl("https://example.com/dl?attachment=%E4%B8%89%E5%9B%BD.txt"))
         assertTrue(BrowserDownloadPolicy.isDirectBookUrl("https://example.com/dl?fname=book.TXT"))
+        assertTrue(BrowserDownloadPolicy.isDirectBookUrl("https://example.com/down?book=%E6%96%97%E7%BD%97.epub"))
+        assertTrue(BrowserDownloadPolicy.isDirectBookUrl("https://example.com/get?down=novel.txt"))
+        assertTrue(BrowserDownloadPolicy.isDirectBookUrl("https://example.com/download/%E4%B8%80%E5%BF%B5%E6%B0%B8%E6%81%92.txt"))
         assertFalse(BrowserDownloadPolicy.isInlineReadablePage("https://example.com/get?file=book.txt"))
     }
 

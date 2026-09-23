@@ -485,4 +485,72 @@ class RemoteImportDownloaderTypeTitleTest {
             ),
         )
     }
+
+    @Test
+    fun parseSafeFilenameFromContentDisposition_supportsPercentEncodedTokens() {
+        // UTF-8 percent encoded
+        assertEquals(
+            "一念永恒",
+            RemoteImportDownloader.parseSafeFilenameFromContentDisposition(
+                "attachment; filename=\"%E4%B8%80%E5%BF%B5%E6%B0%B8%E6%81%92.txt\"",
+            ),
+        )
+        // GBK percent encoded
+        assertEquals(
+            "一念永恒",
+            RemoteImportDownloader.parseSafeFilenameFromContentDisposition(
+                "attachment; filename=%D2%BB%C4%EE%D3%C0%BA%E3.txt",
+            ),
+        )
+    }
+
+    @Test
+    fun parseSafeFilenameFromContentDisposition_repairsLatin1Mojibake() {
+        // "西游记" UTF-8 bytes decoded as ISO-8859-1 chars: è¥¿æ¸¸è®°
+        assertEquals(
+            "西游记",
+            RemoteImportDownloader.parseSafeFilenameFromContentDisposition(
+                "attachment; filename=\"è¥¿æ¸¸è®°.txt\"",
+            ),
+        )
+        // "红楼梦" UTF-8 bytes decoded as ISO-8859-1 chars: çº¢æ¥¼æ¢¦
+        assertEquals(
+            "红楼梦",
+            RemoteImportDownloader.parseSafeFilenameFromContentDisposition(
+                "attachment; filename=\"çº¢æ¥¼æ¢¦.epub\"",
+            ),
+        )
+    }
+
+    @Test
+    fun parseSafeFilenameFromUrl_decodesPercentEncodedPath() {
+        assertEquals(
+            "完美世界",
+            RemoteImportDownloader.parseSafeFilenameFromUrl(
+                "https://cdn.example.com/books/%E5%AE%8C%E7%BE%8E%E4%B8%96%E7%95%8C.epub",
+            ),
+        )
+    }
+
+    @Test
+    fun rawFilenameFromUrlQuery_supportsExpandedParameters() {
+        assertEquals(
+            "斗罗大陆.epub",
+            RemoteImportDownloader.rawFilenameFromUrlQuery(
+                "https://example.com/down?book=%E6%96%97%E7%BD%97%E5%A4%A7%E9%99%86.epub&uid=123",
+            ),
+        )
+        assertEquals(
+            "novel.txt",
+            RemoteImportDownloader.rawFilenameFromUrlQuery(
+                "https://example.com/get?down=novel.txt",
+            ),
+        )
+        assertEquals(
+            "story.epub",
+            RemoteImportDownloader.rawFilenameFromUrlQuery(
+                "https://example.com/api?novel=story.epub",
+            ),
+        )
+    }
 }
