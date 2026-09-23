@@ -5,6 +5,7 @@ import java.io.InputStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -36,6 +37,7 @@ public final class EpubReader {
             Pattern.compile("(?is)<\\?xml[^>]*encoding\\s*=\\s*['\"]([^'\"]+)['\"]");
     private static final Pattern ITEM_TAG = Pattern.compile("(?is)<item\\b([^>]*)>");
     private static final Pattern ITEMREF_TAG = Pattern.compile("(?is)<itemref\\b([^>]*)>");
+    private static final Pattern SPINE_TAG = Pattern.compile("(?is)<spine\\b([^>]*)>");
     private static final Pattern ROOTFILE_TAG = Pattern.compile("(?is)<rootfile\\b([^>]*)>");
     private static final Pattern ATTR_PATTERN =
             Pattern.compile("([A-Za-z_:][-A-Za-z0-9_:.]*)\\s*=\\s*(['\"])(.*?)\\2", Pattern.DOTALL);
@@ -55,26 +57,53 @@ public final class EpubReader {
 
     private static final Pattern META_TAG = Pattern.compile("(?is)<meta\\b([^>]*)>");
 
+    /** Single entry from EPUB table of contents (NCX or EPUB3 Navigation Document). */
+    public static final class TocEntry {
+        public final String title;
+        public final String href;
+        public final String file;
+        public final String anchor;
+
+        public TocEntry(String title, String href, String file, String anchor) {
+            this.title = title == null ? "" : title.trim();
+            this.href = href == null ? "" : href.trim();
+            this.file = file == null ? "" : file.trim();
+            this.anchor = anchor;
+        }
+
+        @Override
+        public String toString() {
+            return "TocEntry{title='" + title + "', file='" + file + (anchor != null ? "#" + anchor : "") + "'}";
+        }
+    }
+
     /**
      * EPUB package + chapter text. [title]/[author] may be null when OPF omits them
      * (callers should fall back to filename / default labels).
      * [coverImage] is raw JPEG/PNG/GIF/WebP bytes or null when missing/oversized/invalid.
+     * [toc] is the ordered list of table-of-contents entries extracted from NCX / nav.xhtml.
      */
     public static final class Book {
         public final String title;
         public final String author;
         public final String text;
         public final byte[] coverImage;
+        public final List<TocEntry> toc;
 
         public Book(String title, String author, String text) {
-            this(title, author, text, null);
+            this(title, author, text, null, null);
         }
 
         public Book(String title, String author, String text, byte[] coverImage) {
+            this(title, author, text, coverImage, null);
+        }
+
+        public Book(String title, String author, String text, byte[] coverImage, List<TocEntry> toc) {
             this.title = title;
             this.author = author;
             this.text = text == null ? "" : text;
             this.coverImage = coverImage;
+            this.toc = toc != null ? Collections.unmodifiableList(new ArrayList<>(toc)) : Collections.emptyList();
         }
     }
 
@@ -128,21 +157,68 @@ public final class EpubReader {
             }
         }
 
+        List<TocEntry> tocEntries = new ArrayList<>();
+        if (opfPath != null) {
+            String navPath = resolveNavHref(opfXml, opfPath);
+            if (navPath != null && files.containsKey(normalize(navPath))) {
+                tocEntries = parseNavEntries(decodeText(files.get(normalize(navPath))), navPath);
+            }
+            if (tocEntries.isEmpty()) {
+                String ncxPath = resolveNcxHref(opfXml, opfPath);
+                if (ncxPath != null && files.containsKey(normalize(ncxPath))) {
+                    tocEntries = parseNcxEntries(decodeText(files.get(normalize(ncxPath))), ncxPath);
+                }
+            }
+        }
+        if (tocEntries.isEmpty()) {
+            for (Map.Entry<String, byte[]> entry : files.entrySet()) {
+                String name = entry.getKey();
+                if (name.toLowerCase(Locale.ROOT).endsWith("nav.xhtml")) {
+                    tocEntries = parseNavEntries(decodeText(entry.getValue()), name);
+                    if (!tocEntries.isEmpty()) break;
+                } else if (name.toLowerCase(Locale.ROOT).endsWith(".ncx")) {
+                    tocEntries = parseNcxEntries(decodeText(entry.getValue()), name);
+                    if (!tocEntries.isEmpty()) break;
+                }
+            }
+        }
+
+        Map<String, List<TocEntry>> tocByFile = new LinkedHashMap<>();
+        for (TocEntry entry : tocEntries) {
+            List<TocEntry> list = tocByFile.get(entry.file);
+            if (list == null) {
+                list = new ArrayList<>();
+                tocByFile.put(entry.file, list);
+            }
+            list.add(entry);
+        }
+
         // Spine order; each chapter is stripHtml'd (already single-\n inside).
         // Join with one '\n' and collapse any accidental blank lines from tags.
         StringBuilder result = new StringBuilder();
         for (String chapter : chapters) {
-            byte[] data = files.get(normalize(chapter));
+            String norm = normalize(chapter);
+            byte[] data = files.get(norm);
             if (data == null) continue;
             String cleaned = stripHtml(decodeText(data));
             if (cleaned.isEmpty()) continue;
+
+            List<TocEntry> entries = tocByFile.get(norm);
+            if (entries != null && !entries.isEmpty()) {
+                TocEntry primary = entries.get(0);
+                String tocTitle = primary.title;
+                if (!tocTitle.isEmpty() && !alreadyStartsWithTitle(cleaned, tocTitle)) {
+                    cleaned = formatChapterHeading(tocTitle) + "\n" + cleaned;
+                }
+            }
+
             if (result.length() > 0) result.append('\n');
             result.append(cleaned);
         }
         // Guarantee "ch1\nch2" not "ch1\n\nch2" if a chapter ends/starts with a block newline.
         String text = normalizeWhitespace(result.toString());
         byte[] cover = extractCoverBytes(files, opfXml, opfPath);
-        return new Book(meta[0], meta[1], text, cover);
+        return new Book(meta[0], meta[1], text, cover, tocEntries);
     }
 
     /**
@@ -324,11 +400,173 @@ public final class EpubReader {
     static String stripHtml(String html) {
         if (html == null || html.isEmpty()) return "";
         String stripped = html
+                .replaceAll("(?is)<head[^>]*>.*?</head>", "")
                 .replaceAll("(?is)<script[^>]*>.*?</script>", "")
                 .replaceAll("(?is)<style[^>]*>.*?</style>", "")
-                .replaceAll("(?is)<(br|/p|/div|/h[1-6]|/li)[^>]*>", "\n")
+                .replaceAll("(?is)<h[1-6]\\b[^>]*>", "\n")
+                .replaceAll("(?is)</h[1-6]>", "\n")
+                .replaceAll("(?is)<(br|/p|/div|/li|hr)[^>]*>", "\n")
                 .replaceAll("(?s)<[^>]+>", "");
         return normalizeWhitespace(decodeHtmlEntities(stripped));
+    }
+
+    /** Resolve EPUB 3 Navigation Document path from OPF. Package-private for JVM tests. */
+    static String resolveNavHref(String opf, String opfPath) {
+        if (opf == null || opf.isEmpty() || opfPath == null) return null;
+        Matcher items = ITEM_TAG.matcher(opf);
+        String fallbackNav = null;
+        while (items.find()) {
+            Map<String, String> attr = attributes(items.group(1));
+            String href = attr.get("href");
+            String props = attr.get("properties");
+            if (href == null) continue;
+            if (props != null && props.toLowerCase(Locale.ROOT).contains("nav")) {
+                return resolve(opfPath, href);
+            }
+            String lower = href.toLowerCase(Locale.ROOT);
+            if (lower.endsWith("nav.xhtml") || lower.endsWith("nav.html") || lower.endsWith("toc.xhtml")) {
+                if (fallbackNav == null) fallbackNav = resolve(opfPath, href);
+            }
+        }
+        return fallbackNav;
+    }
+
+    /** Resolve EPUB 2 NCX file path from OPF. Package-private for JVM tests. */
+    static String resolveNcxHref(String opf, String opfPath) {
+        if (opf == null || opf.isEmpty() || opfPath == null) return null;
+        String tocId = null;
+        Matcher spineMatcher = SPINE_TAG.matcher(opf);
+        if (spineMatcher.find()) {
+            Map<String, String> attr = attributes(spineMatcher.group(1));
+            tocId = attr.get("toc");
+        }
+        String ncxHref = null;
+        Matcher items = ITEM_TAG.matcher(opf);
+        while (items.find()) {
+            Map<String, String> attr = attributes(items.group(1));
+            String id = attr.get("id");
+            String href = attr.get("href");
+            String media = attr.get("media-type");
+            if (id != null && href != null) {
+                if (tocId != null && tocId.equals(id)) {
+                    return resolve(opfPath, href);
+                }
+                if (media != null && "application/x-dtbncx+xml".equalsIgnoreCase(media.trim())) {
+                    ncxHref = resolve(opfPath, href);
+                } else if (href.toLowerCase(Locale.ROOT).endsWith(".ncx") && ncxHref == null) {
+                    ncxHref = resolve(opfPath, href);
+                }
+            }
+        }
+        return ncxHref;
+    }
+
+    /** Parse table of contents entries from EPUB 2 toc.ncx. Package-private for JVM tests. */
+    static List<TocEntry> parseNcxEntries(String ncxXml, String ncxPath) {
+        List<TocEntry> list = new ArrayList<>();
+        if (ncxXml == null || ncxXml.isEmpty()) return list;
+        Matcher m = Pattern.compile(
+                "(?is)<navLabel\\b[^>]*>\\s*<text\\b[^>]*>(.*?)</text>\\s*</navLabel>\\s*<content\\b([^>]*)>"
+        ).matcher(ncxXml);
+        while (m.find()) {
+            String rawTitle = m.group(1);
+            String title = normalizeWhitespace(decodeHtmlEntities(rawTitle.replaceAll("(?s)<[^>]+>", "")));
+            Map<String, String> attr = attributes(m.group(2));
+            String src = attr.get("src");
+            if (src == null || src.isEmpty()) continue;
+            int hash = src.indexOf('#');
+            String anchor = hash >= 0 && hash < src.length() - 1 ? src.substring(hash + 1) : null;
+            String file = resolve(ncxPath, src);
+            String resolvedHref = anchor != null ? file + "#" + anchor : file;
+            if (!title.isEmpty()) {
+                list.add(new TocEntry(title, resolvedHref, normalize(file), anchor));
+            }
+        }
+        return list;
+    }
+
+    /** Parse table of contents entries from EPUB 3 nav.xhtml. Package-private for JVM tests. */
+    static List<TocEntry> parseNavEntries(String navXml, String navPath) {
+        List<TocEntry> list = new ArrayList<>();
+        if (navXml == null || navXml.isEmpty()) return list;
+        String searchBody = navXml;
+        Matcher navMatcher = Pattern.compile(
+                "(?is)<nav\\b[^>]*(?:epub:type|id)\\s*=\\s*['\"][^'\"]*toc[^'\"]*['\"][^>]*>(.*?)</nav>"
+        ).matcher(navXml);
+        if (navMatcher.find()) {
+            searchBody = navMatcher.group(1);
+        } else {
+            Matcher fallback = Pattern.compile("(?is)<nav\\b[^>]*>(.*?)</nav>").matcher(navXml);
+            if (fallback.find()) {
+                searchBody = fallback.group(1);
+            }
+        }
+        Matcher aMatcher = Pattern.compile("(?is)<a\\b([^>]*)>(.*?)</a>").matcher(searchBody);
+        while (aMatcher.find()) {
+            Map<String, String> attr = attributes(aMatcher.group(1));
+            String href = attr.get("href");
+            if (href == null || href.isEmpty()) continue;
+            String rawTitle = aMatcher.group(2);
+            String title = normalizeWhitespace(decodeHtmlEntities(rawTitle.replaceAll("(?s)<[^>]+>", "")));
+            int hash = href.indexOf('#');
+            String anchor = hash >= 0 && hash < href.length() - 1 ? href.substring(hash + 1) : null;
+            String file = resolve(navPath, href);
+            String resolvedHref = anchor != null ? file + "#" + anchor : file;
+            if (!title.isEmpty()) {
+                list.add(new TocEntry(title, resolvedHref, normalize(file), anchor));
+            }
+        }
+        return list;
+    }
+
+    static boolean alreadyStartsWithTitle(String text, String title) {
+        if (text == null || title == null) return false;
+        String t = text.trim();
+        String target = title.trim();
+        if (target.isEmpty()) return true;
+        int newline = t.indexOf('\n');
+        String firstLine = newline >= 0 ? t.substring(0, newline).trim() : t;
+        if (firstLine.equalsIgnoreCase(target)) return true;
+        String normFirst = normalizeForComparison(firstLine);
+        String normTarget = normalizeForComparison(target);
+        return !normTarget.isEmpty() && normFirst.contains(normTarget);
+    }
+
+    private static String normalizeForComparison(String s) {
+        if (s == null) return "";
+        return s.replaceAll("[\\s\\p{Punct}—～·《》〈〉【】〔〕（）()]+", "")
+                .toLowerCase(Locale.ROOT);
+    }
+
+    static String formatChapterHeading(String title) {
+        if (title == null || title.isEmpty()) return "";
+        String t = title.trim();
+        if (isRecognizedHeading(t)) {
+            return t;
+        }
+        return "【" + t + "】";
+    }
+
+    static boolean isRecognizedHeading(String title) {
+        if (title == null || title.isEmpty()) return false;
+        String t = title.trim();
+        return t.startsWith("第") ||
+                t.startsWith("【") ||
+                t.startsWith("卷") ||
+                t.regionMatches(true, 0, "chapter", 0, 7) ||
+                t.regionMatches(true, 0, "prologue", 0, 8) ||
+                t.regionMatches(true, 0, "epilogue", 0, 8) ||
+                t.regionMatches(true, 0, "part", 0, 4) ||
+                t.regionMatches(true, 0, "book", 0, 4) ||
+                t.regionMatches(true, 0, "act", 0, 3) ||
+                t.regionMatches(true, 0, "section", 0, 7) ||
+                t.regionMatches(true, 0, "volume", 0, 6) ||
+                t.startsWith("序章") || t.startsWith("序言") || t.startsWith("序") ||
+                t.startsWith("楔子") || t.startsWith("引子") || t.startsWith("引言") ||
+                t.startsWith("前言") || t.startsWith("尾声") || t.startsWith("后记") ||
+                t.startsWith("番外") || t.startsWith("附录") || t.startsWith("跋") ||
+                t.startsWith("致谢") || t.startsWith("鸣谢") || t.startsWith("感言") ||
+                t.matches("^[0-9一二三四五六七八九十百千万]{1,6}[、.．].*");
     }
 
     /** Package-private for JVM tests: named / decimal / hex entities. */

@@ -69,7 +69,7 @@
 | 仅接入有权使用的内容服务 | 未做 | 勿引入无版权/无授权的扒站逻辑 |
 | 评论、书单、登录等 | 未做 | 如未来需要，应设计独立且有明确隐私边界的服务端 |
 
-**已完成、勿再当缺口：** 本地 TXT/EPUB（含 MIME `application/epub+zip`）、OPF 书名/作者、可选封面与备份、书架筛选/排序/可选作者分组、HTTPS 直链与网页导入、维基搜索导入、单书 TXT 导出（SAF CreateDocument）。
+**已完成、勿再当缺口：** 本地 TXT/EPUB（含 MIME `application/epub+zip`、OPF 书名/作者、EPUB 2 NCX 与 EPUB 3 Nav 目录提取与标题规整、可选封面与备份）、书架筛选/排序/可选作者分组、HTTPS 直链与网页导入、维基搜索导入、单书 TXT 导出（SAF CreateDocument）。
 
 ### 2.3 质量与无障碍
 

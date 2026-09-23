@@ -326,6 +326,42 @@ class ChapterIndexTest {
         assertTrue(ticks == ticks.sorted())
     }
 
+    @Test
+    fun findChapters_supportsPartsBooksNumbersAndBrackets() {
+        val text = """
+            引子 传说开始
+            内容
+
+            Part 1 The Beginning
+            内容
+
+            Book II The Journey
+            内容
+
+            一、初入江湖
+            内容
+
+            2. 异变突生
+            内容
+
+            【A Long-expected Party】
+            内容
+
+            致谢
+            作者感言
+        """.trimIndent()
+        val chapters = ChapterIndex.findChapters(text)
+        assertEquals(7, chapters.size)
+        assertTrue(chapters[0].title.startsWith("引子"))
+        assertTrue(chapters[1].title.startsWith("Part 1", ignoreCase = true))
+        assertTrue(chapters[2].title.startsWith("Book II", ignoreCase = true))
+        assertEquals("一、初入江湖", chapters[3].title)
+        assertEquals("2. 异变突生", chapters[4].title)
+        assertEquals("A Long-expected Party", chapters[5].title) // brackets stripped for display in TOC
+        assertEquals("致谢", chapters[6].title)
+        assertStrictlyIncreasingStarts(chapters)
+    }
+
     private fun assertStrictlyIncreasingStarts(chapters: List<Chapter>) {
         for (i in 1 until chapters.size) {
             assertTrue(

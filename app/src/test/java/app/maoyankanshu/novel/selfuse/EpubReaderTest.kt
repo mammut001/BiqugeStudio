@@ -421,6 +421,162 @@ class EpubReaderTest {
         assertTrue(ex.message?.contains("32MB") == true)
     }
 
+    @Test
+    fun stripHtml_headTagStripped() {
+        val html = "<html><head><title>Meta Header</title><style>p { color: red; }</style></head><body><h1>Heading</h1><p>Body</p></body></html>"
+        val text = EpubReader.stripHtml(html)
+        assertFalse("Metadata in <head> must be stripped", text.contains("Meta Header"))
+        assertEquals("Heading\nBody", text)
+    }
+
+    @Test
+    fun stripHtml_headingTagsPutOnOwnLine() {
+        val html = "<div><h1>Chapter 1</h1><p>Text</p></div>"
+        assertEquals("Chapter 1\nText", EpubReader.stripHtml(html))
+    }
+
+    @Test
+    fun parseNcxEntries_extractsOrderedEntries() {
+        val ncx = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+              <navMap>
+                <navPoint id="p1" playOrder="1">
+                  <navLabel><text>第一章 序章</text></navLabel>
+                  <content src="Text/chap1.xhtml"/>
+                </navPoint>
+                <navPoint id="p2" playOrder="2">
+                  <navLabel><text>第二章 启程</text></navLabel>
+                  <content src="Text/chap2.xhtml#part1"/>
+                </navPoint>
+              </navMap>
+            </ncx>
+        """.trimIndent()
+        val entries = EpubReader.parseNcxEntries(ncx, "OEBPS/toc.ncx")
+        assertEquals(2, entries.size)
+        assertEquals("第一章 序章", entries[0].title)
+        assertEquals("OEBPS/Text/chap1.xhtml", entries[0].file)
+        assertEquals(null, entries[0].anchor)
+        assertEquals("第二章 启程", entries[1].title)
+        assertEquals("OEBPS/Text/chap2.xhtml", entries[1].file)
+        assertEquals("part1", entries[1].anchor)
+    }
+
+    @Test
+    fun parseNavEntries_extractsOrderedEntries() {
+        val nav = """
+            <?xml version="1.0" encoding="utf-8"?>
+            <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+              <body>
+                <nav epub:type="toc" id="toc">
+                  <h1>Table of Contents</h1>
+                  <ol>
+                    <li><a href="chap1.xhtml">Chapter 1 &amp; Intro</a></li>
+                    <li><a href="chap2.xhtml#sub">Chapter 2</a></li>
+                  </ol>
+                </nav>
+              </body>
+            </html>
+        """.trimIndent()
+        val entries = EpubReader.parseNavEntries(nav, "OEBPS/nav.xhtml")
+        assertEquals(2, entries.size)
+        assertEquals("Chapter 1 & Intro", entries[0].title)
+        assertEquals("OEBPS/chap1.xhtml", entries[0].file)
+        assertEquals("Chapter 2", entries[1].title)
+        assertEquals("sub", entries[1].anchor)
+    }
+
+    @Test
+    fun alreadyStartsWithTitle_matchesNormalized() {
+        assertTrue(EpubReader.alreadyStartsWithTitle("第一章 序章\n正文", "第一章 序章"))
+        assertTrue(EpubReader.alreadyStartsWithTitle("Chapter 1: The Boy Who Lived\nBody", "Chapter 1"))
+        assertFalse(EpubReader.alreadyStartsWithTitle("正文开始\n没有标题", "第一章 序章"))
+    }
+
+    @Test
+    fun formatChapterHeading_wrapsUnrecognized() {
+        assertEquals("第一章 序章", EpubReader.formatChapterHeading("第一章 序章"))
+        assertEquals("Chapter 1", EpubReader.formatChapterHeading("Chapter 1"))
+        assertEquals("引子", EpubReader.formatChapterHeading("引子"))
+        assertEquals("1. 缘起", EpubReader.formatChapterHeading("1. 缘起"))
+        assertEquals("一、初入江湖", EpubReader.formatChapterHeading("一、初入江湖"))
+        assertEquals("【A Long-expected Party】", EpubReader.formatChapterHeading("A Long-expected Party"))
+    }
+
+    @Test
+    fun readBook_withEpub2Ncx_populatesTocAndInjectsHeadings() {
+        val ncx = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+              <navMap>
+                <navPoint id="p1" playOrder="1">
+                  <navLabel><text>第一章 序章</text></navLabel>
+                  <content src="chap1.html"/>
+                </navPoint>
+                <navPoint id="p2" playOrder="2">
+                  <navLabel><text>第二章 启程</text></navLabel>
+                  <content src="chap2.html"/>
+                </navPoint>
+              </navMap>
+            </ncx>
+        """.trimIndent()
+        val zip = buildEpub(
+            chaptersInZipOrder = listOf(
+                "OEBPS/chap1.html" to "<p>正文一内容</p>",
+                "OEBPS/chap2.html" to "<p>正文二内容</p>",
+            ),
+            spineIdRefs = listOf("c1", "c2"),
+            manifest = listOf(
+                "c1" to "chap1.html",
+                "c2" to "chap2.html",
+            ),
+            chapterCharset = StandardCharsets.UTF_8,
+            withBom = false,
+            ncxPath = "OEBPS/toc.ncx",
+            ncxContent = ncx,
+        )
+        val book = EpubReader.readBook(ByteArrayInputStream(zip))
+        assertEquals(2, book.toc.size)
+        assertEquals("第一章 序章", book.toc[0].title)
+        assertEquals("第二章 启程", book.toc[1].title)
+        assertTrue("Chapter 1 title must be injected into text", book.text.contains("第一章 序章"))
+        assertTrue("Chapter 2 title must be injected into text", book.text.contains("第二章 启程"))
+    }
+
+    @Test
+    fun readBook_withEpub3Nav_populatesTocAndAvoidsDuplicatingExistingHeading() {
+        val nav = """
+            <?xml version="1.0" encoding="utf-8"?>
+            <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+              <body>
+                <nav epub:type="toc">
+                  <ol>
+                    <li><a href="chap1.html">第一章 序章</a></li>
+                  </ol>
+                </nav>
+              </body>
+            </html>
+        """.trimIndent()
+        val zip = buildEpub(
+            chaptersInZipOrder = listOf(
+                "OEBPS/chap1.html" to "<h1>第一章 序章</h1><p>正文一内容</p>",
+            ),
+            spineIdRefs = listOf("c1"),
+            manifest = listOf(
+                "c1" to "chap1.html",
+            ),
+            chapterCharset = StandardCharsets.UTF_8,
+            withBom = false,
+            navPath = "OEBPS/nav.xhtml",
+            navContent = nav,
+        )
+        val book = EpubReader.readBook(ByteArrayInputStream(zip))
+        assertEquals(1, book.toc.size)
+        assertEquals("第一章 序章", book.toc[0].title)
+        val occurrences = book.text.split("第一章 序章").size - 1
+        assertEquals("Existing <h1> title must not be duplicated", 1, occurrences)
+    }
+
     private fun buildEpub(
         chaptersInZipOrder: List<Pair<String, String>>,
         spineIdRefs: List<String>,
@@ -429,6 +585,10 @@ class EpubReaderTest {
         withBom: Boolean,
         dcTitle: String? = null,
         dcCreator: String? = null,
+        ncxPath: String? = null,
+        ncxContent: String? = null,
+        navPath: String? = null,
+        navContent: String? = null,
     ): ByteArray {
         val baos = ByteArrayOutputStream()
         ZipOutputStream(baos).use { zip ->
@@ -443,12 +603,26 @@ class EpubReaderTest {
             )
             zip.closeEntry()
 
-            val manifestXml = manifest.joinToString("\n") { (id, href) ->
-                """    <item id="$id" href="$href" media-type="application/xhtml+xml"/>"""
+            val allManifest = manifest.toMutableList()
+            if (ncxPath != null && ncxContent != null && allManifest.none { it.first == "ncx" }) {
+                allManifest.add("ncx" to ncxPath.removePrefix("OEBPS/"))
+            }
+            if (navPath != null && navContent != null && allManifest.none { it.first == "nav" }) {
+                allManifest.add("nav" to navPath.removePrefix("OEBPS/"))
+            }
+
+            val manifestXml = allManifest.joinToString("\n") { (id, href) ->
+                val mediaType = when {
+                    href.endsWith(".ncx") -> "application/x-dtbncx+xml"
+                    else -> "application/xhtml+xml"
+                }
+                val props = if (id == "nav") """ properties="nav"""" else ""
+                """    <item id="$id" href="$href" media-type="$mediaType"$props/>"""
             }
             val spineXml = spineIdRefs.joinToString("\n") { id ->
                 """    <itemref idref="$id"/>"""
             }
+            val spineTag = if (ncxContent != null) """  <spine toc="ncx">""" else """  <spine>"""
             val metadata = buildString {
                 if (dcTitle != null || dcCreator != null) {
                     append("  <metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\n")
@@ -464,12 +638,23 @@ class EpubReaderTest {
 $metadata  <manifest>
 $manifestXml
   </manifest>
-  <spine>
+$spineTag
 $spineXml
   </spine>
 </package>""".toByteArray(StandardCharsets.UTF_8),
             )
             zip.closeEntry()
+
+            if (ncxPath != null && ncxContent != null) {
+                zip.putNextEntry(ZipEntry(ncxPath))
+                zip.write(ncxContent.toByteArray(StandardCharsets.UTF_8))
+                zip.closeEntry()
+            }
+            if (navPath != null && navContent != null) {
+                zip.putNextEntry(ZipEntry(navPath))
+                zip.write(navContent.toByteArray(StandardCharsets.UTF_8))
+                zip.closeEntry()
+            }
 
             for ((path, content) in chaptersInZipOrder) {
                 zip.putNextEntry(ZipEntry(path))

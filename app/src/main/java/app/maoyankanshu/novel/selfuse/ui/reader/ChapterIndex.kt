@@ -36,14 +36,36 @@ object ChapterIndex {
             // Rejects "Prologue is mentioned…" (next word is lowercase)
             "|(?i:Prologue)(?:\\s*$|\\s*[-—:.]\\s*.+|\\s+(?=\\p{Lu}).+)" +
             "|(?i:Epilogue)(?:\\s*$|\\s*[-—:.]\\s*.+|\\s+(?=\\p{Lu}).+)" +
+            "|(?i:Part)\\s+(?:\\d+|(?i:[IVXLCDM]+))\\b.*" +
+            "|(?i:Book)\\s+(?:\\d+|(?i:[IVXLCDM]+))\\b.*" +
+            "|(?i:Act)\\s+(?:\\d+|(?i:[IVXLCDM]+))\\b.*" +
+            "|(?i:Volume)\\s+(?:\\d+|(?i:[IVXLCDM]+))\\b.*" +
+            "|(?i:Section)\\s+(?:\\d+|(?i:[IVXLCDM]+))\\b.*" +
+            "|(?i:Introduction)(?:\\s*$|\\s*[-—:.]\\s*.+|\\s+(?=\\p{Lu}).+)" +
+            "|(?i:Preface)(?:\\s*$|\\s*[-—:.]\\s*.+|\\s+(?=\\p{Lu}).+)" +
+            "|(?i:Foreword)(?:\\s*$|\\s*[-—:.]\\s*.+|\\s+(?=\\p{Lu}).+)" +
+            "|(?i:Afterword)(?:\\s*$|\\s*[-—:.]\\s*.+|\\s+(?=\\p{Lu}).+)" +
+            "|(?i:Appendix)(?:\\s*$|\\s*[-—:.]\\s*.+|\\s+(?=\\p{Lu}).+)" +
+            "|(?i:Interlude)(?:\\s*$|\\s*[-—:.]\\s*.+|\\s+(?=\\p{Lu}).+)" +
             "|序章.*" +
             "|序言.*" +
             "|楔子.*" +
-            // Require 前言 alone or 前言 + space so "前言内容" is not a heading.
+            "|引子.*" +
+            "|引言.*" +
             "|前言$" +
             "|前言\\s+.*" +
             "|尾声.*" +
             "|后记.*" +
+            "|跋.*" +
+            "|番外.*" +
+            "|附录.*" +
+            "|致谢.*" +
+            "|鸣谢.*" +
+            "|感言.*" +
+            "|卷[一二三四五六七八九十百千万0-9]+.*" +
+            "|[一二三四五六七八九十百千万]{1,6}[、.．]\\s*\\S+.*" +
+            "|\\d{1,4}[、.．]\\s*\\S+.*" +
+            "|【[^】\r\n]+】[ \\t]*(?:[^\\r\\n]*)" +
             ")$",
         Pattern.UNICODE_CASE,
     )
@@ -55,8 +77,20 @@ object ChapterIndex {
         val chapters = ArrayList<Chapter>()
         val matcher = PATTERN.matcher(text)
         while (matcher.find()) {
-            val title = matcher.group().trim()
-            if (title.isEmpty()) continue
+            val rawTitle = matcher.group().trim()
+            if (rawTitle.isEmpty()) continue
+            val title = if (rawTitle.startsWith("【")) {
+                val closeIdx = rawTitle.indexOf('】')
+                if (closeIdx > 1) {
+                    val inside = rawTitle.substring(1, closeIdx).trim()
+                    val after = rawTitle.substring(closeIdx + 1).trim()
+                    if (after.isEmpty()) inside else "$inside $after"
+                } else {
+                    rawTitle
+                }
+            } else {
+                rawTitle
+            }
             val start = matcher.start()
             // Skip duplicate starts (overlapping / same line edge cases).
             if (chapters.isNotEmpty() && chapters[chapters.lastIndex].start == start) continue
