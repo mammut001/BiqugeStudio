@@ -18,10 +18,22 @@ class TtsRateTest {
     }
 
     @Test
+    fun step_adjustsCleanlyAndRespectsBounds() {
+        assertEquals(1.1f, TtsRate.step(1.0f, 0.1f), 0.001f)
+        assertEquals(0.9f, TtsRate.step(1.0f, -0.1f), 0.001f)
+        assertEquals(2.0f, TtsRate.step(1.95f, 0.1f), 0.001f)
+        assertEquals(0.5f, TtsRate.step(0.55f, -0.1f), 0.001f)
+        assertEquals(2.0f, TtsRate.step(2.0f, 0.1f), 0.001f)
+        assertEquals(0.5f, TtsRate.step(0.5f, -0.1f), 0.001f)
+    }
+
+    @Test
     fun nearestPreset_snapsNearValues() {
         assertEquals(1.0f, TtsRate.nearestPreset(1.02f), 0.001f)
         assertEquals(1.25f, TtsRate.nearestPreset(1.24f), 0.001f)
         assertEquals(0.75f, TtsRate.nearestPreset(0.76f), 0.001f)
+        assertEquals(1.75f, TtsRate.nearestPreset(1.73f), 0.001f)
+        assertEquals(2.0f, TtsRate.nearestPreset(1.98f), 0.001f)
     }
 
     @Test
@@ -29,6 +41,7 @@ class TtsRateTest {
         assertTrue(TtsRate.isPresetSelected(1.0f, 1.0f))
         assertTrue(TtsRate.isPresetSelected(1.03f, 1.0f))
         assertFalse(TtsRate.isPresetSelected(1.25f, 1.0f))
+        assertTrue(TtsRate.isPresetSelected(1.75f, 1.74f))
     }
 
     @Test
@@ -36,6 +49,7 @@ class TtsRateTest {
         assertEquals("1×", TtsRate.label(1.0f))
         assertEquals("0.75×", TtsRate.label(0.75f))
         assertEquals("1.25×", TtsRate.label(1.25f))
+        assertEquals("1.75×", TtsRate.label(1.75f))
         assertEquals("2×", TtsRate.label(2.0f))
     }
 

@@ -91,6 +91,12 @@ class ReaderReadingPolishTest {
     fun pageTurnDurationMs() {
         assertEquals(280, ReaderReadingPolish.pageTurnDurationMs(true))
         assertEquals(0, ReaderReadingPolish.pageTurnDurationMs(false))
+
+        assertEquals(280, ReaderReadingPolish.pageTurnDurationMs(ReaderPreferences.PAGE_TURN_STYLE_SIMULATION))
+        assertEquals(220, ReaderReadingPolish.pageTurnDurationMs(ReaderPreferences.PAGE_TURN_STYLE_SLIDE))
+        assertEquals(240, ReaderReadingPolish.pageTurnDurationMs(ReaderPreferences.PAGE_TURN_STYLE_COVER))
+        assertEquals(0, ReaderReadingPolish.pageTurnDurationMs(ReaderPreferences.PAGE_TURN_STYLE_NONE))
+        assertEquals(280, ReaderReadingPolish.pageTurnDurationMs(999))
     }
 }
 

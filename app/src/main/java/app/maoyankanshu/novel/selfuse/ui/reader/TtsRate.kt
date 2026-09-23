@@ -1,6 +1,7 @@
 package app.maoyankanshu.novel.selfuse.ui.reader
 
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /**
  * Pure speech-rate helpers for in-reader TTS.
@@ -10,13 +11,23 @@ object TtsRate {
     const val MIN: Float = 0.5f
     const val MAX: Float = 2.0f
     const val DEFAULT: Float = 1.0f
+    const val STEP: Float = 0.1f
 
     /** Common CN-reader presets (slow → fast). */
-    val PRESETS: FloatArray = floatArrayOf(0.75f, 1.0f, 1.25f, 1.5f)
+    val PRESETS: FloatArray = floatArrayOf(0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f)
 
     fun clamp(rate: Float): Float {
         if (!rate.isFinite()) return DEFAULT
         return rate.coerceIn(MIN, MAX)
+    }
+
+    /**
+     * Steps the rate by [delta] (e.g. +0.1f or -0.1f), rounding to two decimal places and clamping to [MIN, MAX].
+     */
+    fun step(rate: Float, delta: Float): Float {
+        val current = clamp(rate)
+        val target = ((current + delta) * 100f).roundToInt() / 100f
+        return clamp(target)
     }
 
     /** Nearest preset within [tolerance], else [clamp]ed raw rate. */
@@ -40,12 +51,12 @@ object TtsRate {
     /** Display label e.g. `1.25×`. */
     fun label(rate: Float): String {
         val c = clamp(rate)
-        val rounded = (c * 100f).toInt() / 100f
+        val rounded = ((c * 100f).roundToInt()) / 100f
         return if (rounded == rounded.toInt().toFloat()) {
             "${rounded.toInt()}×"
         } else {
             // Trim trailing zeros in a locale-stable way.
-            val s = String.format(java.util.Locale.US, "%.2f", c).trimEnd('0').trimEnd('.')
+            val s = String.format(java.util.Locale.US, "%.2f", rounded).trimEnd('0').trimEnd('.')
             "${s}×"
         }
     }

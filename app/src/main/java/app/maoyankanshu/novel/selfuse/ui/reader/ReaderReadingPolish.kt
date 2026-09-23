@@ -98,6 +98,17 @@ object ReaderReadingPolish {
     }
 
     /**
+     * Page-turn duration in ms: 280 for simulation, 220 for slide, 240 for cover, 0 for instant snap.
+     */
+    fun pageTurnDurationMs(style: Int): Int = when (style) {
+        ReaderPreferences.PAGE_TURN_STYLE_SIMULATION -> 280
+        ReaderPreferences.PAGE_TURN_STYLE_SLIDE -> 220
+        ReaderPreferences.PAGE_TURN_STYLE_COVER -> 240
+        ReaderPreferences.PAGE_TURN_STYLE_NONE -> 0
+        else -> 280
+    }
+
+    /**
      * Page-turn duration in ms: 280 when animation is on, 0 for instant snap.
      */
     fun pageTurnDurationMs(animationEnabled: Boolean): Int =

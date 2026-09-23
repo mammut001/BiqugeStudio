@@ -22,6 +22,7 @@ public final class ReaderPreferences {
     private static final String KEEP_SCREEN_ON = "reader_keep_screen_on";
     private static final String VOLUME_PAGE_TURN = "reader_volume_page_turn";
     private static final String PAGE_TURN_ANIMATION = "reader_page_turn_animation";
+    private static final String PAGE_TURN_STYLE = "reader_page_turn_style";
     private static final String PARAGRAPH_INDENT = "reader_paragraph_indent";
     private static final String AUTO_NIGHT = "reader_auto_night";
     private static final String THEME_DAY = "reader_theme_day";
@@ -52,6 +53,13 @@ public final class ReaderPreferences {
     public static final int MARGIN_NARROW = 0;
     public static final int MARGIN_STANDARD = 1;
     public static final int MARGIN_WIDE = 2;
+
+    public static final int PAGE_TURN_STYLE_SIMULATION = 0;
+    public static final int PAGE_TURN_STYLE_SLIDE = 1;
+    public static final int PAGE_TURN_STYLE_COVER = 2;
+    public static final int PAGE_TURN_STYLE_NONE = 3;
+    public static final int PAGE_TURN_STYLE_MIN = PAGE_TURN_STYLE_SIMULATION;
+    public static final int PAGE_TURN_STYLE_MAX = PAGE_TURN_STYLE_NONE;
 
     public static final int FONT_SERIF = 0;
     public static final int FONT_SANS = 1;
@@ -405,13 +413,52 @@ public final class ReaderPreferences {
         prefs.edit().putBoolean(VOLUME_PAGE_TURN, enabled).apply();
     }
 
-    /** Left/right page-turn animation (3D tilt). Default true. */
+    /**
+     * Left/right page-turn style: SIMULATION (3D) / SLIDE / COVER / NONE.
+     * Backwards-compatible with {@link #pageTurnAnimation()}:
+     * when absent, falls back to NONE if animation was disabled, else SIMULATION.
+     */
+    public int pageTurnStyle() {
+        if (prefs.contains(PAGE_TURN_STYLE)) {
+            int raw = prefs.getInt(PAGE_TURN_STYLE, PAGE_TURN_STYLE_SIMULATION);
+            return Math.max(PAGE_TURN_STYLE_MIN, Math.min(PAGE_TURN_STYLE_MAX, raw));
+        }
+        return pageTurnAnimation() ? PAGE_TURN_STYLE_SIMULATION : PAGE_TURN_STYLE_NONE;
+    }
+
+    public void setPageTurnStyle(int style) {
+        int safe = Math.max(PAGE_TURN_STYLE_MIN, Math.min(PAGE_TURN_STYLE_MAX, style));
+        boolean animated = safe != PAGE_TURN_STYLE_NONE;
+        prefs.edit()
+                .putInt(PAGE_TURN_STYLE, safe)
+                .putBoolean(PAGE_TURN_ANIMATION, animated)
+                .apply();
+    }
+
+    /** Left/right page-turn animation enabled. Default true. */
     public boolean pageTurnAnimation() {
+        if (prefs.contains(PAGE_TURN_STYLE)) {
+            return prefs.getInt(PAGE_TURN_STYLE, PAGE_TURN_STYLE_SIMULATION) != PAGE_TURN_STYLE_NONE;
+        }
         return prefs.getBoolean(PAGE_TURN_ANIMATION, true);
     }
 
     public void setPageTurnAnimation(boolean enabled) {
-        prefs.edit().putBoolean(PAGE_TURN_ANIMATION, enabled).apply();
+        if (!enabled) {
+            prefs.edit()
+                    .putBoolean(PAGE_TURN_ANIMATION, false)
+                    .putInt(PAGE_TURN_STYLE, PAGE_TURN_STYLE_NONE)
+                    .apply();
+        } else {
+            int style = prefs.getInt(PAGE_TURN_STYLE, PAGE_TURN_STYLE_SIMULATION);
+            if (style == PAGE_TURN_STYLE_NONE) {
+                style = PAGE_TURN_STYLE_SIMULATION;
+            }
+            prefs.edit()
+                    .putBoolean(PAGE_TURN_ANIMATION, true)
+                    .putInt(PAGE_TURN_STYLE, style)
+                    .apply();
+        }
     }
 
     /** First-line fullwidth indent for paragraphs. Default true (common CN novel layout). */

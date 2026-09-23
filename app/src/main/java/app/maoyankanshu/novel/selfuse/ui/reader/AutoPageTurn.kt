@@ -10,7 +10,7 @@ object AutoPageTurn {
     const val MAX_SEC: Int = 300
 
     /** Off + common reading paces (seconds per page). */
-    val PRESETS_SEC: IntArray = intArrayOf(0, 12, 20, 30, 45, 60)
+    val PRESETS_SEC: IntArray = intArrayOf(0, 10, 15, 20, 30, 45, 60)
 
     fun clampSec(seconds: Int): Int = seconds.coerceIn(MIN_SEC, MAX_SEC)
 

@@ -202,6 +202,7 @@ fun ReaderScreen(
     var brightness by remember { mutableFloatStateOf(preferences.brightness()) }
     var keepScreenOn by remember { mutableStateOf(preferences.keepScreenOn()) }
     var volumePageTurn by remember { mutableStateOf(preferences.volumePageTurn()) }
+    var pageTurnStyle by remember { mutableIntStateOf(preferences.pageTurnStyle()) }
     var pageTurnAnimation by remember { mutableStateOf(preferences.pageTurnAnimation()) }
     var paragraphIndent by remember { mutableStateOf(preferences.paragraphIndent()) }
     var autoNight by remember { mutableStateOf(preferences.autoNight()) }
@@ -861,7 +862,7 @@ fun ReaderScreen(
         scope.launch {
             val animate = PageIndex.shouldAnimatePageTurn(pagerState.currentPage, page)
             val ms = if (animate) {
-                ReaderReadingPolish.pageTurnDurationMs(pageTurnAnimation)
+                ReaderReadingPolish.pageTurnDurationMs(pageTurnStyle)
             } else {
                 0
             }
@@ -1421,7 +1422,7 @@ fun ReaderScreen(
                     // pager scrolls (finger swipe or tap animateScrollToPage).
                     val pageOffset =
                         (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
-                    val turn = PageTurnEffect.transform(pageOffset, pageTurnAnimation)
+                    val turn = PageTurnEffect.transform(pageOffset, pageTurnStyle)
                     // Page-local indent: only true paragraph starts (offset 0 or after \n).
                     // Applying firstLineIndent on every page re-wraps mid-paragraph lines and
                     // clips the last line — the longstanding half-line bug.
@@ -1451,6 +1452,7 @@ fun ReaderScreen(
                                 alpha = turn.alpha
                                 scaleX = turn.scale
                                 scaleY = turn.scale
+                                translationX = turn.translationXFraction * size.width
                                 // Prevent 3D layer from cropping descenders at the bottom edge.
                                 clip = false
                             }
@@ -2399,7 +2401,7 @@ fun ReaderScreen(
             brightness = brightness,
             keepScreenOn = keepScreenOn,
             volumePageTurn = volumePageTurn,
-            pageTurnAnimation = pageTurnAnimation,
+            pageTurnStyle = pageTurnStyle,
             paragraphIndent = paragraphIndent,
             autoNight = autoNight,
             customFontName = customFontName,
@@ -2484,9 +2486,10 @@ fun ReaderScreen(
                 volumePageTurn = enabled
                 preferences.setVolumePageTurn(enabled)
             },
-            onPageTurnAnimation = { enabled ->
-                pageTurnAnimation = enabled
-                preferences.setPageTurnAnimation(enabled)
+            onPageTurnStyle = { style ->
+                pageTurnStyle = style
+                preferences.setPageTurnStyle(style)
+                pageTurnAnimation = preferences.pageTurnAnimation()
             },
             onParagraphIndent = { enabled ->
                 paragraphIndent = enabled
@@ -3161,11 +3164,43 @@ private fun VoiceManagerSheet(
                 text = stringResource(R.string.reader_tts_rate_title),
                 style = MaterialTheme.typography.titleMedium,
             )
-            Text(
-                text = stringResource(R.string.reader_tts_rate_label, TtsRate.label(ttsRate)),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = stringResource(R.string.reader_tts_rate_label, TtsRate.label(ttsRate)),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                val slowerCd = stringResource(R.string.reader_tts_rate_slower_cd)
+                val fasterCd = stringResource(R.string.reader_tts_rate_faster_cd)
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(
+                        onClick = { onTtsRate(TtsRate.step(ttsRate, -TtsRate.STEP)) },
+                        enabled = ttsRate > TtsRate.MIN,
+                        modifier = Modifier
+                            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                            .semantics {
+                                contentDescription = slowerCd
+                            },
+                    ) {
+                        Text(stringResource(R.string.reader_tts_rate_slower))
+                    }
+                    TextButton(
+                        onClick = { onTtsRate(TtsRate.step(ttsRate, TtsRate.STEP)) },
+                        enabled = ttsRate < TtsRate.MAX,
+                        modifier = Modifier
+                            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                            .semantics {
+                                contentDescription = fasterCd
+                            },
+                    ) {
+                        Text(stringResource(R.string.reader_tts_rate_faster))
+                    }
+                }
+            }
             Slider(
                 value = ttsRate,
                 onValueChange = onTtsRate,
@@ -3174,13 +3209,15 @@ private fun VoiceManagerSheet(
             )
             Row(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
             ) {
                 TtsRate.PRESETS.forEach { preset ->
                     val selected = TtsRate.isPresetSelected(ttsRate, preset)
                     TextButton(
                         onClick = { onTtsRate(preset) },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
                     ) {
                         Text(
                             text = TtsRate.label(preset),
@@ -3266,7 +3303,7 @@ private fun AppearanceDialog(
     brightness: Float,
     keepScreenOn: Boolean,
     volumePageTurn: Boolean,
-    pageTurnAnimation: Boolean,
+    pageTurnStyle: Int,
     paragraphIndent: Boolean,
     autoNight: Boolean,
     customFontName: String,
@@ -3287,7 +3324,7 @@ private fun AppearanceDialog(
     onBrightness: (Float) -> Unit,
     onKeepScreenOn: (Boolean) -> Unit,
     onVolumePageTurn: (Boolean) -> Unit,
-    onPageTurnAnimation: (Boolean) -> Unit,
+    onPageTurnStyle: (Int) -> Unit,
     onParagraphIndent: (Boolean) -> Unit,
     onAutoNight: (Boolean) -> Unit,
     onTtsRate: (Float) -> Unit,
@@ -3812,12 +3849,56 @@ private fun AppearanceDialog(
                     checked = volumePageTurn,
                     onCheckedChange = onVolumePageTurn,
                 )
-                AppearanceToggleRow(
-                    label = stringResource(R.string.reader_page_turn_animation),
-                    contentDescription = stringResource(R.string.reader_page_turn_animation_cd),
-                    checked = pageTurnAnimation,
-                    onCheckedChange = onPageTurnAnimation,
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.reader_page_turn_style_title),
+                    style = MaterialTheme.typography.bodyMedium,
                 )
+                val pageTurnStyles = listOf(
+                    ReaderPreferences.PAGE_TURN_STYLE_SIMULATION to (
+                        stringResource(R.string.reader_page_turn_style_simulation) to
+                            stringResource(R.string.reader_page_turn_style_simulation_cd)
+                    ),
+                    ReaderPreferences.PAGE_TURN_STYLE_SLIDE to (
+                        stringResource(R.string.reader_page_turn_style_slide) to
+                            stringResource(R.string.reader_page_turn_style_slide_cd)
+                    ),
+                    ReaderPreferences.PAGE_TURN_STYLE_COVER to (
+                        stringResource(R.string.reader_page_turn_style_cover) to
+                            stringResource(R.string.reader_page_turn_style_cover_cd)
+                    ),
+                    ReaderPreferences.PAGE_TURN_STYLE_NONE to (
+                        stringResource(R.string.reader_page_turn_style_none) to
+                            stringResource(R.string.reader_page_turn_style_none_cd)
+                    ),
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.padding(top = 4.dp),
+                ) {
+                    pageTurnStyles.forEach { (style, labels) ->
+                        val (label, cd) = labels
+                        val selected = style == pageTurnStyle
+                        TextButton(
+                            onClick = { onPageTurnStyle(style) },
+                            modifier = Modifier
+                                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                .semantics {
+                                    contentDescription =
+                                        cd + if (selected) selectedSuffix else ""
+                                },
+                        ) {
+                            Text(
+                                text = label,
+                                color = if (selected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        }
+                    }
+                }
             }
         },
         confirmButton = {

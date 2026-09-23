@@ -390,6 +390,16 @@
     <string name="reader_volume_page_turn_cd">用音量加减键翻上一页或下一页</string>
     <string name="reader_page_turn_animation">翻页动画</string>
     <string name="reader_page_turn_animation_cd">左右翻页时使用立体翻页效果</string>
+    <string name="reader_page_turn_style_title">翻页方式</string>
+    <string name="reader_page_turn_style_cd">选择左右翻页的动效方式</string>
+    <string name="reader_page_turn_style_simulation">仿真</string>
+    <string name="reader_page_turn_style_simulation_cd">仿真立体翻页</string>
+    <string name="reader_page_turn_style_slide">平移</string>
+    <string name="reader_page_turn_style_slide_cd">平移滑动翻页</string>
+    <string name="reader_page_turn_style_cover">覆盖</string>
+    <string name="reader_page_turn_style_cover_cd">覆盖叠页翻页</string>
+    <string name="reader_page_turn_style_none">无动画</string>
+    <string name="reader_page_turn_style_none_cd">无动画直接切页</string>
     <string name="reader_paragraph_indent">段首缩进</string>
     <string name="reader_paragraph_indent_cd">每段开头缩进两个全角空格</string>
     <string name="reader_auto_night">自动夜间</string>
@@ -426,6 +436,10 @@
     <string name="reader_tts_preparing_toast">朗读引擎准备中，准备好后会自动开始</string>
     <string name="reader_tts_rate_title">朗读语速</string>
     <string name="reader_tts_rate_label">当前 %1$s</string>
+    <string name="reader_tts_rate_slower">减速</string>
+    <string name="reader_tts_rate_slower_cd">语速调慢 0.1 倍</string>
+    <string name="reader_tts_rate_faster">加速</string>
+    <string name="reader_tts_rate_faster_cd">语速调快 0.1 倍</string>
     <string name="reader_tts_engine_title">朗读引擎</string>
     <string name="reader_tts_engine_label">当前：%1$s</string>
     <string name="reader_tts_engine_system">系统默认</string>
