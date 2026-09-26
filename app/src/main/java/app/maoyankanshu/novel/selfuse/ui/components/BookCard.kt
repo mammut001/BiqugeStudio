@@ -39,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
@@ -52,6 +53,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.draw.shadow
+import app.maoyankanshu.novel.selfuse.ui.theme.BookSerif
+import app.maoyankanshu.novel.selfuse.ui.theme.cardContainerColor
 import app.maoyankanshu.novel.selfuse.Book
 import app.maoyankanshu.novel.selfuse.R
 import app.maoyankanshu.novel.selfuse.ui.reader.ProgressMath
@@ -59,8 +66,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /** Fixed offline cover tile (no network images). */
-private val CoverWidth = 56.dp
-private val CoverHeight = 74.dp
+private val CoverWidth = 60.dp
+private val CoverHeight = 84.dp
+private val CoverShape = RoundedCornerShape(topStart = 3.dp, bottomStart = 3.dp, topEnd = 8.dp, bottomEnd = 8.dp)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -105,7 +113,7 @@ fun BookCard(
     val initial = remember(book.title) {
         book.title.trim().firstOrNull()?.toString() ?: "书"
     }
-    // Offline file only — decode on IO with inSampleSize for the 56×74dp tile.
+    // Offline file only — decode on IO with inSampleSize for the 60×84dp tile.
     // Loading / missing / malformed → null → deterministic gradient + initial letter.
     val density = LocalDensity.current
     val reqWidthPx = with(density) { CoverWidth.roundToPx() }
@@ -135,30 +143,31 @@ fun BookCard(
                 contentDescription = description
                 role = Role.Button
             }
+            .clip(MaterialTheme.shapes.large)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick,
             ),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
+            containerColor = cardContainerColor,
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        shape = RoundedCornerShape(12.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        shape = MaterialTheme.shapes.large,
     ) {
-        // Cover/meta → progress (bar + %) → CTA. Clear vertical stack so the
-        // “开始阅读” button never sits on top of the progress track.
+        // Cover/meta → one footer row (progress + % + CTA). Progress keeps its own weighted
+        // slot so the CTA never sits on top of the track.
         Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(0.dp),
+            modifier = Modifier.padding(16.dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 Box(
                     modifier = Modifier
                         .size(width = CoverWidth, height = CoverHeight)
-                        .clip(RoundedCornerShape(8.dp))
+                        .shadow(elevation = 3.dp, shape = CoverShape, clip = false)
+                        .clip(CoverShape)
                         .then(
                             if (coverBitmap == null) Modifier.background(coverBrush) else Modifier,
                         ),
@@ -174,11 +183,24 @@ fun BookCard(
                     } else {
                         Text(
                             text = initial,
-                            color = Color.White.copy(alpha = 0.95f),
-                            fontSize = 28.sp,
-                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White.copy(alpha = 0.92f),
+                            fontSize = 26.sp,
+                            fontFamily = BookSerif,
+                            fontWeight = FontWeight.Medium,
                         )
                     }
+                    // Spine: soft highlight + crease on the binding edge so tiles read as books.
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .fillMaxHeight()
+                            .width(5.dp)
+                            .background(
+                                Brush.horizontalGradient(
+                                    listOf(Color.Black.copy(alpha = 0.18f), Color.White.copy(alpha = 0.12f)),
+                                ),
+                            ),
+                    )
                 }
 
                 Column(
@@ -195,7 +217,7 @@ fun BookCard(
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Spacer(Modifier.height(2.dp))
+                    Spacer(Modifier.height(4.dp))
                     Text(
                         text = book.author,
                         style = MaterialTheme.typography.bodyMedium,
@@ -203,82 +225,96 @@ fun BookCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(8.dp))
                     Text(
                         text = subtitle ?: progressLabel,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
                     )
                 }
             }
 
-            // Own row under the cover block — never squeezed into the cover column.
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(14.dp))
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .semantics {
-                        contentDescription = "阅读进度 $progressLabel，$percentLabel"
-                    },
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                LinearProgressIndicator(
-                    progress = { progressFraction },
+                Row(
                     modifier = Modifier
                         .weight(1f)
-                        .height(6.dp)
-                        .clip(RoundedCornerShape(3.dp)),
-                    color = MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                )
-                Text(
-                    text = percentLabel,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.End,
-                    maxLines = 1,
-                    modifier = Modifier.widthIn(min = 36.dp),
-                )
-            }
-
-            if (showContinueReading && onContinueReading != null) {
-                Spacer(Modifier.height(12.dp))
-                // Material 3 tonal CTA: ≥48dp target, TalkBack label, RTL-safe trailing arrow.
-                FilledTonalButton(
-                    onClick = onContinueReading,
-                    modifier = Modifier
-                        .align(Alignment.End)
-                        .heightIn(min = 48.dp)
-                        .semantics { contentDescription = "$actionLabel ${book.title}" },
+                        .semantics(mergeDescendants = true) {
+                            contentDescription = "阅读进度 $progressLabel，$percentLabel"
+                        },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
+                    LinearProgressIndicator(
+                        progress = { progressFraction },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(2.dp)),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        strokeCap = StrokeCap.Butt,
+                        gapSize = 0.dp,
+                        drawStopIndicator = {},
+                    )
                     Text(
-                        text = actionLabel,
-                        style = MaterialTheme.typography.labelLarge,
+                        text = percentLabel,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.End,
+                        maxLines = 1,
+                        modifier = Modifier.widthIn(min = 34.dp),
                     )
-                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                        contentDescription = null,
-                        modifier = Modifier.size(ButtonDefaults.IconSize),
-                    )
+                }
+
+                if (showContinueReading && onContinueReading != null) {
+                    Spacer(Modifier.width(14.dp))
+                    // Compact tonal pill; Material still guarantees a ≥48dp touch target.
+                    FilledTonalButton(
+                        onClick = onContinueReading,
+                        contentPadding = PaddingValues(start = 16.dp, end = 12.dp),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        ),
+                        modifier = Modifier
+                            .heightIn(min = 36.dp)
+                            .semantics { contentDescription = "$actionLabel ${book.title}" },
+                    ) {
+                        Text(
+                            text = actionLabel,
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                        Spacer(Modifier.size(6.dp))
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
                 }
             }
         }
     }
 }
 
-/** Deterministic warm gradient from book id/title — offline only, no remote art. */
+/**
+ * Deterministic cover gradient from book id/title — offline only, no remote art.
+ * Muted, ink-like tones (cloth-bound editions) instead of saturated material colors.
+ */
 private fun coverGradient(seed: String): Brush {
     val palette = listOf(
-        Color(0xFF8D6E63) to Color(0xFF5D4037),
-        Color(0xFF6D4C41) to Color(0xFF3E2723),
-        Color(0xFF78909C) to Color(0xFF455A64),
-        Color(0xFF5C6BC0) to Color(0xFF3949AB),
-        Color(0xFF00897B) to Color(0xFF00695C),
-        Color(0xFF7E57C2) to Color(0xFF5E35B1),
-        Color(0xFFEF6C00) to Color(0xFFE65100),
-        Color(0xFF546E7A) to Color(0xFF37474F),
+        Color(0xFF8A5A44) to Color(0xFF5E3A2B), // clay
+        Color(0xFF3F4E63) to Color(0xFF263244), // ink blue
+        Color(0xFF55664F) to Color(0xFF344231), // moss
+        Color(0xFF7A4B57) to Color(0xFF4F2D37), // plum wine
+        Color(0xFF3E5E5C) to Color(0xFF24403E), // teal slate
+        Color(0xFF9A7443) to Color(0xFF6B4D26), // ochre
+        Color(0xFF5B5470) to Color(0xFF39334B), // dusk
+        Color(0xFF6B6259) to Color(0xFF443D36), // stone
     )
     val (start, end) = palette[coverPaletteIndex(seed, palette.size)]
     return Brush.linearGradient(listOf(start, end))

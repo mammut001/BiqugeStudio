@@ -3,7 +3,7 @@
     <!-- Host theme for Compose shell + Java Activities (post-splash). -->
     <style name="Theme.BiqugeStudio" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:colorAccent">@color/brand_orange</item>
+        <item name="android:colorAccent">@color/brand_accent</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">true</item>

@@ -36,12 +36,13 @@ import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -67,6 +68,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import app.maoyankanshu.novel.selfuse.BuildConfig
 import app.maoyankanshu.novel.selfuse.LibraryStore
@@ -76,6 +78,8 @@ import app.maoyankanshu.novel.selfuse.R
 import app.maoyankanshu.novel.selfuse.ReaderPreferences
 import app.maoyankanshu.novel.selfuse.StreamCancellationSignal
 import app.maoyankanshu.novel.selfuse.canAcceptUi
+import app.maoyankanshu.novel.selfuse.ui.components.IconBadge
+import app.maoyankanshu.novel.selfuse.ui.theme.cardContainerColor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -360,17 +364,15 @@ fun ProfileScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text(
-                text = stringResource(R.string.profile_settings_heading),
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.semantics { heading() },
-            )
-
+            // Page title lives in the top bar; sections start right away.
             // Section 1: Reading Preferences & Appearance
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ProfileSectionHeader(stringResource(R.string.profile_section_reading))
-                OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.large,
+                    colors = CardDefaults.cardColors(containerColor = cardContainerColor),
+                ) {
                     Column {
                         ProfileItemRow(
                             icon = Icons.Filled.FormatSize,
@@ -408,7 +410,7 @@ fun ProfileScreen(
                                 }
                             },
                         )
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        ProfileRowDivider()
                         ProfileItemRow(
                             icon = Icons.Filled.DarkMode,
                             title = stringResource(R.string.profile_night_title),
@@ -438,7 +440,11 @@ fun ProfileScreen(
             // Section 2: Data & Backup
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ProfileSectionHeader(stringResource(R.string.profile_section_data))
-                OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.large,
+                    colors = CardDefaults.cardColors(containerColor = cardContainerColor),
+                ) {
                     Column {
                         ProfileItemRow(
                             icon = Icons.Filled.Backup,
@@ -456,7 +462,7 @@ fun ProfileScreen(
                             },
                             contentDescription = stringResource(R.string.profile_backup),
                         )
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        ProfileRowDivider()
                         ProfileItemRow(
                             icon = Icons.Filled.Restore,
                             title = stringResource(R.string.profile_restore_title),
@@ -474,7 +480,11 @@ fun ProfileScreen(
             // Section 3: System & About
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ProfileSectionHeader(stringResource(R.string.profile_section_system))
-                OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.large,
+                    colors = CardDefaults.cardColors(containerColor = cardContainerColor),
+                ) {
                     Column {
                         ProfileItemRow(
                             icon = Icons.Filled.Settings,
@@ -486,7 +496,7 @@ fun ProfileScreen(
                             },
                             contentDescription = stringResource(R.string.profile_display_settings),
                         )
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        ProfileRowDivider()
                         ProfileItemRow(
                             icon = Icons.Filled.Info,
                             title = stringResource(R.string.profile_about_title, appName),
@@ -495,7 +505,7 @@ fun ProfileScreen(
                             onClick = { showAbout = true },
                             contentDescription = stringResource(R.string.about_app, appName),
                         )
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        ProfileRowDivider()
                         ProfileItemRow(
                             icon = Icons.Filled.Info,
                             title = stringResource(R.string.compliance_center_title),
@@ -652,12 +662,22 @@ fun ProfileScreen(
 private fun ProfileSectionHeader(title: String) {
     Text(
         text = title,
-        style = MaterialTheme.typography.titleMedium,
-        color = MaterialTheme.colorScheme.primary,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 4.dp, top = 4.dp, bottom = 4.dp)
+            .padding(start = 8.dp, top = 8.dp, bottom = 2.dp)
             .semantics { heading() },
+    )
+}
+
+/** Hairline divider inset past the icon badge. */
+@Composable
+private fun ProfileRowDivider() {
+    HorizontalDivider(
+        modifier = Modifier.padding(start = 70.dp),
+        thickness = 0.5.dp,
+        color = MaterialTheme.colorScheme.outlineVariant,
     )
 }
 
@@ -717,12 +737,7 @@ private fun ProfileItemRow(
         modifier = itemModifier,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
-            modifier = Modifier.size(24.dp),
-        )
+        IconBadge(icon = icon, enabled = enabled)
         Spacer(Modifier.width(16.dp))
         Column(
             modifier = Modifier.weight(1f),
@@ -730,14 +745,14 @@ private fun ProfileItemRow(
         ) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.titleSmall.copy(fontSize = 15.sp),
                 color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
             )
             if (subtitle.isNotEmpty()) {
                 Spacer(Modifier.height(2.dp))
                 Text(
                     text = subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodySmall,
                     color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
                 )
             }

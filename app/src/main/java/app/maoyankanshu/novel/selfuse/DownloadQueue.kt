@@ -5,7 +5,7 @@ import java.util.UUID
 /**
  * State of a single queued download task.
  */
-sealed class DownloadTaskState {
+internal sealed class DownloadTaskState {
     data object Queued : DownloadTaskState()
     data class Running(
         val bytesRead: Long = 0L,
@@ -23,7 +23,7 @@ sealed class DownloadTaskState {
 /**
  * An item in the download queue.
  */
-data class DownloadTask(
+internal data class DownloadTask(
     val id: String,
     val url: String,
     val preferredTitle: String = "",
@@ -51,7 +51,7 @@ data class DownloadTask(
  * Implements Section 2.2 of the project roadmap (下载队列 / 多任务排队 / 失败重试).
  * Adheres strictly to project privacy & HTTPS standards (no plain http, no scrapers).
  */
-class DownloadQueue(val maxConcurrent: Int = 1) {
+internal class DownloadQueue(val maxConcurrent: Int = 1) {
     companion object {
         @JvmStatic
         val shared: DownloadQueue by lazy { DownloadQueue(maxConcurrent = 1) }

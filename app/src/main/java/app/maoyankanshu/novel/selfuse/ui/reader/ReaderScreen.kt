@@ -162,6 +162,8 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
+import androidx.compose.foundation.shape.CircleShape
+import app.maoyankanshu.novel.selfuse.ui.theme.appFilterChipColors
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class, FlowPreview::class)
 @Composable
@@ -3094,19 +3096,25 @@ private fun VoiceManagerSheet(
                     selected = voiceFilter == TtsVoiceFilter.ALL,
                     onClick = { voiceFilter = TtsVoiceFilter.ALL },
                     label = { Text(stringResource(R.string.reader_voice_filter_all)) },
-                    modifier = Modifier.heightIn(min = 48.dp),
+                    colors = appFilterChipColors(),
+                    border = null,
+                    shape = CircleShape,
                 )
                 FilterChip(
                     selected = voiceFilter == TtsVoiceFilter.LOCAL,
                     onClick = { voiceFilter = TtsVoiceFilter.LOCAL },
                     label = { Text(stringResource(R.string.reader_voice_filter_local)) },
-                    modifier = Modifier.heightIn(min = 48.dp),
+                    colors = appFilterChipColors(),
+                    border = null,
+                    shape = CircleShape,
                 )
                 FilterChip(
                     selected = voiceFilter == TtsVoiceFilter.NETWORK,
                     onClick = { voiceFilter = TtsVoiceFilter.NETWORK },
                     label = { Text(stringResource(R.string.reader_voice_filter_network)) },
-                    modifier = Modifier.heightIn(min = 48.dp),
+                    colors = appFilterChipColors(),
+                    border = null,
+                    shape = CircleShape,
                 )
             }
             Text(

@@ -54,6 +54,10 @@ import app.maoyankanshu.novel.selfuse.ui.components.EmptyState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import app.maoyankanshu.novel.selfuse.ui.theme.appFilterChipColors
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.foundation.shape.CircleShape
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -143,7 +147,7 @@ fun ShelfScreen(
                 .padding(contentPadding)
                 .semantics { contentDescription = context.getString(R.string.shelf_screen_cd) },
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             if (books.isEmpty()) {
                 item {
@@ -378,9 +382,10 @@ private fun ShelfToolbar(
                     selected = progressFilter == ShelfProgressFilter.ALL,
                     onClick = { onFilterChange(ShelfProgressFilter.ALL) },
                     label = { Text(stringResource(R.string.shelf_filter_all)) },
-                    modifier = Modifier
-                        .heightIn(min = 48.dp)
-                        .semantics { contentDescription = filterAllCd },
+                    colors = appFilterChipColors(),
+                    border = null,
+                    shape = CircleShape,
+                    modifier = Modifier.semantics { contentDescription = filterAllCd },
                 )
             }
             item {
@@ -388,9 +393,10 @@ private fun ShelfToolbar(
                     selected = progressFilter == ShelfProgressFilter.IN_PROGRESS,
                     onClick = { onFilterChange(ShelfProgressFilter.IN_PROGRESS) },
                     label = { Text(stringResource(R.string.shelf_filter_progress)) },
-                    modifier = Modifier
-                        .heightIn(min = 48.dp)
-                        .semantics { contentDescription = filterProgressCd },
+                    colors = appFilterChipColors(),
+                    border = null,
+                    shape = CircleShape,
+                    modifier = Modifier.semantics { contentDescription = filterProgressCd },
                 )
             }
             item {
@@ -398,9 +404,10 @@ private fun ShelfToolbar(
                     selected = progressFilter == ShelfProgressFilter.NOT_STARTED,
                     onClick = { onFilterChange(ShelfProgressFilter.NOT_STARTED) },
                     label = { Text(stringResource(R.string.shelf_filter_not_started)) },
-                    modifier = Modifier
-                        .heightIn(min = 48.dp)
-                        .semantics { contentDescription = filterNotStartedCd },
+                    colors = appFilterChipColors(),
+                    border = null,
+                    shape = CircleShape,
+                    modifier = Modifier.semantics { contentDescription = filterNotStartedCd },
                 )
             }
             item {
@@ -408,9 +415,10 @@ private fun ShelfToolbar(
                     selected = progressFilter == ShelfProgressFilter.FINISHED,
                     onClick = { onFilterChange(ShelfProgressFilter.FINISHED) },
                     label = { Text(stringResource(R.string.shelf_filter_finished)) },
-                    modifier = Modifier
-                        .heightIn(min = 48.dp)
-                        .semantics { contentDescription = filterFinishedCd },
+                    colors = appFilterChipColors(),
+                    border = null,
+                    shape = CircleShape,
+                    modifier = Modifier.semantics { contentDescription = filterFinishedCd },
                 )
             }
         }
@@ -423,13 +431,26 @@ private fun ShelfToolbar(
             Box {
                 TextButton(
                     onClick = { onSortMenuExpandedChange(true) },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ),
                     modifier = Modifier
                         .heightIn(min = 48.dp)
                         .semantics {
                             contentDescription = "$sortCd，$currentSortLabel"
                         },
                 ) {
-                    Text(stringResource(sortLabelRes(sortOrder)))
+                    Text(
+                        text = stringResource(sortLabelRes(sortOrder)),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    Icon(
+                        imageVector = Icons.Filled.ExpandMore,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .padding(start = 2.dp)
+                            .size(18.dp),
+                    )
                 }
                 DropdownMenu(
                     expanded = sortMenuExpanded,
@@ -454,13 +475,26 @@ private fun ShelfToolbar(
             Box {
                 TextButton(
                     onClick = { onGroupMenuExpandedChange(true) },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ),
                     modifier = Modifier
                         .heightIn(min = 48.dp)
                         .semantics {
                             contentDescription = "$groupCd，$currentGroupLabel"
                         },
                 ) {
-                    Text(stringResource(groupLabelRes(groupMode)))
+                    Text(
+                        text = stringResource(groupLabelRes(groupMode)),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    Icon(
+                        imageVector = Icons.Filled.ExpandMore,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .padding(start = 2.dp)
+                            .size(18.dp),
+                    )
                 }
                 DropdownMenu(
                     expanded = groupMenuExpanded,
@@ -503,11 +537,11 @@ private fun groupLabelRes(mode: ShelfGroupMode): Int = when (mode) {
 private fun SectionLabel(text: String) {
     Text(
         text = text,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.titleLarge,
+        color = MaterialTheme.colorScheme.onSurface,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 4.dp, bottom = 2.dp)
+            .padding(start = 4.dp, top = 8.dp, bottom = 0.dp)
             .semantics { heading() },
     )
 }
@@ -517,11 +551,11 @@ private fun AuthorSectionHeading(authorLabel: String) {
     val cd = stringResource(R.string.shelf_author_heading_cd, authorLabel)
     Text(
         text = authorLabel,
-        style = MaterialTheme.typography.titleMedium,
-        color = MaterialTheme.colorScheme.primary,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 10.dp, bottom = 2.dp)
+            .padding(start = 4.dp, top = 10.dp, bottom = 0.dp)
             .semantics {
                 heading()
                 contentDescription = cd

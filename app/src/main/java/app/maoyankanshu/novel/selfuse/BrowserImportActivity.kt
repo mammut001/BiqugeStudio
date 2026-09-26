@@ -58,7 +58,6 @@ import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -97,6 +96,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import app.maoyankanshu.novel.selfuse.ui.reader.ProgressMath
 import app.maoyankanshu.novel.selfuse.ui.theme.BiqugeTheme
+import app.maoyankanshu.novel.selfuse.ui.theme.appTopBarColors
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -1201,9 +1201,7 @@ private fun BrowserImportScreen(
                         Icon(Icons.Filled.Close, contentDescription = null)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                ),
+                colors = appTopBarColors(),
             )
         },
     ) { padding ->

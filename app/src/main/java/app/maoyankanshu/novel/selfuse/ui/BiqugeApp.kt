@@ -1,5 +1,6 @@
 package app.maoyankanshu.novel.selfuse.ui
 
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.icons.Icons
@@ -9,10 +10,12 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -28,10 +31,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -51,6 +56,7 @@ import app.maoyankanshu.novel.selfuse.ui.screens.DiscoverScreen
 import app.maoyankanshu.novel.selfuse.ui.screens.ProfileScreen
 import app.maoyankanshu.novel.selfuse.ui.screens.ShelfScreen
 import app.maoyankanshu.novel.selfuse.ui.screens.StoreScreen
+import app.maoyankanshu.novel.selfuse.ui.theme.appTopBarColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -128,8 +134,14 @@ fun BiqugeApp(
 
     val profileSettingsVisible = currentTab == MainTab.Profile && showProfileSettings
 
+    // Bar sits flush with the paper background and tints only once content scrolls under it.
+    val topBarScrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+
     Scaffold(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .nestedScroll(topBarScrollBehavior.nestedScrollConnection),
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = {
@@ -141,6 +153,7 @@ fun BiqugeApp(
                     val pageCd = stringResource(R.string.reader_page_title_cd, pageLabel)
                     Text(
                         text = pageLabel,
+                        style = MaterialTheme.typography.headlineSmall,
                         modifier = Modifier.semantics {
                             contentDescription = pageCd
                         },
@@ -199,38 +212,52 @@ fun BiqugeApp(
                         }
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    // Warm tonal bar; saturated orange stays on selected/accent controls.
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    actionIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    scrolledContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                ),
+                colors = appTopBarColors(),
+                scrollBehavior = topBarScrollBehavior,
             )
         },
         bottomBar = {
-            NavigationBar(
-                containerColor = MaterialTheme.colorScheme.surface,
-            ) {
-                MainTab.entries.forEach { tab ->
-                    val selected = currentTab == tab
-                    val tabLabel = stringResource(tab.labelRes)
-                    val tabCd = stringResource(tab.contentDescriptionRes)
-                    NavigationBarItem(
-                        selected = selected,
-                        onClick = { navigateTo(tab) },
-                        icon = {
-                            Icon(
-                                imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
-                                contentDescription = null,
-                            )
-                        },
-                        label = { Text(tabLabel) },
-                        modifier = Modifier.semantics {
-                            contentDescription = tabCd
-                        },
-                    )
+            Column {
+                HorizontalDivider(
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                )
+                NavigationBar(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    tonalElevation = 0.dp,
+                ) {
+                    MainTab.entries.forEach { tab ->
+                        val selected = currentTab == tab
+                        val tabLabel = stringResource(tab.labelRes)
+                        val tabCd = stringResource(tab.contentDescriptionRes)
+                        NavigationBarItem(
+                            selected = selected,
+                            onClick = { navigateTo(tab) },
+                            icon = {
+                                Icon(
+                                    imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
+                                    contentDescription = null,
+                                )
+                            },
+                            label = {
+                                Text(
+                                    text = tabLabel,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                )
+                            },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                                indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            ),
+                            modifier = Modifier.semantics {
+                                contentDescription = tabCd
+                            },
+                        )
+                    }
                 }
             }
         },

@@ -77,7 +77,8 @@ class ReaderActivity : ComponentActivity() {
 
         val bookId = intent.getStringExtra(EXTRA_ID)
         setContent {
-            BiqugeTheme(darkTheme = ReaderPreferences.get(this).nightMode()) {
+            // Reader palettes own the bar look; keep system bars untouched here.
+            BiqugeTheme(darkTheme = ReaderPreferences.get(this).nightMode(), syncSystemBars = false) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     when (val state = openState) {
                         OpenState.Loading -> LoadingShell()

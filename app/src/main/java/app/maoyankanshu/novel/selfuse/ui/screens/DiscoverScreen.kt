@@ -57,6 +57,9 @@ import java.util.Date
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import app.maoyankanshu.novel.selfuse.ui.theme.cardContainerColor
+import app.maoyankanshu.novel.selfuse.ui.theme.appFilterChipColors
+import androidx.compose.foundation.shape.CircleShape
 
 private enum class ReadingTimeRange(val dayCount: Int) {
     TODAY(1),
@@ -209,24 +212,25 @@ fun DiscoverScreen(
             .fillMaxSize()
             .padding(contentPadding),
         contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .semantics { contentDescription = overviewCd },
+                shape = MaterialTheme.shapes.large,
                 colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    containerColor = cardContainerColor,
                 ),
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp),
+                    modifier = Modifier.padding(20.dp),
                 ) {
                     Text(
                         text = stringResource(R.string.discover_overview_heading),
                         style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.semantics { heading() },
                     )
                     Spacer(Modifier.height(12.dp))
@@ -315,10 +319,10 @@ fun DiscoverScreen(
         item {
             Text(
                 text = stringResource(R.string.discover_continue_heading),
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier
-                    .padding(top = 8.dp)
+                    .padding(start = 4.dp, top = 12.dp)
                     .semantics { heading() },
             )
         }
@@ -355,10 +359,10 @@ fun DiscoverScreen(
             item {
                 Text(
                     text = stringResource(R.string.discover_history_heading),
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier
-                        .padding(top = 8.dp)
+                        .padding(start = 4.dp, top = 12.dp)
                         .semantics { heading() },
                 )
             }
@@ -414,25 +418,28 @@ private fun ReadingTimeRangeChips(
             selected = selected == ReadingTimeRange.TODAY,
             onClick = { onSelected(ReadingTimeRange.TODAY) },
             label = { Text(stringResource(R.string.discover_range_today)) },
-            modifier = Modifier
-                .heightIn(min = 48.dp)
-                .semantics { contentDescription = todayCd },
+            colors = appFilterChipColors(),
+            border = null,
+            shape = CircleShape,
+            modifier = Modifier.semantics { contentDescription = todayCd },
         )
         FilterChip(
             selected = selected == ReadingTimeRange.LAST_7_DAYS,
             onClick = { onSelected(ReadingTimeRange.LAST_7_DAYS) },
             label = { Text(stringResource(R.string.discover_range_last_7_days)) },
-            modifier = Modifier
-                .heightIn(min = 48.dp)
-                .semantics { contentDescription = last7Cd },
+            colors = appFilterChipColors(),
+            border = null,
+            shape = CircleShape,
+            modifier = Modifier.semantics { contentDescription = last7Cd },
         )
         FilterChip(
             selected = selected == ReadingTimeRange.LAST_30_DAYS,
             onClick = { onSelected(ReadingTimeRange.LAST_30_DAYS) },
             label = { Text(stringResource(R.string.discover_range_last_30_days)) },
-            modifier = Modifier
-                .heightIn(min = 48.dp)
-                .semantics { contentDescription = last30Cd },
+            colors = appFilterChipColors(),
+            border = null,
+            shape = CircleShape,
+            modifier = Modifier.semantics { contentDescription = last30Cd },
         )
     }
 }
@@ -445,7 +452,7 @@ private fun ReadingDurationBars(
     val dayMillis = remember(dayEntries) { dayEntries.map { it.millis } }
     val maxMillis = dayMillis.maxOrNull()?.coerceAtLeast(1L) ?: 1L
     val barColor = MaterialTheme.colorScheme.primary
-    val trackColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.18f)
+    val trackColor = MaterialTheme.colorScheme.surfaceContainerHigh
 
     Column(
         modifier = Modifier
@@ -521,13 +528,13 @@ private fun OverviewStatTile(
         Text(
             text = label,
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Spacer(Modifier.height(2.dp))
+        Spacer(Modifier.height(4.dp))
         Text(
             text = value,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.onSurface,
         )
     }
 }

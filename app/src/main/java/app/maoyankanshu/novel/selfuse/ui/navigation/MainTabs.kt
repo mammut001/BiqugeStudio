@@ -2,11 +2,11 @@ package app.maoyankanshu.novel.selfuse.ui.navigation
 
 import androidx.annotation.StringRes
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.LibraryBooks
-import androidx.compose.material.icons.automirrored.outlined.LibraryBooks
-import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.AutoStories
+import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.AutoStories
+import androidx.compose.material.icons.outlined.LibraryAdd
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.ui.graphics.vector.ImageVector
 import app.maoyankanshu.novel.selfuse.R
@@ -29,15 +29,15 @@ enum class MainTab(
         route = "shelf",
         labelRes = R.string.tab_shelf,
         contentDescriptionRes = R.string.tab_shelf_cd,
-        selectedIcon = Icons.Filled.Home,
-        unselectedIcon = Icons.Outlined.Home,
+        selectedIcon = Icons.Filled.AutoStories,
+        unselectedIcon = Icons.Outlined.AutoStories,
     ),
     Store(
         route = "store",
         labelRes = R.string.store_import_section,
         contentDescriptionRes = R.string.tab_store_cd,
-        selectedIcon = Icons.AutoMirrored.Filled.LibraryBooks,
-        unselectedIcon = Icons.AutoMirrored.Outlined.LibraryBooks,
+        selectedIcon = Icons.Filled.LibraryAdd,
+        unselectedIcon = Icons.Outlined.LibraryAdd,
     ),
     Profile(
         route = "profile",

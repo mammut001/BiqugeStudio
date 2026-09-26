@@ -4,38 +4,44 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.maoyankanshu.novel.selfuse.AppIntents
 import app.maoyankanshu.novel.selfuse.R
+import app.maoyankanshu.novel.selfuse.ui.components.IconBadge
+import app.maoyankanshu.novel.selfuse.ui.theme.cardContainerColor
 
 /**
  * Focused import destination.
@@ -73,33 +79,23 @@ fun StoreScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
-            Column {
-                Text(
-                    text = stringResource(R.string.store_import_section),
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.semantics { heading() },
-                )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = summary,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.semantics { contentDescription = summaryCd },
-                )
-            }
-        }
-
-        item {
+            // Top bar already names the page; lead with the library summary instead of repeating it.
             Text(
-                text = stringResource(R.string.online_import_scope_notice),
-                style = MaterialTheme.typography.bodySmall,
+                text = summary,
+                style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .padding(horizontal = 4.dp)
+                    .semantics { contentDescription = summaryCd },
             )
         }
 
         item {
-            OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.large,
+                colors = CardDefaults.cardColors(containerColor = cardContainerColor),
+            ) {
                 Column {
                     StoreImportListItem(
                         icon = Icons.Filled.Public,
@@ -110,7 +106,7 @@ fun StoreScreen(
                             context.startActivity(AppIntents.browserImport(context))
                         },
                     )
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    RowDivider()
                     StoreImportListItem(
                         icon = Icons.AutoMirrored.Filled.InsertDriveFile,
                         title = importLocal,
@@ -120,7 +116,7 @@ fun StoreScreen(
                             context.startActivity(AppIntents.importLocal(context))
                         },
                     )
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    RowDivider()
                     StoreImportListItem(
                         icon = Icons.Filled.CloudDownload,
                         title = importRemote,
@@ -130,7 +126,7 @@ fun StoreScreen(
                             context.startActivity(AppIntents.remoteImport(context))
                         },
                     )
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    RowDivider()
                     StoreImportListItem(
                         icon = Icons.Filled.Language,
                         title = importWeb,
@@ -143,7 +139,38 @@ fun StoreScreen(
                 }
             }
         }
+
+        item {
+            Row(
+                modifier = Modifier.padding(horizontal = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Info,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    modifier = Modifier
+                        .padding(top = 2.dp)
+                        .size(14.dp),
+                )
+                Text(
+                    text = stringResource(R.string.online_import_scope_notice),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                )
+            }
+        }
     }
+}
+
+/** Hairline divider inset past the icon badge. */
+@Composable
+private fun RowDivider() {
+    HorizontalDivider(
+        modifier = Modifier.padding(start = 70.dp),
+        thickness = 0.5.dp,
+        color = MaterialTheme.colorScheme.outlineVariant,
+    )
 }
 
 /**
@@ -161,26 +188,27 @@ private fun StoreImportListItem(
         headlineContent = {
             Text(
                 text = title,
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.titleSmall.copy(fontSize = 15.sp),
                 color = MaterialTheme.colorScheme.onSurface,
             )
         },
         supportingContent = {
             Text(
                 text = subtitle,
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         },
-        leadingContent = {
+        leadingContent = { IconBadge(icon) },
+        trailingContent = {
             Icon(
-                imageVector = icon,
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
             )
         },
         colors = ListItemDefaults.colors(
-            containerColor = MaterialTheme.colorScheme.surface,
+            containerColor = Color.Transparent,
         ),
         modifier = Modifier
             .fillMaxWidth()
